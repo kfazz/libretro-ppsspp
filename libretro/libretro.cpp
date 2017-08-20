@@ -18,11 +18,13 @@
 #include "GPU/GPUState.h"
 #include "GPU/GPUInterface.h"
 #include "input/input_state.h"
+#if 0
 #include "native/gfx_es2/fbo.h"
 #include "native/gfx_es2/gl_state.h"
 #include "native/gfx/gl_lost_manager.h"
 #include "native/thread/thread.h"
 #include "native/thread/threadutil.h"
+#endif
 
 #include <cstring>
 
@@ -36,10 +38,6 @@
 #endif
 
 #define SAMPLERATE 44100
-
-#ifdef BAKE_IN_GIT
-const char *PPSSPP_GIT_VERSION = "v1.0.1-git";
-#endif
 
 static CoreParameter coreParam;
 static struct retro_hw_render_callback hw_render;
