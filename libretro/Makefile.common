@@ -395,7 +395,7 @@ SOURCES_CXX += $(EXTDIR)/native/file/chunk_file.cpp \
 	       $(COREDIR)/Util/ppge_atlas.cpp \
 	       $(COREDIR)/Util/AudioFormat.cpp \
 
-#SOURCES_CXX +=			$(LIBRETRODIR)/libretro.cpp
+SOURCES_CXX +=			$(LIBRETRODIR)/libretro.cpp
 SOURCES_CXX += 		$(LIBRETRODIR)/libretro_osm.cpp
 SOURCES_CXX  += $(LIBRETRODIR)/libretro_version.cpp
 

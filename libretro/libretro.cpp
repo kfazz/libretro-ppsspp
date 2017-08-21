@@ -105,7 +105,9 @@ void NativeRender(GraphicsContext *graphicsContext)
 }
 void NativeResized() { }
 void NativeMessageReceived(const char *message, const char *value) {}
+#if 0
 InputState input_state;
+#endif
 
 extern "C"
 {
@@ -124,7 +126,7 @@ public:
 
 	void SetDebugMode(bool mode) override {}
 
-	bool InitGraphics(std::string *error_message) override { return true; }
+	bool InitGraphics(std::string *error_message, GraphicsContext **ctx) override { return true; }
 	void ShutdownGraphics() override {}
 
 	void InitSound() override { };
@@ -341,8 +343,8 @@ static void initialize_gl(void)
       return;
    }
 #endif
-   glstate.Initialize();
 #if 0
+   glstate.Initialize();
    CheckGLExtensions();
 #endif
 }
@@ -359,11 +361,15 @@ static void context_reset(void)
 
       //RecreateViews(); /* TODO ? */
 
+#if 0
       gl_lost();
+#endif
 
       initialize_gl();
 
+#if 0
       glstate.Restore();
+#endif
    }
    
    first_ctx_reset = false;
@@ -754,6 +760,7 @@ static void check_variables(void)
       g_Config.bSoundSpeedHack = false;
 
 
+#if 0
    var.key = "ppsspp_cpu_core";
    var.value = NULL;
 
@@ -766,6 +773,7 @@ static void check_variables(void)
    }
    else
       coreParam.cpuCore = CPU_JIT;
+#endif
 
    var.key = "ppsspp_locked_cpu_speed";
    var.value = NULL;
@@ -921,9 +929,11 @@ bool retro_load_game(const struct retro_game_info *game)
 
    host = new LibretroHost;
 
-	// We do this here, instead of in NativeInitGraphics, because the display may be reset.
-	// When it's reset we don't want to forget all our managed things.
-	gl_lost_manager_init();
+#if 0
+   // We do this here, instead of in NativeInitGraphics, because the display may be reset.
+   // When it's reset we don't want to forget all our managed things.
+   gl_lost_manager_init();
+#endif
 
    g_Config.Load("");
 
@@ -940,7 +950,9 @@ bool retro_load_game(const struct retro_game_info *game)
    if (environ_cb(RETRO_ENVIRONMENT_GET_USERNAME, &tmp) && tmp)
       g_Config.sNickName = std::string(tmp);
 
+#if 0
    coreParam.gpuCore = GPU_GLES;
+#endif
    coreParam.enableSound = true;
    coreParam.fileToStart = std::string(game->path);
    coreParam.mountIso = "";
@@ -952,10 +964,9 @@ bool retro_load_game(const struct retro_game_info *game)
    _initialized = false;
    check_variables();
 
+#if 0
    g_Config.bVertexDecoderJit = (coreParam.cpuCore == CPU_JIT) ? true : false;
-
-
-
+#endif
 
    return true;
 }
@@ -1020,8 +1031,9 @@ static void retro_input(void)
    __CtrlSetAnalogY(analogY);
 }
 
-
+#if 0
 static std::thread *input_thread = NULL;
+#endif
 static bool running = false;
 
 static inline void rarch_sleep(unsigned msec)
@@ -1044,6 +1056,7 @@ static inline void rarch_sleep(unsigned msec)
 #endif
 }
 
+#if 0
 void retro_input_poll_thread()
 {
 	setCurrentThreadName("Input Thread");
@@ -1056,6 +1069,7 @@ void retro_input_poll_thread()
       rarch_sleep(4);
    }
 }
+#endif
 
 
 void retro_run(void)
@@ -1110,12 +1124,14 @@ void retro_run(void)
 	   }
    }
   
+#if 0
    if (threaded_input)
    {
 	   if (!input_thread)
 		   input_thread = new std::thread(&retro_input_poll_thread);
    }
    else
+#endif
    {
       if (input_poll_cb)
          input_poll_cb();
@@ -1160,7 +1176,7 @@ void retro_run(void)
       log_cb(RETRO_LOG_INFO, "Function replacements: %d\n", g_Config.bFuncReplacements);
 #endif
 
-   NativeRender();
+   NativeRender(NULL);
 
    video_cb(((gstate_c.skipDrawReason & SKIPDRAW_SKIPFRAME) == 0) ? NULL : RETRO_HW_FRAME_BUFFER_VALID, screen_width, screen_height, 0);
 }
@@ -1178,12 +1194,14 @@ void retro_unload_game(void)
 
 	PSP_Shutdown();
 
+#if 0
 	if (input_thread)
 	{
       input_thread->join();
 		delete input_thread;
 		input_thread = NULL;
 	}
+#endif
 }
 unsigned retro_get_region(void)
 {
@@ -1206,6 +1224,7 @@ size_t retro_serialize_size(void)
 
 bool retro_serialize(void *data, size_t size)
 {
+#if 0
    (void)size;
    SaveState::SaveStart state;
 
@@ -1223,13 +1242,20 @@ bool retro_serialize(void *data, size_t size)
       return false;
    else
       return CChunkFileReader::SavePtr((u8 *) data, state) == CChunkFileReader::ERROR_NONE;
+#else
+   return false;
+#endif
 }
 
 bool retro_unserialize(const void *data, size_t size)
 {
+#if 0
    (void)size;
    SaveState::SaveStart state;
    return CChunkFileReader::LoadPtr((u8 *) data, state) == CChunkFileReader::ERROR_NONE;
+#else
+   return false;
+#endif
 }
 
 void *retro_get_memory_data(unsigned id)
