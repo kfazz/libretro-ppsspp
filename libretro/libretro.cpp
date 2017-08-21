@@ -1,8 +1,11 @@
 #include "libretro.h"
 #include "libretro_host.h"
 
+#define NO_FBO 1
+
 #include "Common/ChunkFile.h"
 #include "Core/Config.h"
+#include "Core/Core.h"
 #include "Core/CoreParameter.h"
 #include "Core/CoreTiming.h"
 #include "Core/HLE/sceCtrl.h"
@@ -18,7 +21,8 @@
 #include "GPU/GPUState.h"
 #include "GPU/GPUInterface.h"
 #include "input/input_state.h"
-#if 0
+#include "base/NativeApp.h"
+#ifndef NO_FBO
 #include "native/gfx_es2/fbo.h"
 #include "native/gfx_es2/gl_state.h"
 #include "native/gfx/gl_lost_manager.h"
@@ -48,7 +52,9 @@ static retro_input_poll_t input_poll_cb;
 static retro_input_state_t input_state_cb;
 static retro_environment_t environ_cb;
 static bool _initialized;
+#ifndef NO_FBO
 static FBO *libretro_framebuffer;
+#endif
 static bool gpu_refresh = false;
 static bool threaded_input = false;
 
@@ -60,16 +66,23 @@ static bool first_ctx_reset;
 // linker stubs
 std::string System_GetProperty(SystemProperty prop) { return ""; }
 int System_GetPropertyInt(SystemProperty prop) { return -1; }
-void NativeUpdate(InputState &input_state) { }
-void NativeRender()
+void NativeUpdate() { }
+void NativeRender(GraphicsContext *graphicsContext)
 {
+   u32_le *test = NULL;
+#ifndef NO_FBO
    fbo_override_backbuffer(libretro_framebuffer);
+#endif
 
+#if 0
    glstate.depthWrite.set(GL_TRUE);
    glstate.colorMask.set(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-   glstate.Restore();
+#endif
+   gstate.Restore(test);
 
+#if 0
    ReapplyGfxState();
+#endif
 
    // We just run the CPU until we get to vblank. This will quickly sync up pretty nicely.
    // The actual number of cycles doesn't matter so much here as we will break due to CORE_NEXTFRAME, most of the time hopefully...
@@ -84,9 +97,11 @@ void NativeRender()
       // set back to running for the next frame
       coreState = CORE_RUNNING;
 
+#ifndef NO_FBO
    bool useBufferedRendering = g_Config.iRenderingMode != 0;
    if (useBufferedRendering)
       fbo_unbind();
+#endif
 }
 void NativeResized() { }
 void NativeMessageReceived(const char *message, const char *value) {}
@@ -327,7 +342,9 @@ static void initialize_gl(void)
    }
 #endif
    glstate.Initialize();
+#if 0
    CheckGLExtensions();
+#endif
 }
 
 static void context_reset(void)
@@ -442,6 +459,8 @@ static void check_variables(void)
    else
          g_Config.bFastMemory = true;
 
+
+#if 0
    var.key = "ppsspp_set_rounding_mode";
    var.value = NULL;
 
@@ -454,6 +473,7 @@ static void check_variables(void)
    }
    else
          g_Config.bSetRoundingMode = false;
+#endif
 
    var.key = "ppsspp_vertex_cache";
    var.value = NULL;
@@ -713,12 +733,12 @@ static void check_variables(void)
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
    {
       if (!strcmp(var.value, "enabled"))
-         g_Config.bUnsafeFuncReplacements = true;
+         g_Config.bFuncReplacements = true;
       else if (!strcmp(var.value, "disabled"))
-         g_Config.bUnsafeFuncReplacements = false;
+         g_Config.bFuncReplacements = false;
    }
    else
-         g_Config.bUnsafeFuncReplacements = true;
+         g_Config.bFuncReplacements = true;
    
    var.key = "ppsspp_sound_speedhack";
    var.value = NULL;
@@ -794,6 +814,7 @@ static void check_variables(void)
    else
       g_Config.iForceMaxEmulatedFPS = 0;
 
+#if 0
    var.key = "ppsspp_prescale_uv";
    var.value = NULL;
 
@@ -806,6 +827,7 @@ static void check_variables(void)
    }
    else
       g_Config.bPrescaleUV = 0;
+#endif
 
    var.key = "ppsspp_threaded_input";
    var.value = NULL;
@@ -1125,7 +1147,9 @@ void retro_run(void)
 
       host->BootDone();
       _initialized = true;
+#ifndef NO_FBO
       libretro_framebuffer = fbo_create_from_native_fbo((GLuint) hw_render.get_current_framebuffer(), libretro_framebuffer);
+#endif
    }
 
 #if 0
@@ -1146,9 +1170,11 @@ void retro_unload_game(void)
    if (threaded_input)
       threaded_input = false;
 
+#ifndef NO_FBO
 	if (libretro_framebuffer)
 		fbo_destroy(libretro_framebuffer);
 	libretro_framebuffer = NULL;
+#endif
 
 	PSP_Shutdown();
 
