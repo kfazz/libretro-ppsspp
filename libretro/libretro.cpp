@@ -760,20 +760,18 @@ static void check_variables(void)
       g_Config.bSoundSpeedHack = false;
 
 
-#if 0
    var.key = "ppsspp_cpu_core";
    var.value = NULL;
 
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
    {
       if (!strcmp(var.value, "jit"))
-         coreParam.cpuCore = CPU_JIT;
+         coreParam.cpuCore = CPUCore::JIT;
       else if (!strcmp(var.value, "interpreter"))
-         coreParam.cpuCore = CPU_INTERPRETER;
+         coreParam.cpuCore = CPUCore::INTERPRETER;
    }
    else
-      coreParam.cpuCore = CPU_JIT;
-#endif
+      coreParam.cpuCore = CPUCore::JIT;
 
    var.key = "ppsspp_locked_cpu_speed";
    var.value = NULL;
@@ -952,9 +950,8 @@ bool retro_load_game(const struct retro_game_info *game)
    if (environ_cb(RETRO_ENVIRONMENT_GET_USERNAME, &tmp) && tmp)
       g_Config.sNickName = std::string(tmp);
 
-#if 0
-   coreParam.gpuCore = GPU_GLES;
-#endif
+   coreParam.gpuCore     = GPUCORE_GLES;
+   coreParam.cpuCore     = CPUCore::JIT;
    coreParam.enableSound = true;
    coreParam.fileToStart = std::string(game->path);
    coreParam.mountIso = "";
