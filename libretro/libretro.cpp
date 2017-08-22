@@ -77,8 +77,8 @@ void NativeRender(GraphicsContext *graphicsContext)
 #if 0
    glstate.depthWrite.set(GL_TRUE);
    glstate.colorMask.set(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-#endif
    gstate.Restore(test);
+#endif
 
 #if 0
    ReapplyGfxState();
@@ -935,7 +935,9 @@ bool retro_load_game(const struct retro_game_info *game)
    gl_lost_manager_init();
 #endif
 
+#if 0
    g_Config.Load("");
+#endif
 
    g_Config.currentDirectory      = retro_base_dir;
    g_Config.externalDirectory     = retro_base_dir;

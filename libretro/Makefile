@@ -291,7 +291,7 @@ ifeq ($(DEBUG), 1)
 	CPUOPTS += -O0 -g
 	CPUOPTS += -DOPENGL_DEBUG
 else
-	CPUOPTS += -O3 -DNDEBUG
+	CPUOPTS += -O2 -g
 endif
 
 COREFLAGS +=-DNO_VULKAN
