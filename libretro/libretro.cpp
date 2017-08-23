@@ -22,9 +22,9 @@
 #include "GPU/GPUInterface.h"
 #include "input/input_state.h"
 #include "base/NativeApp.h"
+#include "gfx/gl_common.h"
+#include "gfx_es2/gpu_features.h"
 #ifndef NO_FBO
-#include "native/gfx_es2/fbo.h"
-#include "native/gfx_es2/gl_state.h"
 #include "native/gfx/gl_lost_manager.h"
 #include "native/thread/thread.h"
 #include "native/thread/threadutil.h"
@@ -345,8 +345,8 @@ static void initialize_gl(void)
 #endif
 #if 0
    glstate.Initialize();
-   CheckGLExtensions();
 #endif
+   CheckGLExtensions();
 }
 
 static void context_reset(void)
@@ -1192,6 +1192,7 @@ void retro_unload_game(void)
 #endif
 
 	PSP_Shutdown();
+	VFSShutdown();
 
 #if 0
 	if (input_thread)
