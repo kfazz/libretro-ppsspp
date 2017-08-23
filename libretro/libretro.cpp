@@ -24,6 +24,7 @@
 #include "base/NativeApp.h"
 #include "gfx/gl_common.h"
 #include "gfx_es2/gpu_features.h"
+#include "Common/GraphicsContext.h"
 #ifndef NO_FBO
 #include "native/gfx/gl_lost_manager.h"
 #include "native/thread/thread.h"
@@ -42,6 +43,38 @@
 #endif
 
 #define SAMPLERATE 44100
+
+Draw::DrawContext *libretro_draw;
+
+class LibretroGLGraphicsContext : public GraphicsContext {
+public:
+	LibretroGLGraphicsContext()
+	{
+	}
+	bool Init();
+	void Shutdown() override;
+	void SwapBuffers() override;
+	void SwapInterval(int interval) override {}
+	void Resize() override {}
+	Draw::DrawContext *GetDrawContext() override {
+		return NULL;
+	}
+
+private:
+};
+
+void LibretroGLGraphicsContext::Shutdown() {
+#if 0
+	NativeShutdownGraphics();
+	gl->ClearCurrent();
+	gl->Shutdown();
+	delete gl;
+	finalize_glslang();
+#endif
+}
+
+void LibretroGLGraphicsContext::SwapBuffers() {
+}
 
 static CoreParameter coreParam;
 static struct retro_hw_render_callback hw_render;
@@ -366,7 +399,6 @@ static void context_reset(void)
 #endif
 
       initialize_gl();
-
 #if 0
       glstate.Restore();
 #endif
@@ -950,8 +982,12 @@ bool retro_load_game(const struct retro_game_info *game)
    if (environ_cb(RETRO_ENVIRONMENT_GET_USERNAME, &tmp) && tmp)
       g_Config.sNickName = std::string(tmp);
 
+   libretro_draw         = Draw::T3DCreateGLContext();
+
    coreParam.gpuCore     = GPUCORE_GLES;
    coreParam.cpuCore     = CPUCore::JIT;
+   coreParam.graphicsContext = new LibretroGLGraphicsContext;
+   coreParam.thin3d      = libretro_draw;
    coreParam.enableSound = true;
    coreParam.fileToStart = std::string(game->path);
    coreParam.mountIso = "";
@@ -1190,6 +1226,9 @@ void retro_unload_game(void)
 		fbo_destroy(libretro_framebuffer);
 	libretro_framebuffer = NULL;
 #endif
+
+	delete libretro_draw;
+	libretro_draw = nullptr;
 
 	PSP_Shutdown();
 	VFSShutdown();
