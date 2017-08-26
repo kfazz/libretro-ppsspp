@@ -84,9 +84,32 @@ else ifneq (,$(findstring rpi,$(platform)))
 	LDFLAGS += -shared -Wl,--version-script=link.T
 	fpic = -fPIC
 	GLES = 1
-	GL_LIB := -lGLESv2
-	INCFLAGS += -I/opt/vc/include
-	CPUFLAGS += -DARMv5_ONLY 
+	
+        ifneq (,$(findstring mesa,$(platform)))
+           	GL_LIB := -lGLESv2
+        else
+		GL_LIB := -L/opt/vc/lib -lGLESv2
+ 		INCFLAGS += -I/opt/vc/include -I/opt/vc/include/interface/vcos -I/opt/vc/include/interface/vcos/pthreads
+ 	endif
+	
+	ifneq (,$(findstring rpi2,$(platform)))
+      		CPUFLAGS += -mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard
+      		HAVE_NEON = 1
+		FFMPEGINCFLAGS += -I$(FFMPEGDIR)/linux/armv7/include
+		FFMPEGLIBDIR := $(FFMPEGDIR)/linux/armv7/lib
+   	else ifneq (,$(findstring rpi3,$(platform)))
+      		CPUFLAGS += -march=armv8-a+crc -mtune=cortex-a53 -mfpu=neon-fp-armv8 -mfloat-abi=hard
+      		HAVE_NEON = 1
+		FFMPEGINCFLAGS += -I$(FFMPEGDIR)/linux/armv7/include
+		FFMPEGLIBDIR := $(FFMPEGDIR)/linux/armv7/lib
+	else
+		FFMPEGINCFLAGS += -I$(FFMPEGDIR)/linux/arm/include
+		FFMPEGLIBDIR := $(FFMPEGDIR)/linux/arm/lib
+		CPUFLAGS += -DARMv5_ONLY 
+   	endif
+	
+	FFMPEGLDFLAGS += -L$(FFMPEGLIBDIR) -lavformat -lavcodec -lavutil -lswresample -lswscale
+
 	PLATFORM_EXT := unix
 	WITH_DYNAREC=arm
 	LDFLAGS += -lrt -ldl
