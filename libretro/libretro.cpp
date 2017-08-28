@@ -122,9 +122,6 @@ static retro_input_poll_t input_poll_cb;
 static retro_input_state_t input_state_cb;
 static retro_environment_t environ_cb;
 static bool _initialized;
-#ifndef NO_FBO
-static FBO *libretro_framebuffer;
-#endif
 static bool gpu_refresh = false;
 static bool threaded_input = false;
 
@@ -1200,11 +1197,10 @@ void retro_run(void)
 
 	      host->BootDone();
 	      _initialized = true;
-#ifndef NO_FBO
-	      libretro_framebuffer = fbo_create_from_native_fbo((GLuint) hw_render.get_current_framebuffer(), libretro_framebuffer);
-#endif
 	      PSP_BeginHostFrame();
 	      coreState = CORE_RUNNING;
+	      extern GLuint g_defaultFBO;
+	      g_defaultFBO = hw_render.get_current_framebuffer();
       }
    }
 
@@ -1231,9 +1227,7 @@ void retro_run(void)
 			   input_poll_cb();
 		   retro_input();
 	   }
-#ifndef NO_FBO
-	   fbo_override_backbuffer(libretro_framebuffer);
-#endif
+
 
 	   // We just run the CPU until we get to vblank. This will quickly sync up pretty nicely.
 	   // The actual number of cycles doesn't matter so much here as we will break due to CORE_NEXTFRAME, most of the time hopefully...
@@ -1259,12 +1253,6 @@ void retro_unload_game(void)
 {
    if (threaded_input)
       threaded_input = false;
-
-#ifndef NO_FBO
-	if (libretro_framebuffer)
-		fbo_destroy(libretro_framebuffer);
-	libretro_framebuffer = NULL;
-#endif
 
 	delete libretro_draw;
 	libretro_draw = nullptr;
