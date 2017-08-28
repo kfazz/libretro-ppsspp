@@ -988,7 +988,7 @@ bool retro_load_game(const struct retro_game_info *game)
    coreParam.fileToStart = std::string(game->path);
    coreParam.mountIso = "";
    coreParam.startPaused = false;
-   coreParam.printfEmuLog = false;
+   coreParam.printfEmuLog = true;
    coreParam.headLess = true;
    coreParam.unthrottle = true;
 
@@ -1200,6 +1200,8 @@ void retro_run(void)
 #ifndef NO_FBO
 	      libretro_framebuffer = fbo_create_from_native_fbo((GLuint) hw_render.get_current_framebuffer(), libretro_framebuffer);
 #endif
+	      PSP_BeginHostFrame();
+	      coreState = CORE_RUNNING;
       }
    }
 
@@ -1230,6 +1232,7 @@ void retro_unload_game(void)
 	delete libretro_draw;
 	libretro_draw = nullptr;
 
+	PSP_EndHostFrame();
 	PSP_Shutdown();
 	VFSShutdown();
 
