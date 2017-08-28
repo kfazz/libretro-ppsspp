@@ -137,42 +137,7 @@ static bool first_ctx_reset;
 std::string System_GetProperty(SystemProperty prop) { return ""; }
 int System_GetPropertyInt(SystemProperty prop) { return -1; }
 void NativeUpdate() { }
-void NativeRender(GraphicsContext *graphicsContext)
-{
-   u32_le *test = NULL;
-#ifndef NO_FBO
-   fbo_override_backbuffer(libretro_framebuffer);
-#endif
-
-#if 0
-   glstate.depthWrite.set(GL_TRUE);
-   glstate.colorMask.set(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-   gstate.Restore(test);
-#endif
-
-#if 0
-   ReapplyGfxState();
-#endif
-
-   // We just run the CPU until we get to vblank. This will quickly sync up pretty nicely.
-   // The actual number of cycles doesn't matter so much here as we will break due to CORE_NEXTFRAME, most of the time hopefully...
-   int blockTicks = usToCycles(1000000 / 10);
-
-   // Run until CORE_NEXTFRAME
-   while (coreState == CORE_RUNNING)
-      PSP_RunLoopUntil(CoreTiming::GetTicks() + blockTicks);
-
-   // Hopefully coreState is now CORE_NEXTFRAME
-   if (coreState == CORE_NEXTFRAME)
-      // set back to running for the next frame
-      coreState = CORE_RUNNING;
-
-#ifndef NO_FBO
-   bool useBufferedRendering = g_Config.iRenderingMode != 0;
-   if (useBufferedRendering)
-      fbo_unbind();
-#endif
-}
+void NativeRender(GraphicsContext *graphicsContext) { }
 void NativeResized() { }
 void NativeMessageReceived(const char *message, const char *value) {}
 #if 0
@@ -1262,7 +1227,28 @@ void retro_run(void)
       log_cb(RETRO_LOG_INFO, "Function replacements: %d\n", g_Config.bFuncReplacements);
 #endif
 
-   NativeRender(NULL);
+   if (_initialized)
+   {
+#ifndef NO_FBO
+	   fbo_override_backbuffer(libretro_framebuffer);
+#endif
+
+	   // We just run the CPU until we get to vblank. This will quickly sync up pretty nicely.
+	   // The actual number of cycles doesn't matter so much here as we will break due to CORE_NEXTFRAME, most of the time hopefully...
+	   int blockTicks = usToCycles(1000000 / 10);
+	   PSP_RunLoopFor(blockTicks);
+
+	   // Hopefully coreState is now CORE_NEXTFRAME
+	   if (coreState == CORE_NEXTFRAME)
+		   // set back to running for the next frame
+		   coreState = CORE_RUNNING;
+
+#ifndef NO_FBO
+	   bool useBufferedRendering = g_Config.iRenderingMode != 0;
+	   if (useBufferedRendering)
+		   fbo_unbind();
+#endif
+   }
 
    video_cb(((gstate_c.skipDrawReason & SKIPDRAW_SKIPFRAME) == 0) ? NULL : RETRO_HW_FRAME_BUFFER_VALID, screen_width, screen_height, 0);
 }
