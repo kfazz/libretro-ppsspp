@@ -15,6 +15,8 @@
 #include "Core/Host.h"
 #include "Core/SaveState.h"
 #include "Core/System.h"
+#include "Log.h"
+#include "LogManager.h"
 #include "gfx/gl_common.h"
 #include "file/vfs.h"
 #include "file/zip_read.h"
@@ -43,6 +45,41 @@
 #endif
 
 #define SAMPLERATE 44100
+
+retro_log_printf_t log_cb;
+
+class PrintfLogger : public LogListener {
+public:
+	void Log(const LogMessage &message) {
+		switch (message.level) {
+		case LogTypes::LVERBOSE:
+			if (log_cb)
+				log_cb(RETRO_LOG_INFO, "V %s.\n", message.msg.c_str());
+			break;
+		case LogTypes::LDEBUG:
+			if (log_cb)
+				log_cb(RETRO_LOG_DEBUG, "D %s.\n", message.msg.c_str());
+			break;
+		case LogTypes::LINFO:
+			if (log_cb)
+				log_cb(RETRO_LOG_INFO, "I %s.\n", message.msg.c_str());
+			break;
+		case LogTypes::LERROR:
+			if (log_cb)
+				log_cb(RETRO_LOG_ERROR, "E %s.\n", message.msg.c_str());
+			break;
+		case LogTypes::LWARNING:
+			if (log_cb)
+				log_cb(RETRO_LOG_WARN, "W %s.\n", message.msg.c_str());
+			break;
+		case LogTypes::LNOTICE:
+		default:
+			if (log_cb)
+				log_cb(RETRO_LOG_INFO, "N %s.\n", message.msg.c_str());
+			break;
+		}
+	}
+};
 
 Draw::DrawContext *libretro_draw;
 static bool gl_initialized = false;
@@ -79,7 +116,6 @@ void LibretroGLGraphicsContext::SwapBuffers() {
 
 static CoreParameter coreParam;
 static struct retro_hw_render_callback hw_render;
-retro_log_printf_t log_cb;
 static retro_video_refresh_t video_cb;
 static retro_audio_sample_batch_t audio_batch_cb;
 static retro_input_poll_t input_poll_cb;
@@ -962,6 +998,19 @@ bool retro_load_game(const struct retro_game_info *game)
    // We do this here, instead of in NativeInitGraphics, because the display may be reset.
    // When it's reset we don't want to forget all our managed things.
    gl_lost_manager_init();
+
+   LogManager::Init();
+   LogManager *logman = LogManager::GetInstance();
+
+   PrintfLogger *printfLogger = new PrintfLogger();
+
+   bool fullLog = true;
+   for (int i = 0; i < LogTypes::NUMBER_OF_LOGS; i++) {
+	   LogTypes::LOG_TYPE type = (LogTypes::LOG_TYPE)i;
+	   logman->SetEnabled(type, fullLog);
+	   logman->SetLogLevel(type, LogTypes::LDEBUG);
+   }
+   logman->AddListener(printfLogger);
 
 #if 0
    g_Config.Load("");
