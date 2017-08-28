@@ -400,10 +400,7 @@ SOURCES_CXX += 		$(LIBRETRODIR)/libretro_osm.cpp
 SOURCES_CXX  += $(LIBRETRODIR)/libretro_version.cpp
 
 
-#SOURCES_CXX += $(LIBRETRODIR)/Core/HLE/__sceAudio.cpp
-#SOURCES_CXX += $(LIBRETRODIR)/Core/HLE/StereoResampler.cpp
 SOURCES_CXX += $(COREDIR)/HLE/__sceAudio.cpp
-
 
 ### DYNAREC ###
 ifdef WITH_DYNAREC
