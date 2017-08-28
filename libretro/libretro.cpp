@@ -25,8 +25,8 @@
 #include "gfx/gl_common.h"
 #include "gfx_es2/gpu_features.h"
 #include "Common/GraphicsContext.h"
+#include "ext/native/gfx/gl_lost_manager.h"
 #ifndef NO_FBO
-#include "native/gfx/gl_lost_manager.h"
 #include "native/thread/thread.h"
 #include "native/thread/threadutil.h"
 #endif
@@ -45,6 +45,7 @@
 #define SAMPLERATE 44100
 
 Draw::DrawContext *libretro_draw;
+static bool gl_initialized = false;
 
 class LibretroGLGraphicsContext : public GraphicsContext {
 public:
@@ -380,6 +381,7 @@ static void initialize_gl(void)
    glstate.Initialize();
 #endif
    CheckGLExtensions();
+   gl_initialized = true;
 }
 
 static void context_reset(void)
@@ -394,9 +396,7 @@ static void context_reset(void)
 
       //RecreateViews(); /* TODO ? */
 
-#if 0
       gl_lost();
-#endif
 
       initialize_gl();
 #if 0
@@ -959,11 +959,9 @@ bool retro_load_game(const struct retro_game_info *game)
 
    host = new LibretroHost;
 
-#if 0
    // We do this here, instead of in NativeInitGraphics, because the display may be reset.
    // When it's reset we don't want to forget all our managed things.
    gl_lost_manager_init();
-#endif
 
 #if 0
    g_Config.Load("");
@@ -982,12 +980,10 @@ bool retro_load_game(const struct retro_game_info *game)
    if (environ_cb(RETRO_ENVIRONMENT_GET_USERNAME, &tmp) && tmp)
       g_Config.sNickName = std::string(tmp);
 
-   libretro_draw         = Draw::T3DCreateGLContext();
 
    coreParam.gpuCore     = GPUCORE_GLES;
    coreParam.cpuCore     = CPUCore::JIT;
    coreParam.graphicsContext = new LibretroGLGraphicsContext;
-   coreParam.thin3d      = libretro_draw;
    coreParam.enableSound = true;
    coreParam.fileToStart = std::string(game->path);
    coreParam.mountIso = "";
@@ -1115,47 +1111,47 @@ void retro_run(void)
 	   check_variables();
 	   if (gpu_refresh)
 	   {
-         switch (coreParam.renderWidth)
-         {
-            case 480:
-               g_Config.iInternalResolution = 1;
-               break;
-            case 960:
-               g_Config.iInternalResolution = 2;
-               break;
-            case 1440:
-               g_Config.iInternalResolution = 3;
-               break;
-            case 1920:
-               g_Config.iInternalResolution = 4;
-               break;
-            case 2400:
-               g_Config.iInternalResolution = 5;
-               break;
-            case 2880:
-               g_Config.iInternalResolution = 6;
-               break;
-            case 3360:
-               g_Config.iInternalResolution = 7;
-               break;
-            case 3840:
-               g_Config.iInternalResolution = 8;
-               break;
-            case 4320:
-               g_Config.iInternalResolution = 9;
-               break;
-            case 4800:
-               g_Config.iInternalResolution = 10;
-               break;
+		   switch (coreParam.renderWidth)
+		   {
+			   case 480:
+				   g_Config.iInternalResolution = 1;
+				   break;
+			   case 960:
+				   g_Config.iInternalResolution = 2;
+				   break;
+			   case 1440:
+				   g_Config.iInternalResolution = 3;
+				   break;
+			   case 1920:
+				   g_Config.iInternalResolution = 4;
+				   break;
+			   case 2400:
+				   g_Config.iInternalResolution = 5;
+				   break;
+			   case 2880:
+				   g_Config.iInternalResolution = 6;
+				   break;
+			   case 3360:
+				   g_Config.iInternalResolution = 7;
+				   break;
+			   case 3840:
+				   g_Config.iInternalResolution = 8;
+				   break;
+			   case 4320:
+				   g_Config.iInternalResolution = 9;
+				   break;
+			   case 4800:
+				   g_Config.iInternalResolution = 10;
+				   break;
 
-         }
+		   }
 
-         if (gpu)
-         {
-            gpu->ClearCacheNextFrame();
-            gpu->Resized();		   	   
-            gpu_refresh = false;
-         }
+		   if (gpu)
+		   {
+			   gpu->ClearCacheNextFrame();
+			   gpu->Resized();		   	   
+			   gpu_refresh = false;
+		   }
 	   }
    }
   
@@ -1179,28 +1175,32 @@ void retro_run(void)
    
    if (!_initialized || should_reset)
    {
-      static bool gl_initialized = false;
       should_reset = false;
 
       if (!gl_initialized)
       {
          initialize_gl();
-         gl_initialized = true;
       }
 
       std::string error_string;
-      if(!PSP_Init(coreParam, &error_string))
+      if (gl_initialized)
       {
-         if (log_cb)
-            log_cb(RETRO_LOG_ERROR, "PSP_Init() failed: %s.\n", error_string.c_str());
-         environ_cb(RETRO_ENVIRONMENT_SHUTDOWN, nullptr);
-      }
+	      libretro_draw         = Draw::T3DCreateGLContext();
+	      coreParam.thin3d      = libretro_draw;
 
-      host->BootDone();
-      _initialized = true;
+	      if(!PSP_Init(coreParam, &error_string))
+	      {
+		      if (log_cb)
+			      log_cb(RETRO_LOG_ERROR, "PSP_Init() failed: %s.\n", error_string.c_str());
+		      environ_cb(RETRO_ENVIRONMENT_SHUTDOWN, nullptr);
+	      }
+
+	      host->BootDone();
+	      _initialized = true;
 #ifndef NO_FBO
-      libretro_framebuffer = fbo_create_from_native_fbo((GLuint) hw_render.get_current_framebuffer(), libretro_framebuffer);
+	      libretro_framebuffer = fbo_create_from_native_fbo((GLuint) hw_render.get_current_framebuffer(), libretro_framebuffer);
 #endif
+      }
    }
 
 #if 0
