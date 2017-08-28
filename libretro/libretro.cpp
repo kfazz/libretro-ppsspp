@@ -434,6 +434,8 @@ static void check_variables(void)
    var.key = "ppsspp_internal_resolution";
    var.value = NULL;
 
+   g_Config.bEnableSound  = true;
+
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
    {
       if (sscanf(var.value ? var.value : "480x272", "%dx%d", &coreParam.renderWidth, &coreParam.renderHeight) != 2)
@@ -1169,19 +1171,6 @@ void retro_run(void)
 	   }
    }
   
-#if 0
-   if (threaded_input)
-   {
-	   if (!input_thread)
-		   input_thread = new std::thread(&retro_input_poll_thread);
-   }
-   else
-#endif
-   {
-      if (input_poll_cb)
-         input_poll_cb();
-      retro_input();
-   }
 
    if (should_reset)
       PSP_Shutdown();
@@ -1229,6 +1218,19 @@ void retro_run(void)
 
    if (_initialized)
    {
+#if 0
+	   if (threaded_input)
+	   {
+		   if (!input_thread)
+			   input_thread = new std::thread(&retro_input_poll_thread);
+	   }
+	   else
+#endif
+	   {
+		   if (input_poll_cb)
+			   input_poll_cb();
+		   retro_input();
+	   }
 #ifndef NO_FBO
 	   fbo_override_backbuffer(libretro_framebuffer);
 #endif
