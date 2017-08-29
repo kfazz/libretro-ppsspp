@@ -1256,12 +1256,13 @@ void retro_unload_game(void)
    if (threaded_input)
       threaded_input = false;
 
-	delete libretro_draw;
-	libretro_draw = nullptr;
 
 	PSP_EndHostFrame();
 	PSP_Shutdown();
 	VFSShutdown();
+
+	delete libretro_draw;
+	libretro_draw = nullptr;
 
 #if 0
 	if (input_thread)
