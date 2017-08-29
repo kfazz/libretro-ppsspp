@@ -260,6 +260,7 @@ else ifneq (,$(findstring win,$(platform)))
 	CFLAGS += -D_UNICODE -DUNICODE
 	CXXFLAGS += -fpermissive -D_UNICODE -DUNICODE 
 	TARGET := $(TARGET_NAME)_libretro.dll
+	WITH_DYNAREC = x86_64
 	LDFLAGS += -shared -static-libgcc -static-libstdc++ -Wl,--version-script=link.T -lwinmm -lgdi32 -lwsock32 -lws2_32
 	GL_LIB := -lopengl32
 	PLATFORM_EXT := win32
