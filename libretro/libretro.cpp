@@ -431,7 +431,7 @@ static void check_variables(void)
    var.key = "ppsspp_internal_resolution";
    var.value = NULL;
 
-   g_Config.iGlobalVolume = VOLUME_MAX;
+   g_Config.iGlobalVolume = VOLUME_MAX - 1;
    g_Config.bEnableSound  = true;
 
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
