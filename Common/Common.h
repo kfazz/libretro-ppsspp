@@ -60,7 +60,7 @@ private:
 
 #define CHECK_HEAP_INTEGRITY()
 
-#elif defined(_WIN32)
+#elif defined(_WIN32) && !defined(__MINGW32__)
 
 // Memory leak checks
 	#define CHECK_HEAP_INTEGRITY()
@@ -86,13 +86,16 @@ private:
 #endif
 
 // Windows compatibility
-#ifndef _WIN32
+#if defined(_WIN32) && !defined(__MINGW32__)
+#else
 #include <limits.h>
 #ifndef MAX_PATH
 #define MAX_PATH PATH_MAX
 #endif
 
+#ifndef __MINGW32__
 #define __forceinline inline __attribute__((always_inline))
+#endif
 #define MEMORY_ALIGNED16(x) __attribute__((aligned(16))) x
 #define GC_ALIGNED32(x) __attribute__((aligned(32))) x
 #define GC_ALIGNED64(x) __attribute__((aligned(64))) x
