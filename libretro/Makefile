@@ -257,6 +257,8 @@ else ifeq ($(platform), emscripten)
 
 # Windows
 else ifneq (,$(findstring win,$(platform)))
+	CFLAGS += -fpermissive
+	CXXFLAGS += -fpermissive
 	TARGET := $(TARGET_NAME)_libretro.dll
 	LDFLAGS += -shared -static-libgcc -static-libstdc++ -Wl,--version-script=link.T -lwinmm -lgdi32 -lwsock32 -lws2_32
 	GL_LIB := -lopengl32
