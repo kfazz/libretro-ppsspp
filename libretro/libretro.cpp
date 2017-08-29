@@ -431,8 +431,6 @@ static void check_variables(void)
    var.key = "ppsspp_internal_resolution";
    var.value = NULL;
 
-   g_Config.iGlobalVolume = VOLUME_MAX - 1;
-   g_Config.bEnableSound  = true;
 
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
    {
@@ -1006,6 +1004,9 @@ bool retro_load_game(const struct retro_game_info *game)
    coreParam.headLess = true;
    coreParam.unthrottle = true;
 
+   g_Config.iGlobalVolume = VOLUME_MAX - 1;
+   g_Config.bEnableSound  = true;
+   g_Config.bAudioResampler = false;
    _initialized = false;
    check_variables();
 
