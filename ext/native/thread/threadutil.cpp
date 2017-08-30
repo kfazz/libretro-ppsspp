@@ -80,11 +80,19 @@ void setCurrentThreadName(const char* threadName) {
 	info.dwThreadID = -1; //dwThreadID;
 	info.dwFlags = 0;
 
+#ifdef __MINGW32__
+	__try1 (ehandler)
+#else
 	__try
+#endif
 	{
 		RaiseException(MS_VC_EXCEPTION, 0, sizeof(info)/sizeof(ULONG_PTR), (ULONG_PTR*)&info);
 	}
+#ifdef __MINGW32__
+	__except1
+#else
 	__except(EXCEPTION_CONTINUE_EXECUTION)
+#endif
 	{}
 #else
 
