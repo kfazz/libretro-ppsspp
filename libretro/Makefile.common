@@ -26,7 +26,7 @@ INCFLAGS += \
 INCFLAGS += -I$(NATIVEDIR)/ext/rg_etc1
 #INCFLAGS += -I$(NATIVEDIR)/ext/stb_vorbis
 
-SOURCES_C += $(EXTDIR)/glew/glew.c
+SOURCES_C += $(EXTDIR)/glew/glew_libretro.c
 INCFLAGS += -I$(EXTDIR)/glew
 
 SOURCES_CXX += $(NATIVEDIR)/ext/rg_etc1/rg_etc1.cpp
