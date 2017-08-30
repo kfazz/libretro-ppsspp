@@ -410,7 +410,7 @@ ifdef WITH_DYNAREC
    ifeq ($(WITH_DYNAREC), arm)
       DYNAFLAGS += -DNEW_DYNAREC=3 -D_ARCH_32
 		SOURCES_CXX += $(COMMONDIR)/ArmEmitter.cpp \
-			       SOURCES_CXX += $(EXTDIR)/disarm.cpp
+			       $(EXTDIR)/disarm.cpp \
 			       $(COMMONDIR)/ArmCPUDetect.cpp \
 			       $(COMMONDIR)/ArmThunk.cpp \
 			       $(COREDIR)/MIPS/ARM/ArmAsm.cpp \
@@ -471,9 +471,9 @@ ifdef WITH_DYNAREC
 		endif
    else
       ifeq ($(WITH_DYNAREC), x86_64)
-	   CPUFLAGS := -msse -msse2 -D_M_X64 -D_ARCH_64
+	   CPUFLAGS += -msse -msse2 -D_M_X64 -D_ARCH_64
       else
-	   CPUFLAGS := -msse -msse2 -D_M_IX86 -m32 -D_ARCH_32
+	   CPUFLAGS += -msse -msse2 -D_M_IX86 -m32 -D_ARCH_32
       endif
 	   SOURCES_CXX += $(GPUDIR)/Software/SamplerX86.cpp
 	   SOURCES_CXX += $(COMMONDIR)/x64Analyzer.cpp \
