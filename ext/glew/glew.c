@@ -32,18 +32,33 @@
 
 #include "GL/glew.h"
 
+#ifdef __LIBRETRO__
+#undef GLEW_REGAL
+#undef GLEW_APPLE_GLX
+#include <libretro.h>
+extern retro_hw_get_proc_address_t libretro_get_proc_address;
+#else
 #if defined(_WIN32)
 #  include <GL/wglew.h>
 #elif !defined(__ANDROID__) && !defined(__native_client__) && !defined(__HAIKU__) && (!defined(__APPLE__) || defined(GLEW_APPLE_GLX))
 #  include "GL/glxew.h"
 #endif
+#endif
 
 #include <stddef.h>  /* For size_t */
 
+#ifdef __LIBRETRO__
+#  define GLEW_CONTEXT_ARG_DEF_INIT void
+#  define GLEW_CONTEXT_ARG_VAR_INIT
+#  define GLEW_CONTEXT_ARG_DEF_LIST void
+#  define WGLEW_CONTEXT_ARG_DEF_INIT void
+#  define WGLEW_CONTEXT_ARG_DEF_LIST void
+#  define GLXEW_CONTEXT_ARG_DEF_INIT void
+#  define GLXEW_CONTEXT_ARG_DEF_LIST void
 /*
  * Define glewGetContext and related helper macros.
  */
-#ifdef GLEW_MX
+#elif defined(GLEW_MX)
 #  define glewGetContext() ctx
 #  ifdef _WIN32
 #    define GLEW_CONTEXT_ARG_DEF_INIT GLEWContext* ctx
@@ -69,11 +84,13 @@
 #  define GLXEW_CONTEXT_ARG_DEF_LIST void
 #endif /* GLEW_MX */
 
-#if defined(GLEW_REGAL)
+#if defined(__LIBRETRO__)
+#elif defined(GLEW_REGAL)
 
 /* In GLEW_REGAL mode we call direcly into the linked
    libRegal.so glGetProcAddressREGAL for looking up
    the GL function pointers. */
+
 
 #  undef glGetProcAddressREGAL
 #  ifdef WIN32
@@ -107,6 +124,7 @@ void* dlGetProcAddress (const GLubyte* name)
     return dlsym(h, (const char*)name);
 }
 #endif /* __sgi || __sun || GLEW_APPLE_GLX */
+
 
 #if defined(__APPLE__)
 #include <stdlib.h>
@@ -167,6 +185,8 @@ void* NSGLGetProcAddress (const GLubyte *name)
 /*
  * Define glewGetProcAddress.
  */
+#if defined(__LIBRETRO__)
+#  define glewGetProcAddress(name) (libretro_get_proc_address)(name)
 #if defined(GLEW_REGAL)
 #  define glewGetProcAddress(name) regalGetProcAddress((const GLchar *) name)
 #elif defined(_WIN32)
