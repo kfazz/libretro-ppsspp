@@ -338,6 +338,7 @@ else ifneq (,$(findstring windows_msvc2017,$(platform)))
 	LIB := $(shell IFS=$$'\n'; cygpath -w "$(VcCompilerToolsDir)/lib/$(TargetArchMoniker)")
 
 	export INCLUDE := $(INCLUDE);$(WindowsSDKSharedIncludeDir);$(WindowsSDKUCRTIncludeDir);$(WindowsSDKUMIncludeDir)
+	INCFLAGS_PLATFORM = -I$(WindowsSDKSharedIncludeDir) -I$(WindowsSDKUCRTIncludeDir) -I$(WindowsSDKUMIncludeDir)
 	export LIB := $(LIB);$(WindowsSDKUCRTLibDir);$(WindowsSDKUMLibDir)
 	TARGET := $(TARGET_NAME)_libretro.dll
 	PSS_STYLE :=2
@@ -390,8 +391,8 @@ COREFLAGS +=-DNO_VULKAN
 
 ### Finalize ###
 OBJECTS		+= $(SOURCES_CXX:.cpp=.o) $(SOURCES_C:.c=.o) $(ASMFILES:.S=.o)
-CXXFLAGS	+= -std=c++11 $(CPUOPTS) $(COREFLAGS) $(INCFLAGS) $(PLATCFLAGS) $(fpic) $(PLATCFLAGS) $(CPUFLAGS) $(GLFLAGS) $(DYNAFLAGS) 
-CFLAGS		+= $(CPUOPTS) $(COREFLAGS) $(INCFLAGS) $(PLATCFLAGS) $(fpic) $(PLATCFLAGS) $(CPUFLAGS) $(GLFLAGS) $(DYNAFLAGS)
+CXXFLAGS	+= -std=c++11 $(CPUOPTS) $(COREFLAGS) $(INCFLAGS) $(INCFLAGS_PLATFORM) $(PLATCFLAGS) $(fpic) $(PLATCFLAGS) $(CPUFLAGS) $(GLFLAGS) $(DYNAFLAGS) 
+CFLAGS		+= $(CPUOPTS) $(COREFLAGS) $(INCFLAGS) $(INCFLAGS_PLATFORM) $(PLATCFLAGS) $(fpic) $(PLATCFLAGS) $(CPUFLAGS) $(GLFLAGS) $(DYNAFLAGS)
 
 LDFLAGS		+= -lm -lz -lavcodec -lavformat -lswresample -lavutil -lswscale $(FFMPEGLDFLAGS) $(fpic)
 ifeq (,$(findstring android,$(platform)))
