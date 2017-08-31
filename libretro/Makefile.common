@@ -341,6 +341,7 @@ SOURCES_CXX += $(EXTDIR)/native/file/chunk_file.cpp \
 	       $(COREDIR)/HLE/sceSsl.cpp \
 	       $(COREDIR)/HLE/sceUmd.cpp \
 	       $(COREDIR)/HLE/sceUsb.cpp \
+	       $(COREDIR)/HLE/sceUsbCam.cpp \
 	       $(COREDIR)/HLE/sceUtility.cpp \
 	       $(COREDIR)/HLE/sceVaudio.cpp \
 	       $(COREDIR)/HLE/scePspNpDrm_user.cpp \
