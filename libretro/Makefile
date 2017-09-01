@@ -409,7 +409,7 @@ OBJECTS		+= $(SOURCES_CXX:.cpp=.o) $(SOURCES_C:.c=.o) $(ASMFILES:.S=.o)
 CXXFLAGS	+= -std=c++11 $(CPUOPTS) $(COREFLAGS) $(INCFLAGS) $(INCFLAGS_PLATFORM) $(PLATCFLAGS) $(fpic) $(PLATCFLAGS) $(CPUFLAGS) $(GLFLAGS) $(DYNAFLAGS) 
 CFLAGS		+= $(CPUOPTS) $(COREFLAGS) $(INCFLAGS) $(INCFLAGS_PLATFORM) $(PLATCFLAGS) $(fpic) $(PLATCFLAGS) $(CPUFLAGS) $(GLFLAGS) $(DYNAFLAGS)
 
-LDFLAGS		+= -lm -lz -lavcodec -lavformat -lswresample -lavutil -lswscale $(FFMPEGLDFLAGS) $(fpic)
+LDFLAGS		+= -lm -lavcodec -lavformat -lswresample -lavutil -lswscale $(FFMPEGLDFLAGS) $(fpic)
 ifeq (,$(findstring android,$(platform)))
 	LDFLAGS		+= -lpthread
 endif

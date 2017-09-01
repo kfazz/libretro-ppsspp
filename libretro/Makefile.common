@@ -517,3 +517,21 @@ SOURCES_C += $(EXTDIR)/udis86/decode.c \
 			 $(EXTDIR)/udis86/udis86.c
 
 SOURCES_C += $(LIBRETRO_SRC)
+
+ifneq ($(STATIC_LINKING), 1)
+SOURCES_C += $(EXTDIR)/zlib/adler32.c \
+				 $(EXTDIR)/zlib/compress.c \
+				 $(EXTDIR)/zlib/crc32.c \
+				 $(EXTDIR)/zlib/deflate.c \
+				 $(EXTDIR)/zlib/gzclose.c \
+				 $(EXTDIR)/zlib/gzlib.c \
+				 $(EXTDIR)/zlib/gzread.c \
+				 $(EXTDIR)/zlib/gzwrite.c \
+				 $(EXTDIR)/zlib/infback.c \
+				 $(EXTDIR)/zlib/inffast.c \
+				 $(EXTDIR)/zlib/inflate.c \
+				 $(EXTDIR)/zlib/inftrees.c \
+				 $(EXTDIR)/zlib/trees.c \
+				 $(EXTDIR)/zlib/uncompr.c \
+				 $(EXTDIR)/zlib/zutil.c
+endif
