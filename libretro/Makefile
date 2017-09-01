@@ -350,6 +350,10 @@ else ifneq (,$(findstring windows_msvc2017,$(platform)))
 	PSS_STYLE :=2
 	LDFLAGS += -DLL
 	PLATFORM_EXT := win32
+	FFMPEGINCFLAGS += -I$(FFMPEGDIR)/Windows/$(FFMPEG_ARCH)/include
+	FFMPEGLIBDIR := $(FFMPEGDIR)/Windows/$(FFMPEG_ARCH)/lib
+	FFMPEGLDFLAGS += -L$(FFMPEGLIBDIR) -lavformat -lavcodec -lavutil -lswresample -lswscale
+	GL_LIB := -lopengl32
 
 # Windows
 else ifneq (,$(findstring win,$(platform)))
