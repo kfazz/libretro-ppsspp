@@ -349,6 +349,7 @@ else ifneq (,$(findstring windows_msvc2017,$(platform)))
 	TARGET := $(TARGET_NAME)_libretro.dll
 	PSS_STYLE :=2
 	LDFLAGS += -DLL
+	PLATFORM_EXT := win32
 
 # Windows
 else ifneq (,$(findstring win,$(platform)))
