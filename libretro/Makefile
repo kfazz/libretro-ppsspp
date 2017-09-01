@@ -441,7 +441,7 @@ $(TARGET): $(OBJECTS)
 ifeq ($(STATIC_LINKING), 1)
 	$(AR) rcs $A $(OBJECTS)
 else
-	$(CXX) $(LINKOUT)$@ $(OBJECTS) $(LDFLAGS) $(GL_LIB)
+	$(LD) $(LINKOUT)$@ $(OBJECTS) $(LDFLAGS) $(GL_LIB)
 endif
 
 clean:
