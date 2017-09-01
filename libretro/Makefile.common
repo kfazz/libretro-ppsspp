@@ -12,7 +12,9 @@ INCFLAGS += \
 	-I$(COMMONDIR) \
 	-I$(CORE_DIR)/libretro \
 	-I$(EXTDIR)/native \
+	-I$(EXTDIR)/zlib \
 	-I$(EXTDIR)/snappy \
+	-I$(FFMPEGDIR) \
 	$(FFMPEGINCFLAGS) \
 	-I$(EXTDIR)/cityhash \
 	-I$(EXTDIR)/armips \
