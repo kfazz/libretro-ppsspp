@@ -353,7 +353,8 @@ else ifneq (,$(findstring windows_msvc2017,$(platform)))
 	FFMPEGINCFLAGS += -I$(FFMPEGDIR)/Windows/$(FFMPEG_ARCH)/include
 	FFMPEGLIBDIR := $(FFMPEGDIR)/Windows/$(FFMPEG_ARCH)/lib
 	FFMPEGLDFLAGS += -L$(FFMPEGLIBDIR) -lavformat -lavcodec -lavutil -lswresample -lswscale
-	GL_LIB := -lopengl32
+	GL_LIB := opengl32.lib
+	LDFLAGS += ws2_32.lib user32.lib shell32.lib
 
 # Windows
 else ifneq (,$(findstring win,$(platform)))
