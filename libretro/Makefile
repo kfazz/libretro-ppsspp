@@ -345,16 +345,16 @@ else ifneq (,$(findstring windows_msvc2017,$(platform)))
 	LIB := $(shell IFS=$$'\n'; cygpath -w "$(VcCompilerToolsDir)/lib/$(TargetArchMoniker)")
 
 	export INCLUDE := $(INCLUDE);$(WindowsSDKSharedIncludeDir);$(WindowsSDKUCRTIncludeDir);$(WindowsSDKUMIncludeDir)
-	export LIB := $(LIB);$(WindowsSDKUCRTLibDir);$(WindowsSDKUMLibDir)
+	export LIB := $(LIB);$(WindowsSDKUCRTLibDir);$(WindowsSDKUMLibDir);$(FFMPEGDIR)/Windows/$(FFMPEG_ARCH)/lib
 	TARGET := $(TARGET_NAME)_libretro.dll
 	PSS_STYLE :=2
 	LDFLAGS += -DLL
 	PLATFORM_EXT := win32
 	FFMPEGINCFLAGS += -I$(FFMPEGDIR)/Windows/$(FFMPEG_ARCH)/include
 	FFMPEGLIBDIR := $(FFMPEGDIR)/Windows/$(FFMPEG_ARCH)/lib
-	FFMPEGLDFLAGS += -L$(FFMPEGLIBDIR) -lavformat -lavcodec -lavutil -lswresample -lswscale
+	FFMPEGLDFLAGS += -L$(FFMPEGLIBDIR) -lavformat
 	GL_LIB := opengl32.lib
-	LDFLAGS += ws2_32.lib user32.lib shell32.lib
+	LDFLAGS += ws2_32.lib user32.lib shell32.lib avcodec.lib avutil.lib swresample.lib swscale.lib avformat.lib advapi32.lib
 
 # Windows
 else ifneq (,$(findstring win,$(platform)))
