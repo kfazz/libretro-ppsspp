@@ -419,7 +419,7 @@ SOURCES_CXX += $(COREDIR)/HLE/__sceAudio.cpp
 ifdef WITH_DYNAREC
    DYNAFLAGS += -DDYNAREC
    ifeq ($(WITH_DYNAREC), arm)
-      DYNAFLAGS += -DNEW_DYNAREC=3 -D_ARCH_32
+      DYNAFLAGS += -D_ARCH_32
 		SOURCES_CXX += $(COMMONDIR)/ArmEmitter.cpp \
 			       $(EXTDIR)/disarm.cpp \
 			       $(COMMONDIR)/ArmCPUDetect.cpp \
@@ -449,7 +449,7 @@ ifdef WITH_DYNAREC
 				      $(NATIVEDIR)/ext/libpng17/arm/filter_neon.S
 		endif
 	else ifeq ($(WITH_DYNAREC), arm64)
-      DYNAFLAGS += -DNEW_DYNAREC=3 -D_ARCH_64
+      DYNAFLAGS += -D_ARCH_64
       SOURCES_CXX += $(COMMONDIR)/ArmEmitter.cpp \
 		     $(EXTDIR)/disarm.cpp \
 		     $(COMMONDIR)/ArmCPUDetect.cpp \

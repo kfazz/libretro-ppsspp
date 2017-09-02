@@ -8,10 +8,10 @@ ifneq ($(GIT_VERSION)," unknown")
 endif
 
 LOCAL_MODULE    := libavformat
-CORE_DIR    := ..
-ROOTDIR     := $(CORE_DIR)/../
-FFMPEGDIR   := $(ROOTDIR)/ffmpeg
-FFMPEGLIBDIR   := $(FFMPEGDIR)/android/armv7/lib
+CORE_DIR        := ..
+ROOTDIR         := $(CORE_DIR)/../
+FFMPEGDIR       := $(ROOTDIR)/ffmpeg
+FFMPEGLIBDIR    := $(FFMPEGDIR)/android/armv7/lib
 LOCAL_SRC_FILES := $(FFMPEGLIBDIR)/libavformat.a
 
 include $(PREBUILT_STATIC_LIBRARY)
@@ -19,10 +19,10 @@ include $(PREBUILT_STATIC_LIBRARY)
 include $(CLEAR_VARS)
 
 LOCAL_MODULE    := libavcodec
-CORE_DIR    := ..
-ROOTDIR     := $(CORE_DIR)/../
-FFMPEGDIR   := $(ROOTDIR)/ffmpeg
-FFMPEGLIBDIR   := $(FFMPEGDIR)/android/armv7/lib
+CORE_DIR        := ..
+ROOTDIR         := $(CORE_DIR)/../
+FFMPEGDIR       := $(ROOTDIR)/ffmpeg
+FFMPEGLIBDIR    := $(FFMPEGDIR)/android/armv7/lib
 LOCAL_SRC_FILES := $(FFMPEGLIBDIR)/libavcodec.a
 
 include $(PREBUILT_STATIC_LIBRARY)
@@ -30,10 +30,10 @@ include $(PREBUILT_STATIC_LIBRARY)
 include $(CLEAR_VARS)
 
 LOCAL_MODULE    := libavutil
-CORE_DIR    := ..
-ROOTDIR     := $(CORE_DIR)/../
-FFMPEGDIR   := $(ROOTDIR)/ffmpeg
-FFMPEGLIBDIR   := $(FFMPEGDIR)/android/armv7/lib
+CORE_DIR        := ..
+ROOTDIR         := $(CORE_DIR)/../
+FFMPEGDIR       := $(ROOTDIR)/ffmpeg
+FFMPEGLIBDIR    := $(FFMPEGDIR)/android/armv7/lib
 LOCAL_SRC_FILES := $(FFMPEGLIBDIR)/libavutil.a
 
 include $(PREBUILT_STATIC_LIBRARY)
@@ -41,10 +41,10 @@ include $(PREBUILT_STATIC_LIBRARY)
 include $(CLEAR_VARS)
 
 LOCAL_MODULE    := libswresample
-CORE_DIR    := ..
-ROOTDIR     := $(CORE_DIR)/../
-FFMPEGDIR   := $(ROOTDIR)/ffmpeg
-FFMPEGLIBDIR   := $(FFMPEGDIR)/android/armv7/lib
+CORE_DIR        := ..
+ROOTDIR         := $(CORE_DIR)/../
+FFMPEGDIR       := $(ROOTDIR)/ffmpeg
+FFMPEGLIBDIR    := $(FFMPEGDIR)/android/armv7/lib
 LOCAL_SRC_FILES := $(FFMPEGLIBDIR)/libswresample.a
 
 include $(PREBUILT_STATIC_LIBRARY)
@@ -52,10 +52,10 @@ include $(PREBUILT_STATIC_LIBRARY)
 include $(CLEAR_VARS)
 
 LOCAL_MODULE    := libswscale
-CORE_DIR    := ..
-ROOTDIR     := $(CORE_DIR)/../
-FFMPEGDIR   := $(ROOTDIR)/ffmpeg
-FFMPEGLIBDIR   := $(FFMPEGDIR)/android/armv7/lib
+CORE_DIR        := ..
+ROOTDIR         := $(CORE_DIR)/../
+FFMPEGDIR       := $(ROOTDIR)/ffmpeg
+FFMPEGLIBDIR    := $(FFMPEGDIR)/android/armv7/lib
 LOCAL_SRC_FILES := $(FFMPEGLIBDIR)/libswscale.a
 
 include $(PREBUILT_STATIC_LIBRARY)
@@ -80,6 +80,8 @@ ifeq ($(TARGET_ARCH),mips)
   LOCAL_CFLAGS += -DANDROID_MIPS
 endif
 
+PLATFORM_EXT   := android
+
 CORE_DIR    := ..
 ROOTDIR     := $(CORE_DIR)/../
 FFMPEGDIR   := $(ROOTDIR)/ffmpeg
@@ -93,7 +95,7 @@ NATIVEDIR   := $(EXTDIR)/native
 
 FFMPEGINCFLAGS := -I$(FFMPEGDIR)/android/armv7/include
 FFMPEGLIBDIR   := $(FFMPEGDIR)/android/armv7/lib
-FFMPEGLIBS  += libavformat libavcodec libavutil libswresample libswscale
+FFMPEGLIBS     += libavformat libavcodec libavutil libswresample libswscale
 
 WITH_DYNAREC = arm
 GLES = 1
