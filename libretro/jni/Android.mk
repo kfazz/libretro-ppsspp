@@ -88,8 +88,8 @@ COREDIR     := $(ROOTDIR)/Core
 COMMONDIR   := $(ROOTDIR)/Common
 GPUCOMMONDIR:= $(ROOTDIR)/GPU/Common
 GPUDIR      := $(ROOTDIR)/GPU
-NATIVEDIR   := $(ROOTDIR)/native
 EXTDIR      := $(ROOTDIR)/ext
+NATIVEDIR   := $(EXTDIR)/native
 
 FFMPEGINCFLAGS := -I$(FFMPEGDIR)/android/armv7/include
 FFMPEGLIBDIR   := $(FFMPEGDIR)/android/armv7/lib
