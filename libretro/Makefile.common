@@ -481,10 +481,18 @@ ifdef WITH_DYNAREC
 				      $(NATIVEDIR)/ext/libpng17/arm/filter_neon.S
 		endif
    else
+	ifneq (,$(findstring msvc,$(platform)))
+	ifeq (,$(findstring x64,$(platform)))
+		CPUFLAGS += /arch:SSE2
+	endif
+		CPUFLAGS += -D_M_IX86_FP
+	else
+		CPUFLAGS += -msse -msse2
+endif
       ifeq ($(WITH_DYNAREC), x86_64)
-	   CPUFLAGS += -msse -msse2 -D_M_X64 -D_ARCH_64
+	   CPUFLAGS += -D_M_X64 -D_ARCH_64
       else
-	   CPUFLAGS += -msse -msse2 -D_M_IX86 -m32 -D_ARCH_32
+	   CPUFLAGS += -D_M_IX86 -m32 -D_ARCH_32
       endif
 	   SOURCES_CXX += $(GPUDIR)/Software/SamplerX86.cpp
 	   SOURCES_CXX += $(COMMONDIR)/x64Analyzer.cpp \
