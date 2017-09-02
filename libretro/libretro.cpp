@@ -318,12 +318,14 @@ void retro_set_controller_port_device(unsigned port, unsigned device)
 
 void retro_get_system_info(struct retro_system_info *info)
 {
+   char str[256];
    memset(info, 0, sizeof(*info));
    info->library_name     = "PPSSPP";
 #ifndef GIT_VERSION
 #define GIT_VERSION ""
 #endif
-   info->library_version  = "v1.0.1-git" GIT_VERSION;
+   sprintf(str, "%s", PPSSPP_GIT_VERSION);
+   info->library_version  = strdup(str); 
    info->need_fullpath    = true;
    info->valid_extensions = "elf|iso|cso|prx|pbp";
 }
