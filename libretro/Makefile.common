@@ -191,11 +191,13 @@ SOURCES_CXX += $(GPUCOMMONDIR)/TextureDecoder.cpp \
 
 ifeq ($(PLATFORM_EXT), win32)
 SOURCES_CXX += $(COMMONDIR)/MemArenaWin32.cpp
+else ifeq ($(PLATFORM_EXT), darwin)
+SOURCES_CXX += $(COMMONDIR)/MemArenaDarwin.cpp
+else ifeq ($(PLATFORM_EXT), android)
+SOURCES_CXX += $(COMMONDIR)/MemArenaAndroid.cpp
 else
 SOURCES_CXX += $(COMMONDIR)/MemArenaPosix.cpp
 endif
-#SOURCES_CXX += $(COMMONDIR)/MemArenaAndroid.cpp
-#SOURCES_CXX += $(COMMONDIR)/MemArenaDarwin.cpp
 
 SOURCES_C   += $(NATIVEDIR)/gfx_es2/gl3stub.c \
 				$(NATIVEDIR)/math/fast/fast_math.c \

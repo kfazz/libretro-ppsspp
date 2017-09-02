@@ -124,7 +124,7 @@ else ifneq (,$(findstring osx,$(platform)))
 	FFMPEGLDFLAGS += -liconv -L$(FFMPEGLIBDIR) -lavformat -lavcodec -lavutil -lswresample -lswscale
 	PLATCFLAGS += -D__MACOSX__
 	GL_LIB := -framework OpenGL
-	PLATFORM_EXT := unix
+	PLATFORM_EXT := darwin
 
 # iOS
 else ifneq (,$(findstring ios,$(platform)))
