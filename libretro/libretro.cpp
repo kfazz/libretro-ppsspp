@@ -1201,12 +1201,14 @@ void retro_run(void)
 
 	      host->BootDone();
 	      _initialized = true;
-	      PSP_BeginHostFrame();
 	      coreState = CORE_RUNNING;
 	      extern GLuint g_defaultFBO;
 	      g_defaultFBO = hw_render.get_current_framebuffer();
       }
+
    }
+
+   PSP_BeginHostFrame();
 
 #if 0
    if (log_cb)
@@ -1251,6 +1253,7 @@ void retro_run(void)
    }
 
    video_cb(((gstate_c.skipDrawReason & SKIPDRAW_SKIPFRAME) == 0) ? NULL : RETRO_HW_FRAME_BUFFER_VALID, screen_width, screen_height, 0);
+   PSP_EndHostFrame();
 }
 
 void retro_unload_game(void)
@@ -1259,7 +1262,6 @@ void retro_unload_game(void)
       threaded_input = false;
 
 
-	PSP_EndHostFrame();
 	PSP_Shutdown();
 	VFSShutdown();
 
