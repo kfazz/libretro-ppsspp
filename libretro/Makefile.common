@@ -25,13 +25,7 @@ INCFLAGS += \
 	-I$(EXTDIR)/xbrz \
 	-I$(EXTDIR)/xxhash
 
-ifeq ($(PLATFORM_EXT), win32)
-ifeq ($(WITH_DYNAREC), x86_64)
-INCFLAGS += -I$(FFMPEGDIR)/Windows/x86_64/include
-endif
-endif
-
-INCFLAGS += -I$(NATIVEDIR)/ext/rg_etc1
+INCFLAGS  += -I$(NATIVEDIR)/ext/rg_etc1
 #INCFLAGS += -I$(NATIVEDIR)/ext/stb_vorbis
 
 SOURCES_C += $(EXTDIR)/glew/glew_libretro.c
