@@ -334,9 +334,11 @@ else ifneq (,$(findstring windows_msvc2017,$(platform)))
 	ifneq (,$(findstring x64,$(TargetArchMoniker)))
 		WITH_DYNAREC = x86_64
 		VCCompilerToolsBinDir := $(VcCompilerToolsDir)\bin\HostX64
+		FFMPEG_ARCH=x86_64
 	else
 		WITH_DYNAREC = x86
 		VCCompilerToolsBinDir := $(VcCompilerToolsDir)\bin\HostX86
+		FFMPEG_ARCH=x86
 	endif
 
 	PATH := $(shell IFS=$$'\n'; cygpath "$(VCCompilerToolsBinDir)/$(TargetArchMoniker)"):$(PATH)
