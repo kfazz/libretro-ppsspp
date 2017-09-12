@@ -106,8 +106,8 @@ else ifneq (,$(findstring imx6,$(platform)))
 	PLATFORM_EXT := unix
 	WITH_DYNAREC=arm
 	HAVE_NEON=1
-	FFMPEGINCFLAGS += -I$(FFMPEGDIR)/linux/armv7/include
-	FFMPEGLIBDIR := $(FFMPEGDIR)/linux/armv7/lib
+	FFMPEGINCFLAGS += -I$(FFMPEGDIR)/linux/$(FFMPEG_ARCH)/include
+	FFMPEGLIBDIR := $(FFMPEGDIR)/linux/$(FFMPEG_ARCH)/lib
 	FFMPEGLDFLAGS += -L$(FFMPEGLIBDIR) -lavformat -lavcodec -lavutil -lswresample -lswscale
 	LDFLAGS += -lrt -ldl
 
