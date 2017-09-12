@@ -418,7 +418,6 @@ ifdef WITH_DYNAREC
 		SOURCES_CXX += $(COMMONDIR)/ArmEmitter.cpp \
 			       $(EXTDIR)/disarm.cpp \
 			       $(COMMONDIR)/ArmCPUDetect.cpp \
-			       $(COMMONDIR)/ArmThunk.cpp \
 			       $(COREDIR)/MIPS/ARM/ArmAsm.cpp \
 			       $(COREDIR)/MIPS/ARM/ArmCompALU.cpp \
 			       $(COREDIR)/MIPS/ARM/ArmCompBranch.cpp \
@@ -435,6 +434,7 @@ ifdef WITH_DYNAREC
 			SOURCES_CXX   += \
 					 $(COREDIR)/MIPS/ARM/ArmCompVFPUNEON.cpp \
 					 $(COREDIR)/MIPS/ARM/ArmCompVFPUNEONUtil.cpp \
+					 $(COREDIR)/Util/AudioFormatNEON.cpp \
 					 $(COMMONDIR)/ColorConvNEON.cpp \
 					 $(GPUDIR)/Common/TextureDecoderNEON.cpp
 

@@ -8,9 +8,8 @@ ifneq ($(GIT_VERSION)," unknown")
 endif
 
 LOCAL_MODULE    := libavformat
-CORE_DIR        := ..
-ROOTDIR         := $(CORE_DIR)/../
-FFMPEGDIR       := $(ROOTDIR)/ffmpeg
+CORE_DIR        := ../..
+FFMPEGDIR       := $(CORE_DIR)/ffmpeg
 FFMPEGLIBDIR    := $(FFMPEGDIR)/android/armv7/lib
 LOCAL_SRC_FILES := $(FFMPEGLIBDIR)/libavformat.a
 
@@ -19,10 +18,6 @@ include $(PREBUILT_STATIC_LIBRARY)
 include $(CLEAR_VARS)
 
 LOCAL_MODULE    := libavcodec
-CORE_DIR        := ..
-ROOTDIR         := $(CORE_DIR)/../
-FFMPEGDIR       := $(ROOTDIR)/ffmpeg
-FFMPEGLIBDIR    := $(FFMPEGDIR)/android/armv7/lib
 LOCAL_SRC_FILES := $(FFMPEGLIBDIR)/libavcodec.a
 
 include $(PREBUILT_STATIC_LIBRARY)
@@ -30,10 +25,6 @@ include $(PREBUILT_STATIC_LIBRARY)
 include $(CLEAR_VARS)
 
 LOCAL_MODULE    := libavutil
-CORE_DIR        := ..
-ROOTDIR         := $(CORE_DIR)/../
-FFMPEGDIR       := $(ROOTDIR)/ffmpeg
-FFMPEGLIBDIR    := $(FFMPEGDIR)/android/armv7/lib
 LOCAL_SRC_FILES := $(FFMPEGLIBDIR)/libavutil.a
 
 include $(PREBUILT_STATIC_LIBRARY)
@@ -41,10 +32,6 @@ include $(PREBUILT_STATIC_LIBRARY)
 include $(CLEAR_VARS)
 
 LOCAL_MODULE    := libswresample
-CORE_DIR        := ..
-ROOTDIR         := $(CORE_DIR)/../
-FFMPEGDIR       := $(ROOTDIR)/ffmpeg
-FFMPEGLIBDIR    := $(FFMPEGDIR)/android/armv7/lib
 LOCAL_SRC_FILES := $(FFMPEGLIBDIR)/libswresample.a
 
 include $(PREBUILT_STATIC_LIBRARY)
@@ -52,10 +39,6 @@ include $(PREBUILT_STATIC_LIBRARY)
 include $(CLEAR_VARS)
 
 LOCAL_MODULE    := libswscale
-CORE_DIR        := ..
-ROOTDIR         := $(CORE_DIR)/../
-FFMPEGDIR       := $(ROOTDIR)/ffmpeg
-FFMPEGLIBDIR    := $(FFMPEGDIR)/android/armv7/lib
 LOCAL_SRC_FILES := $(FFMPEGLIBDIR)/libswscale.a
 
 include $(PREBUILT_STATIC_LIBRARY)
@@ -82,10 +65,6 @@ endif
 
 PLATFORM_EXT   := android
 
-CORE_DIR    := ..
-ROOTDIR     := $(CORE_DIR)/../
-FFMPEGDIR   := $(ROOTDIR)/ffmpeg
-
 FFMPEGINCFLAGS := -I$(FFMPEGDIR)/android/armv7/include
 FFMPEGLIBDIR   := $(FFMPEGDIR)/android/armv7/lib
 FFMPEGLIBS     += libavformat libavcodec libavutil libswresample libswscale
@@ -100,9 +79,9 @@ LOCAL_MODULE := retro
 platform := android
 HAVE_NEON := 1
 
-include $(CORE_DIR)/Makefile.common
+include $(CORE_DIR)/libretro/Makefile.common
 
-COREFLAGS := -DINLINE="inline" -DPPSSPP -DUSE_FFMPEG -DMOBILE_DEVICE -DBAKE_IN_GIT -DDYNAREC -D__LIBRETRO__ -D__arm__ -DARM_ASM -D__NEON_OPT__ -DUSING_GLES2 -D__STDC_CONSTANT_MACROS -D_ARCH_32 $(INCFLAGS)
+COREFLAGS := -DINLINE="inline" -DPPSSPP -DUSE_FFMPEG -DMOBILE_DEVICE -DBAKE_IN_GIT -DDYNAREC -D__LIBRETRO__ -D__arm__ -DARM_ASM -D__NEON_OPT__ -DUSING_GLES2 -D__STDC_CONSTANT_MACROS -D_ARCH_32 -DGLEW_NO_GLU -DNO_VULKAN $(INCFLAGS)
 LOCAL_SRC_FILES = $(SOURCES_CXX) $(SOURCES_C) $(ASMFILES)
 LOCAL_CPPFLAGS := -Wall -std=gnu++11 -Wno-literal-suffix $(COREFLAGS)
 LOCAL_CFLAGS := -O2 -ffast-math -DANDROID $(COREFLAGS)
