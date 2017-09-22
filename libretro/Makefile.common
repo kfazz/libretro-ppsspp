@@ -445,23 +445,20 @@ ifdef WITH_DYNAREC
 		endif
 	else ifeq ($(WITH_DYNAREC), arm64)
       DYNAFLAGS += -D_ARCH_64
-      SOURCES_CXX += $(COMMONDIR)/ArmEmitter.cpp \
-		     $(EXTDIR)/disarm.cpp \
+      SOURCES_CXX += $(COMMONDIR)/Arm64Emitter.cpp \
 		     $(COMMONDIR)/ArmCPUDetect.cpp \
-		     $(COMMONDIR)/ArmThunk.cpp \
-		     $(COMMONDIR)/Arm64Emitter.cpp \
-		     $(COREDIR)/MIPS/ARM/ArmAsm.cpp \
-		     $(COREDIR)/MIPS/ARM/ArmCompALU.cpp \
-		     $(COREDIR)/MIPS/ARM/ArmCompBranch.cpp \
-		     $(COREDIR)/MIPS/ARM/ArmCompFPU.cpp \
-		     $(COREDIR)/MIPS/ARM/ArmCompLoadStore.cpp \
-		     $(COREDIR)/MIPS/ARM/ArmCompVFPU.cpp \
-		     $(COREDIR)/MIPS/ARM/ArmCompReplace.cpp \
-		     $(COREDIR)/MIPS/ARM/ArmJit.cpp \
-		     $(COREDIR)/MIPS/ARM/ArmRegCache.cpp \
-		     $(COREDIR)/MIPS/ARM/ArmRegCacheFPU.cpp \
+		     $(COREDIR)/MIPS/ARM64/Arm64Asm.cpp \
+		     $(COREDIR)/MIPS/ARM64/Arm64CompALU.cpp \
+		     $(COREDIR)/MIPS/ARM64/Arm64CompBranch.cpp \
+		     $(COREDIR)/MIPS/ARM64/Arm64CompFPU.cpp \
+		     $(COREDIR)/MIPS/ARM64/Arm64CompLoadStore.cpp \
+		     $(COREDIR)/MIPS/ARM64/Arm64CompVFPU.cpp \
+		     $(COREDIR)/MIPS/ARM64/Arm64CompReplace.cpp \
+		     $(COREDIR)/MIPS/ARM64/Arm64Jit.cpp \
+		     $(COREDIR)/MIPS/ARM64/Arm64RegCache.cpp \
+		     $(COREDIR)/MIPS/ARM64/Arm64RegCacheFPU.cpp \
 		     $(COREDIR)/Util/DisArm64.cpp \
-		     $(GPUCOMMONDIR)/VertexDecoderArm.cpp
+		     $(GPUCOMMONDIR)/VertexDecoderArm64.cpp
 		
 		ifeq ($(HAVE_NEON),1)
 			SOURCES_CXX   += \
