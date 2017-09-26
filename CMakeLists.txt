@@ -373,6 +373,8 @@ add_library(Common STATIC
 	Common/MsgHandler.h
 	Common/OSVersion.cpp
 	Common/OSVersion.h
+	Common/ShaderInit.cpp
+	Common/ShaderInit.h
 	Common/StringUtils.cpp
 	Common/StringUtils.h
 	Common/ThreadPools.cpp
@@ -1249,7 +1251,6 @@ set(GPU_SOURCES
 	GPU/Common/ShaderId.h
 	GPU/Common/ShaderUniforms.cpp
 	GPU/Common/ShaderUniforms.h
-	GPU/Common/ShaderCommon.cpp
 	GPU/Common/ShaderCommon.h
 	GPU/Common/SplineCommon.cpp
 	GPU/Common/SplineCommon.h

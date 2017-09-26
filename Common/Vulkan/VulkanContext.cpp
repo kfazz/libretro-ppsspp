@@ -7,7 +7,7 @@
 
 #include "base/basictypes.h"
 #include "VulkanContext.h"
-#include "GPU/Common/ShaderCommon.h"
+#include "Common/ShaderInit.h"
 
 #ifdef USE_CRT_DBG
 #undef new
