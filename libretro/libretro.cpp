@@ -1298,7 +1298,6 @@ size_t retro_serialize_size(void)
 
 bool retro_serialize(void *data, size_t size)
 {
-#if 0
    (void)size;
    SaveState::SaveStart state;
 
@@ -1316,20 +1315,13 @@ bool retro_serialize(void *data, size_t size)
       return false;
    else
       return CChunkFileReader::SavePtr((u8 *) data, state) == CChunkFileReader::ERROR_NONE;
-#else
-   return false;
-#endif
 }
 
 bool retro_unserialize(const void *data, size_t size)
 {
-#if 0
    (void)size;
    SaveState::SaveStart state;
    return CChunkFileReader::LoadPtr((u8 *) data, state) == CChunkFileReader::ERROR_NONE;
-#else
-   return false;
-#endif
 }
 
 void *retro_get_memory_data(unsigned id)
