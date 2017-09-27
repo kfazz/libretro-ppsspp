@@ -12,6 +12,7 @@
 #include "Core/HLE/sceDisplay.h"
 #include "Core/HLE/sceUtility.h"
 #include "Core/HLE/__sceAudio.h"
+#include "Core/HW/MemoryStick.h"
 #include "Core/Host.h"
 #include "Core/SaveState.h"
 #include "Core/System.h"
@@ -990,6 +991,7 @@ bool retro_load_game(const struct retro_game_info *game)
    g_Config.bFrameSkipUnthrottle = false;
    g_Config.bVSync = false;
    g_Config.bEnableLogging = true;
+   g_Config.bMemStickInserted = PSP_MEMORYSTICK_STATE_INSERTED;
 
    if (environ_cb(RETRO_ENVIRONMENT_GET_USERNAME, &tmp) && tmp)
       g_Config.sNickName = std::string(tmp);
