@@ -1298,30 +1298,29 @@ size_t retro_serialize_size(void)
 
 bool retro_serialize(void *data, size_t size)
 {
-   (void)size;
-   SaveState::SaveStart state;
+   std::vector<u8> state;
 
    if (!_initialized)
       return false;
 
-   size_t sz = CChunkFileReader::MeasurePtr(state);
-
-#if 0
-   if (log_cb)
-      log_cb(RETRO_LOG_INFO, "Savestate size: %u\n", sz);
-#endif
-
-   if (size < sz)
+   if (SaveState::SaveToRam(state) == CChunkFileReader::ERROR_NONE &&
+       size >= (sizeof(uint32_t) + state.size()*sizeof(u8)))
+   {
+      static_cast<uint32_t*>(data)[0] = state.size();
+      std::memcpy(static_cast<uint32_t*>(data)+1, state.data(), state.size()*sizeof(u8));
+      return true;
+   }
       return false;
-   else
-      return CChunkFileReader::SavePtr((u8 *) data, state) == CChunkFileReader::ERROR_NONE;
 }
 
 bool retro_unserialize(const void *data, size_t size)
 {
-   (void)size;
-   SaveState::SaveStart state;
-   return CChunkFileReader::LoadPtr((u8 *) data, state) == CChunkFileReader::ERROR_NONE;
+   if (size < static_cast<uint32_t const*>(data)[0]*sizeof(u8) + sizeof(uint32_t))
+      return false;
+
+   u8 const* state_data = static_cast<u8 const*>(data)+4;
+   std::vector<u8> state(state_data, state_data+static_cast<uint32_t const*>(data)[0]);
+   return SaveState::LoadFromRam(state) == CChunkFileReader::ERROR_NONE;
 }
 
 void *retro_get_memory_data(unsigned id)

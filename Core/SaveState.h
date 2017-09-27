@@ -23,11 +23,6 @@
 
 namespace SaveState
 {
-	struct SaveStart
-	{
-		void DoState(PointerWrap &p);
-	};
-
 	typedef std::function<void(bool status, const std::string &message, void *cbUserData)> Callback;
 
 	static const int NUM_SLOTS = 5;

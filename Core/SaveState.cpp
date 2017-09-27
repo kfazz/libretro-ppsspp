@@ -48,6 +48,11 @@
 
 namespace SaveState
 {
+	struct SaveStart
+	{
+		void DoState(PointerWrap &p);
+	};
+
 	enum OperationType
 	{
 		SAVESTATE_SAVE,
