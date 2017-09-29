@@ -49,6 +49,12 @@
 // #define DEBUG_READ_PIXELS 1
 
 static const char tex_fs[] =
+	"#if __VERSION__ >= 130\n"
+	"#define varying in\n"
+	"#define texture2D texture\n"
+	"#define gl_FragColor fragColor0\n"
+	"out vec4 fragColor0;\n"
+	"#endif\n"
 #ifdef USING_GLES2
 	"precision mediump float;\n"
 #endif
@@ -59,6 +65,10 @@ static const char tex_fs[] =
 	"}\n";
 
 static const char basic_vs[] =
+	"#if __VERSION__ >= 130\n"
+	"#define attribute in\n"
+	"#define varying out\n"
+	"#endif\n"
 	"attribute vec4 a_position;\n"
 	"attribute vec2 a_texcoord0;\n"
 	"varying vec2 v_texcoord0;\n"
@@ -87,7 +97,10 @@ void FramebufferManagerGLES::DisableState() {
 void FramebufferManagerGLES::CompileDraw2DProgram() {
 	if (!draw2dprogram_) {
 		std::string errorString;
-		draw2dprogram_ = glsl_create_source(basic_vs, tex_fs, &errorString);
+		static std::string vs_code, fs_code;
+		vs_code = ApplyGLSLPrelude(basic_vs, GL_VERTEX_SHADER);
+		fs_code = ApplyGLSLPrelude(tex_fs, GL_FRAGMENT_SHADER);
+		draw2dprogram_ = glsl_create_source(vs_code.c_str(), fs_code.c_str(), &errorString);
 		if (!draw2dprogram_) {
 			ERROR_LOG_REPORT(G3D, "Failed to compile draw2dprogram! This shouldn't happen.\n%s", errorString.c_str());
 		} else {
@@ -147,6 +160,7 @@ void FramebufferManagerGLES::CompilePostShader() {
 			deltaLoc_ = glsl_uniform_loc(postShaderProgram_, "u_texelDelta");
 			pixelDeltaLoc_ = glsl_uniform_loc(postShaderProgram_, "u_pixelDelta");
 			timeLoc_ = glsl_uniform_loc(postShaderProgram_, "u_time");
+			videoLoc_ = glsl_uniform_loc(postShaderProgram_, "u_video");
 			usePostShader_ = true;
 		}
 	} else {
@@ -171,9 +185,10 @@ void FramebufferManagerGLES::BindPostShader(const PostShaderUniforms &uniforms) 
 		glUniform2f(deltaLoc_, uniforms.texelDelta[0], uniforms.texelDelta[1]);
 	if (pixelDeltaLoc_ != -1)
 		glUniform2f(pixelDeltaLoc_, uniforms.pixelDelta[0], uniforms.pixelDelta[1]);
-	if (timeLoc_ != -1) {
+	if (timeLoc_ != -1)
 		glUniform4fv(timeLoc_, 1, uniforms.time);
-	}
+	if (videoLoc_ != -1)
+		glUniform1f(videoLoc_, uniforms.video);
 }
 
 void FramebufferManagerGLES::DestroyDraw2DProgram() {
@@ -195,6 +210,7 @@ FramebufferManagerGLES::FramebufferManagerGLES(Draw::DrawContext *draw) :
 	draw2dprogram_(nullptr),
 	postShaderProgram_(nullptr),
 	stencilUploadProgram_(nullptr),
+	videoLoc_(-1),
 	timeLoc_(-1),
 	pixelDeltaLoc_(-1),
 	deltaLoc_(-1),

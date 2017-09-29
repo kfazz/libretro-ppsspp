@@ -654,6 +654,10 @@ elseif(IOS)
 		ios/ViewController.h
 		ios/iOSCoreAudio.cpp
 		ios/iOSCoreAudio.h
+		ios/PPSSPPUIApplication.h
+		ios/PPSSPPUIApplication.mm
+		ios/SmartKeyboardMap.cpp
+		ios/SmartKeyboardMap.hpp
 		ios/iCade/iCadeReaderView.h
 		ios/iCade/iCadeReaderView.m
 		ios/iCade/iCadeState.h)
@@ -1765,9 +1769,12 @@ set(NativeAssets
 if(HEADLESS)
 	add_executable(PPSSPPHeadless
 		headless/Headless.cpp
+		headless/StubHost.cpp
 		headless/StubHost.h
 		headless/Compare.cpp
-		headless/Compare.h)
+		headless/Compare.h
+		headless/SDLHeadlessHost.cpp
+		headless/SDLHeadlessHost.h)
 	target_link_libraries(PPSSPPHeadless
 		${COCOA_LIBRARY} ${LinkCommon})
 	setup_target_project(PPSSPPHeadless headless)
