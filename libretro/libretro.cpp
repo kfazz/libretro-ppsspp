@@ -12,6 +12,7 @@
 #include "Core/HLE/sceDisplay.h"
 #include "Core/HLE/sceUtility.h"
 #include "Core/HLE/__sceAudio.h"
+#include "Core/HW/MemoryStick.h"
 #include "Core/Host.h"
 #include "Core/SaveState.h"
 #include "Core/System.h"
@@ -990,6 +991,7 @@ bool retro_load_game(const struct retro_game_info *game)
    g_Config.bFrameSkipUnthrottle = false;
    g_Config.bVSync = false;
    g_Config.bEnableLogging = true;
+   g_Config.bMemStickInserted = PSP_MEMORYSTICK_STATE_INSERTED;
 
    if (environ_cb(RETRO_ENVIRONMENT_GET_USERNAME, &tmp) && tmp)
       g_Config.sNickName = std::string(tmp);
@@ -1298,38 +1300,29 @@ size_t retro_serialize_size(void)
 
 bool retro_serialize(void *data, size_t size)
 {
-#if 0
-   (void)size;
-   SaveState::SaveStart state;
+   std::vector<u8> state;
 
    if (!_initialized)
       return false;
 
-   size_t sz = CChunkFileReader::MeasurePtr(state);
-
-#if 0
-   if (log_cb)
-      log_cb(RETRO_LOG_INFO, "Savestate size: %u\n", sz);
-#endif
-
-   if (size < sz)
+   if (SaveState::SaveToRam(state) == CChunkFileReader::ERROR_NONE &&
+       size >= (sizeof(uint32_t) + state.size()*sizeof(u8)))
+   {
+      static_cast<uint32_t*>(data)[0] = state.size();
+      std::memcpy(static_cast<uint32_t*>(data)+1, state.data(), state.size()*sizeof(u8));
+      return true;
+   }
       return false;
-   else
-      return CChunkFileReader::SavePtr((u8 *) data, state) == CChunkFileReader::ERROR_NONE;
-#else
-   return false;
-#endif
 }
 
 bool retro_unserialize(const void *data, size_t size)
 {
-#if 0
-   (void)size;
-   SaveState::SaveStart state;
-   return CChunkFileReader::LoadPtr((u8 *) data, state) == CChunkFileReader::ERROR_NONE;
-#else
-   return false;
-#endif
+   if (size < static_cast<uint32_t const*>(data)[0]*sizeof(u8) + sizeof(uint32_t))
+      return false;
+
+   u8 const* state_data = static_cast<u8 const*>(data)+4;
+   std::vector<u8> state(state_data, state_data+static_cast<uint32_t const*>(data)[0]);
+   return SaveState::LoadFromRam(state) == CChunkFileReader::ERROR_NONE;
 }
 
 void *retro_get_memory_data(unsigned id)
