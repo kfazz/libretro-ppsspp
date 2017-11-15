@@ -119,6 +119,10 @@ if(LIBRETRO)
 	add_definitions(-fPIC)
 
 	include_directories(libretro)
+
+	set(GLEW_LIBRARY glew_libretro.c)
+else()
+	set(GLEW_LIBRARY glew.c)
 endif()
 
 if(ANDROID)
