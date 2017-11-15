@@ -137,13 +137,6 @@ void SoftwareTransform(
 	bool throughmode = (vertType & GE_VTYPE_THROUGH_MASK) != 0;
 	bool lmode = gstate.isUsingSecondaryColor() && gstate.isLightingEnabled();
 
-	// TODO: Split up into multiple draw calls for GLES 2.0 where you can't guarantee support for more than 0x10000 verts.
-
-#if defined(MOBILE_DEVICE)
-	if (vertexCount > 0x10000/3)
-		vertexCount = 0x10000/3;
-#endif
-
 	float uscale = 1.0f;
 	float vscale = 1.0f;
 	if (throughmode) {
@@ -400,6 +393,7 @@ void SoftwareTransform(
 	// rectangle out of many. Quite a small optimization though.
 	// Experiment: Disable on PowerVR (see issue #6290)
 	// TODO: This bleeds outside the play area in non-buffered mode. Big deal? Probably not.
+	// TODO: Allow creating a depth clear and a color draw.
 	bool reallyAClear = false;
 	if (maxIndex > 1 && prim == GE_PRIM_RECTANGLES && gstate.isModeClear()) {
 		int scissorX2 = gstate.getScissorX2() + 1;

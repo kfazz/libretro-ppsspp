@@ -228,8 +228,6 @@ static const GlTypeInfo GLComp[] = {
 	{GL_UNSIGNED_SHORT, 2, GL_TRUE},// 	DEC_U16_2,
 	{GL_UNSIGNED_SHORT, 3, GL_TRUE},// 	DEC_U16_3,
 	{GL_UNSIGNED_SHORT, 4, GL_TRUE},// 	DEC_U16_4,
-	{GL_UNSIGNED_BYTE,  2, GL_FALSE},// 	DEC_U8A_2,
-	{GL_UNSIGNED_SHORT, 2, GL_FALSE},// 	DEC_U16A_2,
 };
 
 static inline void VertexAttribSetup(int attrib, int fmt, int stride, u8 *ptr) {
@@ -701,8 +699,15 @@ rotateVBO:
 		params.allowSeparateAlphaClear = true;
 
 		int maxIndex = indexGen.MaxIndex();
+		int vertexCount = indexGen.VertexCount();
+
+		// TODO: Split up into multiple draw calls for GLES 2.0 where you can't guarantee support for more than 0x10000 verts.
+#if defined(MOBILE_DEVICE)
+		if (vertexCount > 0x10000 / 3)
+			vertexCount = 0x10000 / 3;
+#endif
 		SoftwareTransform(
-			prim, indexGen.VertexCount(),
+			prim, vertexCount,
 			dec_->VertexType(), inds, GE_VTYPE_IDX_16BIT, dec_->GetDecVtxFmt(),
 			maxIndex, drawBuffer, numTrans, drawIndexed, &params, &result);
 		ApplyDrawStateLate();

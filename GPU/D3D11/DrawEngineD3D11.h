@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include <map>
 #include <d3d11.h>
 #include <d3d11_1.h>
 
@@ -120,9 +121,6 @@ public:
 
 	void BeginFrame();
 
-	void SetupVertexDecoder(u32 vertType);
-	void SetupVertexDecoderInternal(u32 vertType);
-
 	// So that this can be inlined
 	void Flush() {
 		if (!numDrawCalls)
@@ -136,8 +134,6 @@ public:
 		DecodeVerts();
 	}
 
-	bool IsCodePtrVertexDecoder(const u8 *ptr) const;
-
 	void DispatchFlush() override { Flush(); }
 	void DispatchSubmitPrim(void *verts, void *inds, GEPrimitiveType prim, int vertexCount, u32 vertType, int *bytesRead) override {
 		SubmitPrim(verts, inds, prim, vertexCount, vertType, bytesRead);
@@ -147,6 +143,8 @@ public:
 
 	void Resized() override;
 
+	void ClearInputLayoutMap();
+
 private:
 	void DecodeVerts();
 	void DoFlush();
@@ -154,8 +152,6 @@ private:
 	void ApplyDrawState(int prim);
 	void ApplyDrawStateLate(bool applyStencilRef, uint8_t stencilRef);
 	void ResetShaderBlending();
-
-	void ClearInputLayoutMap();
 
 	ID3D11InputLayout *SetupDecFmtForDraw(D3D11VertexShader *vshader, const DecVtxFormat &decFmt, u32 pspFmt);
 
@@ -171,11 +167,11 @@ private:
 
 	struct InputLayoutKey {
 		D3D11VertexShader *vshader;
-		u32 vertType;
+		u32 decFmtId;
 		bool operator <(const InputLayoutKey &other) const {
-			if (vertType < other.vertType)
+			if (decFmtId < other.decFmtId)
 				return true;
-			if (vertType > other.vertType)
+			if (decFmtId > other.decFmtId)
 				return false;
 			return vshader < other.vshader;
 		}
@@ -192,7 +188,8 @@ private:
 	PushBufferD3D11 *pushVerts_;
 	PushBufferD3D11 *pushInds_;
 
-	// D3D11 state object caches
+	// D3D11 state object caches.
+	// TODO: Change them to DenseHashMaps.
 	std::map<uint64_t, ID3D11BlendState *> blendCache_;
 	std::map<uint64_t, ID3D11BlendState1 *> blendCache1_;
 	std::map<uint64_t, ID3D11DepthStencilState *> depthStencilCache_;

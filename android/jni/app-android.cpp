@@ -38,6 +38,7 @@
 #include "gfx_es2/gpu_features.h"
 
 #include "thin3d/thin3d.h"
+#include "thin3d/VulkanRenderManager.h"
 #include "Core/Config.h"
 #include "Core/Loaders.h"
 #include "Core/System.h"
@@ -133,6 +134,8 @@ bool AndroidEGLGraphicsContext::Init(ANativeWindow *wnd, int backbufferWidth, in
 	gl->MakeCurrent();
 	CheckGLExtensions();
 	draw_ = Draw::T3DCreateGLContext();
+	bool success = draw_->CreatePresets();  // There will always be a GLSL compiler capable of compiling these.
+	assert(success);
 	return true;
 }
 
@@ -157,6 +160,8 @@ public:
 	AndroidJavaEGLGraphicsContext() {
 		CheckGLExtensions();
 		draw_ = Draw::T3DCreateGLContext();
+		bool success = draw_->CreatePresets();
+		assert(success);
 	}
 	~AndroidJavaEGLGraphicsContext() {
 		delete draw_;
@@ -185,6 +190,11 @@ static VulkanContext *g_Vulkan;
 class AndroidVulkanContext : public AndroidGraphicsContext {
 public:
 	AndroidVulkanContext() : draw_(nullptr) {}
+	~AndroidVulkanContext() {
+		delete g_Vulkan;
+		g_Vulkan = nullptr;
+	}
+
 	bool Init(ANativeWindow *wnd, int desiredBackbufferSizeX, int desiredBackbufferSizeY, int backbufferFormat, int androidVersion) override;
 	void Shutdown() override;
 	void SwapInterval(int interval) override;
@@ -266,10 +276,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL Vulkan_Dbg(VkDebugReportFlagsEXT msgFlags,
 }
 
 bool AndroidVulkanContext::Init(ANativeWindow *wnd, int desiredBackbufferSizeX, int desiredBackbufferSizeY, int backbufferFormat, int androidVersion) {
-	if (g_Vulkan) {
-		return false;
-	}
-
+	ILOG("AndroidVulkanContext::Init");
 	init_glslang();
 
 	g_LogOptions.breakOnError = true;
@@ -278,7 +285,10 @@ bool AndroidVulkanContext::Init(ANativeWindow *wnd, int desiredBackbufferSizeX, 
 
 	ILOG("Creating vulkan context");
 	Version gitVer(PPSSPP_GIT_VERSION);
-	g_Vulkan = new VulkanContext();
+
+	if (!g_Vulkan) {
+		g_Vulkan = new VulkanContext();
+	}
 	if (VK_SUCCESS != g_Vulkan->CreateInstance("PPSSPP", gitVer.ToInteger(), VULKAN_FLAG_PRESENT_MAILBOX | VULKAN_FLAG_PRESENT_FIFO_RELAXED)) {
 		ELOG("Failed to create vulkan context: %s", g_Vulkan->InitError().c_str());
 		delete g_Vulkan;
@@ -286,12 +296,21 @@ bool AndroidVulkanContext::Init(ANativeWindow *wnd, int desiredBackbufferSizeX, 
 		return false;
 	}
 
-	g_Vulkan->ChooseDevice(g_Vulkan->GetBestPhysicalDevice());
+	int physicalDevice = g_Vulkan->GetBestPhysicalDevice();
+	if (physicalDevice < 0) {
+		ELOG("No usable Vulkan device found.");
+		delete g_Vulkan;
+		g_Vulkan = nullptr;
+		return false;
+	}
+
+	g_Vulkan->ChooseDevice(physicalDevice);
 	// Here we can enable device extensions if we like.
 
 	ILOG("Creating vulkan device");
 	if (g_Vulkan->CreateDevice() != VK_SUCCESS) {
 		ILOG("Failed to create vulkan device: %s", g_Vulkan->InitError().c_str());
+		System_SendMessage("toast", "No Vulkan driver found. Using OpenGL instead.");
 		delete g_Vulkan;
 		g_Vulkan = nullptr;
 		return false;
@@ -308,38 +327,65 @@ bool AndroidVulkanContext::Init(ANativeWindow *wnd, int desiredBackbufferSizeX, 
 		int bits = VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT | VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT;
 		g_Vulkan->InitDebugMsgCallback(&Vulkan_Dbg, bits, &g_LogOptions);
 	}
-	g_Vulkan->InitObjects(true);
-	draw_ = Draw::T3DCreateVulkanContext(g_Vulkan);
-	return true;
+
+	bool success = true;
+	if (g_Vulkan->InitObjects()) {
+		draw_ = Draw::T3DCreateVulkanContext(g_Vulkan);
+		success = draw_->CreatePresets();  // Doesn't fail, we ship the compiler.
+		assert(success);
+		draw_->HandleEvent(Draw::Event::GOT_BACKBUFFER, g_Vulkan->GetBackbufferWidth(), g_Vulkan->GetBackbufferHeight());
+
+		VulkanRenderManager *renderManager = (VulkanRenderManager *)draw_->GetNativeObject(Draw::NativeObject::RENDER_MANAGER);
+		success = renderManager->HasBackbuffers();
+	} else {
+		success = false;
+	}
+
+	ILOG("AndroidVulkanContext::Init completed, %s", success ? "successfully" : "but failed");
+	if (!success) {
+		g_Vulkan->DestroyObjects();
+		g_Vulkan->DestroyDevice();
+		g_Vulkan->DestroyDebugMsgCallback();
+
+		g_Vulkan->DestroyInstance();
+	}
+	return success;
 }
 
 void AndroidVulkanContext::Shutdown() {
 	ILOG("AndroidVulkanContext::Shutdown");
+	draw_->HandleEvent(Draw::Event::LOST_BACKBUFFER, g_Vulkan->GetBackbufferWidth(), g_Vulkan->GetBackbufferHeight());
 	delete draw_;
 	draw_ = nullptr;
+	ILOG("Calling NativeShutdownGraphics");
 	NativeShutdownGraphics();
-
 	g_Vulkan->WaitUntilQueueIdle();
 	g_Vulkan->DestroyObjects();
-	g_Vulkan->DestroyDebugMsgCallback();
 	g_Vulkan->DestroyDevice();
+	g_Vulkan->DestroyDebugMsgCallback();
 
-	delete g_Vulkan;
-	g_Vulkan = nullptr;
+	g_Vulkan->DestroyInstance();
+
+	// We keep the g_Vulkan context around to avoid invalidating a ton of pointers around the app.
 
 	finalize_glslang();
+	ILOG("AndroidVulkanContext::Shutdown completed");
 }
 
 void AndroidVulkanContext::SwapBuffers() {
 }
 
 void AndroidVulkanContext::Resize() {
-	g_Vulkan->WaitUntilQueueIdle();
+	ILOG("AndroidVulkanContext::Resize begin (%d, %d)", g_Vulkan->GetBackbufferWidth(), g_Vulkan->GetBackbufferHeight());
+
+	draw_->HandleEvent(Draw::Event::LOST_BACKBUFFER, g_Vulkan->GetBackbufferWidth(), g_Vulkan->GetBackbufferHeight());
 	g_Vulkan->DestroyObjects();
 
 	// backbufferResize updated these values.	TODO: Notify another way?
 	g_Vulkan->ReinitSurfaceAndroid(pixel_xres, pixel_yres);
-	g_Vulkan->InitObjects(g_Vulkan);
+	g_Vulkan->InitObjects();
+	draw_->HandleEvent(Draw::Event::GOT_BACKBUFFER, g_Vulkan->GetBackbufferWidth(), g_Vulkan->GetBackbufferHeight());
+	ILOG("AndroidVulkanContext::Resize end (%d, %d)", g_Vulkan->GetBackbufferWidth(), g_Vulkan->GetBackbufferHeight());
 }
 
 void AndroidVulkanContext::SwapInterval(int interval) {
@@ -712,6 +758,9 @@ extern "C" void Java_org_ppsspp_ppsspp_NativeRenderer_displayInit(JNIEnv * env, 
 extern "C" void JNICALL Java_org_ppsspp_ppsspp_NativeApp_backbufferResize(JNIEnv *, jclass, jint bufw, jint bufh, jint format) {
 	ILOG("NativeApp.backbufferResize(%d x %d)", bufw, bufh);
 
+	bool new_size = pixel_xres != bufw || pixel_yres != bufh;
+	int old_w = pixel_xres;
+	int old_h = pixel_yres;
 	// pixel_*res is the backbuffer resolution.
 	pixel_xres = bufw;
 	pixel_yres = bufh;
@@ -738,7 +787,12 @@ extern "C" void JNICALL Java_org_ppsspp_ppsspp_NativeApp_backbufferResize(JNIEnv
 	ILOG("dp_xres=%d dp_yres=%d", dp_xres, dp_yres);
 	ILOG("pixel_xres=%d pixel_yres=%d", pixel_xres, pixel_yres);
 
-	NativeResized();
+	if (new_size) {
+		ILOG("Size change detected (previously %d,%d) - calling NativeResized()", old_w, old_h);
+		NativeResized();
+	} else {
+		ILOG("Size didn't change.");
+	}
 }
 
 
@@ -1107,7 +1161,7 @@ retry:
 		ProcessFrameCommands(env);
 	}
 
-	ILOG("After render loop.");
+	ILOG("Leaving EGL/Vulkan render loop.");
 	g_gameInfoCache->WorkQueue()->Flush();
 
 	NativeDeviceLost();

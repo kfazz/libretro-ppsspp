@@ -33,6 +33,7 @@
 #include <unordered_map>
 
 #include "Common/Hashmaps.h"
+#include "Common/Vulkan/VulkanMemory.h"
 
 #include "GPU/Vulkan/VulkanUtil.h"
 
@@ -113,6 +114,8 @@ public:
 	u8 flags = 0;
 };
 
+class VulkanRenderManager;
+
 // Handles transform, lighting and drawing.
 class DrawEngineVulkan : public DrawEngineCommon {
 public:
@@ -135,10 +138,7 @@ public:
 	}
 
 	void DeviceLost();
-	void DeviceRestore(VulkanContext *vulkan);
-
-	void SetupVertexDecoder(u32 vertType);
-	void SetupVertexDecoderInternal(u32 vertType);
+	void DeviceRestore(VulkanContext *vulkan, Draw::DrawContext *draw);
 
 	// So that this can be inlined
 	void Flush() {
@@ -146,8 +146,6 @@ public:
 			return;
 		DoFlush();
 	}
-
-	bool IsCodePtrVertexDecoder(const u8 *ptr) const;
 
 	void DispatchFlush() override { Flush(); }
 	void DispatchSubmitPrim(void *verts, void *inds, GEPrimitiveType prim, int vertexCount, u32 vertType, int *bytesRead) override {
@@ -163,18 +161,25 @@ public:
 
 	void DirtyAllUBOs();
 
+	void DirtyPipeline() {
+		lastPipeline_ = nullptr;
+	}
+
 	VulkanPushBuffer *GetPushBufferForTextureData() {
-		return frame_[curFrame_].pushUBO;
+		return frame_[vulkan_->GetCurFrame()].pushUBO;
 	}
 
 	const DrawEngineVulkanStats &GetStats() const {
 		return stats_;
 	}
 
+	void SetLineWidth(float lineWidth);
+
 private:
 	struct FrameData;
-	void ApplyDrawStateLate(VkCommandBuffer cmd, bool applyStencilRef, uint8_t stencilRef);
+	void ApplyDrawStateLate(VulkanRenderManager *renderManager, bool applyStencilRef, uint8_t stencilRef, bool useBlendConstant);
 	void ConvertStateToVulkanKey(FramebufferManagerVulkan &fbManager, ShaderManagerVulkan *shaderManager, int prim, VulkanPipelineRasterStateKey &key, VulkanDynamicState &dynState);
+	void ResetShaderBlending();
 
 	void InitDeviceObjects();
 	void DestroyDeviceObjects();
@@ -185,7 +190,7 @@ private:
 	void DoFlush();
 	void UpdateUBOs(FrameData *frame);
 
-	VkDescriptorSet GetOrCreateDescriptorSet(VkImageView imageView, VkSampler sampler, VkBuffer base, VkBuffer light, VkBuffer bone);
+	VkDescriptorSet GetOrCreateDescriptorSet(VkImageView imageView, VkSampler sampler, VkBuffer base, VkBuffer light, VkBuffer bone, bool tess);
 
 	VulkanContext *vulkan_;
 	Draw::DrawContext *draw_;
@@ -193,9 +198,12 @@ private:
 	// We use a single descriptor set layout for all PSP draws.
 	VkDescriptorSetLayout descriptorSetLayout_;
 	VkPipelineLayout pipelineLayout_;
-	VkCommandBuffer lastCmd_ = VK_NULL_HANDLE;
 	VulkanPipeline *lastPipeline_;
 	VkDescriptorSet lastDs_ = VK_NULL_HANDLE;
+
+	// Secondary texture for shader blending
+	VkImageView boundSecondary_ = VK_NULL_HANDLE;
+	VkSampler samplerSecondary_ = VK_NULL_HANDLE;
 
 	PrehashMap<VertexArrayInfoVulkan *, nullptr> vai_;
 	VulkanPushBuffer *vertexCache_;
@@ -225,7 +233,6 @@ private:
 	};
 
 	GEPrimitiveType lastPrim_ = GE_PRIM_INVALID;
-	int curFrame_;
 	FrameData frame_[VulkanContext::MAX_INFLIGHT_FRAMES];
 
 	// Other
@@ -234,16 +241,14 @@ private:
 	TextureCacheVulkan *textureCache_ = nullptr;
 	FramebufferManagerVulkan *framebufferManager_ = nullptr;
 
-	VkSampler depalSampler_;
-
 	// State cache
 	uint64_t dirtyUniforms_;
 	uint32_t baseUBOOffset;
 	uint32_t lightUBOOffset;
 	uint32_t boneUBOOffset;
 	VkBuffer baseBuf, lightBuf, boneBuf;
-	VkImageView imageView;
-	VkSampler sampler;
+	VkImageView imageView = VK_NULL_HANDLE;
+	VkSampler sampler = VK_NULL_HANDLE;
 
 	// Null texture
 	VulkanTexture *nullTexture_ = nullptr;
@@ -254,57 +259,36 @@ private:
 	VulkanPipelineRasterStateKey pipelineKey_{};
 	VulkanDynamicState dynState_{};
 
+	int tessOffset_ = 0;
+
 	// Hardware tessellation
 	class TessellationDataTransferVulkan : public TessellationDataTransfer {
-	private:
-		VulkanContext *vulkan;
-		VulkanTexture *data_tex[3];
-		VkSampler sampler;
 	public:
-		TessellationDataTransferVulkan(VulkanContext *vulkan) 
-			: TessellationDataTransfer(), vulkan(vulkan), data_tex(), sampler() {
-			for (int i = 0; i < 3; i++)
-				data_tex[i] = new VulkanTexture(vulkan);
+		TessellationDataTransferVulkan(VulkanContext *vulkan, Draw::DrawContext *draw);
+		~TessellationDataTransferVulkan();
 
-			CreateSampler();
-		}
-		~TessellationDataTransferVulkan() {
-			for (int i = 0; i < 3; i++)
-				delete data_tex[i];
-
-			vulkan->Delete().QueueDeleteSampler(sampler);
-		}
+		void SetPushBuffer(VulkanPushBuffer *push) { push_ = push; }
 		void SendDataToShader(const float *pos, const float *tex, const float *col, int size, bool hasColor, bool hasTexCoords) override;
-		void PrepareBuffers(float *&pos, float *&tex, float *&col, int size, bool hasColor, bool hasTexCoords) override;
-		VulkanTexture *GetTexture(int i) const { return data_tex[i]; }
-		VkSampler GetSampler() const { return sampler; }
-		void CreateSampler() {
-			VkSamplerCreateInfo samp = { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
-			samp.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-			samp.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-			samp.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-			samp.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
-			samp.compareOp = VK_COMPARE_OP_NEVER;
-			samp.flags = 0;
-			samp.magFilter =VK_FILTER_NEAREST;
-			samp.minFilter = VK_FILTER_NEAREST;
-			samp.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+		void PrepareBuffers(float *&pos, float *&tex, float *&col, int &posStride, int &texStride, int &colStride, int size, bool hasColor, bool hasTexCoords) override;
 
-			if (gstate_c.Supports(GPU_SUPPORTS_ANISOTROPY) && g_Config.iAnisotropyLevel > 0) {
-				// Docs say the min of this value and the supported max are used.
-				samp.maxAnisotropy = 1 << g_Config.iAnisotropyLevel;
-				samp.anisotropyEnable = true;
-			} else {
-				samp.maxAnisotropy = 1.0f;
-				samp.anisotropyEnable = false;
-			}
+		void GetBufferAndOffset(VkBuffer *buf, VkDeviceSize *offset, VkDeviceSize *range) {
+			*buf = buf_;
+			*offset = (VkDeviceSize)offset_;
+			*range = (VkDeviceSize)range_;
 
-			samp.maxLod = 1.0f;
-			samp.minLod = 0.0f;
-			samp.mipLodBias = 0.0f;
-
-			VkResult res = vkCreateSampler(vulkan->GetDevice(), &samp, nullptr, &sampler);
-			assert(res == VK_SUCCESS);
+			buf_ = 0;
+			offset_ = 0;
+			range_ = 0;
 		}
+
+	private:
+		VulkanContext *vulkan_;
+		Draw::DrawContext *draw_;
+		VulkanPushBuffer *push_;  // Updated each frame.
+
+		int size_ = 0;
+		uint32_t offset_ = 0;
+		uint32_t range_ = 0;
+		VkBuffer buf_ = VK_NULL_HANDLE;
 	};
 };

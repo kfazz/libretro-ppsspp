@@ -56,6 +56,7 @@
 
 #include "base/stringutil.h"
 #include "thin3d/thin3d.h"
+#include "thin3d/VulkanRenderManager.h"
 #include "util/text/parsers.h"
 #include "Windows/GPU/WindowsVulkanContext.h"
 
@@ -124,17 +125,9 @@ static VkBool32 VKAPI_CALL Vulkan_Dbg(VkDebugReportFlagsEXT msgFlags, VkDebugRep
 	}
 	message << "[" << pLayerPrefix << "] " << ObjTypeToString(objType) << " Code " << msgCode << " : " << pMsg << "\n";
 
-	if (msgCode == 2)  // Useless perf warning
+	if (msgCode == 2)  // Useless perf warning ("Vertex attribute at location X not consumed by vertex shader")
 		return false;
-
-	// This seems like a bogus result when submitting two command buffers in one go, one creating the image, the other one using it.
-	if (msgCode == 6 && startsWith(pMsg, "Cannot submit cmd buffer using image"))
-		return false;
-	if (msgCode == 11)
-		return false;
-	// Silence "invalid reads of buffer data" - usually just uninitialized color buffers that will immediately get cleared due to our
-	// lacking clearing optimizations.
-	if (msgCode == 15 && objType == VK_DEBUG_REPORT_OBJECT_TYPE_DEVICE_MEMORY_EXT)
+	if (msgCode == 64)  // Another useless perf warning that will be seen less and less as we optimize -  vkCmdClearAttachments() issued on command buffer object 0x00000195296C6D40 prior to any Draw Cmds. It is recommended you use RenderPass LOAD_OP_CLEAR on Attachments prior to any Draw.
 		return false;
 
 #ifdef _WIN32
@@ -180,7 +173,13 @@ bool WindowsVulkanContext::Init(HINSTANCE hInst, HWND hWnd, std::string *error_m
 
 	Version gitVer(PPSSPP_GIT_VERSION);
 	g_Vulkan = new VulkanContext();
-	if (VK_SUCCESS != g_Vulkan->CreateInstance("PPSSPP", gitVer.ToInteger(), (g_validate_ ? VULKAN_FLAG_VALIDATE : 0) | VULKAN_FLAG_PRESENT_MAILBOX)) {
+
+	// int vulkanFlags = VULKAN_FLAG_PRESENT_FIFO_RELAXED;
+	int vulkanFlags = VULKAN_FLAG_PRESENT_MAILBOX;
+	if (g_validate_) {
+		vulkanFlags |= VULKAN_FLAG_VALIDATE;
+	}
+	if (VK_SUCCESS != g_Vulkan->CreateInstance("PPSSPP", gitVer.ToInteger(), vulkanFlags)) {
 		*error_message = g_Vulkan->InitError();
 		return false;
 	}
@@ -197,17 +196,28 @@ bool WindowsVulkanContext::Init(HINSTANCE hInst, HWND hWnd, std::string *error_m
 		g_Vulkan->InitDebugMsgCallback(&Vulkan_Dbg, bits, &g_LogOptions);
 	}
 	g_Vulkan->InitSurfaceWin32(hInst, hWnd);
-	if (!g_Vulkan->InitObjects(true)) {
+	if (!g_Vulkan->InitObjects()) {
 		Shutdown();
 		return false;
 	}
 
 	draw_ = Draw::T3DCreateVulkanContext(g_Vulkan);
+	bool success = draw_->CreatePresets();
+	assert(success);  // Doesn't fail, we include the compiler.
+	draw_->HandleEvent(Draw::Event::GOT_BACKBUFFER, g_Vulkan->GetBackbufferWidth(), g_Vulkan->GetBackbufferHeight());
 
+	VulkanRenderManager *renderManager = (VulkanRenderManager *)draw_->GetNativeObject(Draw::NativeObject::RENDER_MANAGER);
+	if (!renderManager->HasBackbuffers()) {
+		Shutdown();
+		return false;
+	}
 	return true;
 }
 
 void WindowsVulkanContext::Shutdown() {
+	if (draw_)
+		draw_->HandleEvent(Draw::Event::LOST_BACKBUFFER, g_Vulkan->GetBackbufferWidth(), g_Vulkan->GetBackbufferHeight());
+
 	delete draw_;
 	draw_ = nullptr;
 
@@ -215,6 +225,8 @@ void WindowsVulkanContext::Shutdown() {
 	g_Vulkan->DestroyObjects();
 	g_Vulkan->DestroyDevice();
 	g_Vulkan->DestroyDebugMsgCallback();
+	g_Vulkan->DestroyInstance();
+
 	delete g_Vulkan;
 	g_Vulkan = nullptr;
 
@@ -225,11 +237,13 @@ void WindowsVulkanContext::SwapBuffers() {
 }
 
 void WindowsVulkanContext::Resize() {
-	g_Vulkan->WaitUntilQueueIdle();
+	draw_->HandleEvent(Draw::Event::LOST_BACKBUFFER, g_Vulkan->GetBackbufferWidth(), g_Vulkan->GetBackbufferHeight());
 	g_Vulkan->DestroyObjects();
 
 	g_Vulkan->ReinitSurfaceWin32();
-	g_Vulkan->InitObjects(true);
+
+	g_Vulkan->InitObjects();
+	draw_->HandleEvent(Draw::Event::GOT_BACKBUFFER, g_Vulkan->GetBackbufferWidth(), g_Vulkan->GetBackbufferHeight());
 }
 
 void WindowsVulkanContext::SwapInterval(int interval) {

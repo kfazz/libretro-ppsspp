@@ -19,8 +19,6 @@
 //#define SHADERLOG
 #endif
 
-#include <map>
-
 #include "base/logging.h"
 #include "math/lin/matrix4x4.h"
 #include "math/math_util.h"
@@ -29,6 +27,7 @@
 #include "util/text/utf8.h"
 #include "Common/Vulkan/VulkanContext.h"
 #include "Common/Vulkan/VulkanMemory.h"
+#include "Common/Log.h"
 #include "Common/Common.h"
 #include "Core/Config.h"
 #include "Core/Reporting.h"
@@ -203,7 +202,7 @@ void ShaderManagerVulkan::DirtyShader() {
 	DirtyLastShader();
 }
 
-void ShaderManagerVulkan::DirtyLastShader() { // disables vertex arrays
+void ShaderManagerVulkan::DirtyLastShader() {
 	lastVShader_ = nullptr;
 	lastFShader_ = nullptr;
 	gstate_c.Dirty(DIRTY_VERTEXSHADER_STATE | DIRTY_FRAGMENTSHADER_STATE);
@@ -244,6 +243,7 @@ void ShaderManagerVulkan::GetShaders(int prim, u32 vertType, VulkanVertexShader 
 	if (lastVShader_ != nullptr && lastFShader_ != nullptr && VSID == lastVSID_ && FSID == lastFSID_) {
 		*vshader = lastVShader_;
 		*fshader = lastFShader_;
+		_dbg_assert_msg_(G3D, (*vshader)->UseHWTransform() == useHWTransform, "Bad vshader was cached");
 		// Already all set, no need to look up in shader maps.
 		return;
 	}
@@ -273,6 +273,7 @@ void ShaderManagerVulkan::GetShaders(int prim, u32 vertType, VulkanVertexShader 
 
 	*vshader = vs;
 	*fshader = fs;
+	_dbg_assert_msg_(G3D, (*vshader)->UseHWTransform() == useHWTransform, "Bad vshader was computed");
 }
 
 std::vector<std::string> ShaderManagerVulkan::DebugGetShaderIDs(DebugShaderType type) {

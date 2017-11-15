@@ -61,6 +61,7 @@ private:
 	DenseHashMap<SamplerCacheKey, VkSampler, (VkSampler)VK_NULL_HANDLE> cache_;
 };
 
+class Vulkan2D;
 
 class TextureCacheVulkan : public TextureCacheCommon {
 public:
@@ -71,7 +72,7 @@ public:
 	void EndFrame();
 
 	void DeviceLost();
-	void DeviceRestore(VulkanContext *vulkan);
+	void DeviceRestore(VulkanContext *vulkan, Draw::DrawContext *draw);
 
 	void SetFramebufferManager(FramebufferManagerVulkan *fbManager);
 	void SetDepalShaderCache(DepalShaderCacheVulkan *dpCache) {
@@ -82,6 +83,10 @@ public:
 	}
 	void SetDrawEngine(DrawEngineVulkan *td) {
 		drawEngine_ = td;
+	}
+	void SetVulkan2D(Vulkan2D *vk2d);
+	void SetPushBuffer(VulkanPushBuffer *push) {
+		push_ = push;
 	}
 
 	void ForgetLastTexture() override {
@@ -96,9 +101,11 @@ public:
 
 	void GetVulkanHandles(VkImageView &imageView, VkSampler &sampler) {
 		imageView = imageView_;
-		sampler = sampler_;
+		sampler = curSampler_;
 	}
 	void SetFramebufferSamplingParams(u16 bufferWidth, u16 bufferHeight, SamplerCacheKey &key);
+
+	bool GetCurrentTextureDebug(GPUDebugBuffer &buffer, int level) override;
 
 protected:
 	void BindTexture(TexCacheEntry *entry) override;
@@ -115,27 +122,31 @@ private:
 	void ApplyTextureFramebuffer(TexCacheEntry *entry, VirtualFramebuffer *framebuffer) override;
 	void BuildTexture(TexCacheEntry *const entry, bool replaceImages) override;
 
-	VulkanContext *vulkan_;
-	VulkanDeviceAllocator *allocator_;
+	VulkanContext *vulkan_ = nullptr;
+	VulkanDeviceAllocator *allocator_ = nullptr;
+	VulkanPushBuffer *push_ = nullptr;
 
 	SamplerCache samplerCache_;
 
 	TextureScalerVulkan scaler;
 
-	CachedTextureVulkan *lastBoundTexture;
+	CachedTextureVulkan *lastBoundTexture = nullptr;
 
-	int decimationCounter_;
-	int texelsScaledThisFrame_;
-	int timesInvalidatedAllThisFrame_;
+	int decimationCounter_ = 0;
+	int texelsScaledThisFrame_ = 0;
+	int timesInvalidatedAllThisFrame_ = 0;
 
 	FramebufferManagerVulkan *framebufferManagerVulkan_;
 	DepalShaderCacheVulkan *depalShaderCache_;
 	ShaderManagerVulkan *shaderManagerVulkan_;
 	DrawEngineVulkan *drawEngine_;
+	Vulkan2D *vulkan2D_;
 
 	// Bound state to emulate an API similar to the others
 	VkImageView imageView_ = VK_NULL_HANDLE;
-	VkSampler sampler_ = VK_NULL_HANDLE;
+	VkSampler curSampler_ = VK_NULL_HANDLE;
+
+	VkSampler samplerNearest_ = VK_NULL_HANDLE;
 };
 
 VkFormat getClutDestFormatVulkan(GEPaletteFormat format);

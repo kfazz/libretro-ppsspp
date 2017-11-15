@@ -9,7 +9,7 @@ else()
     GL/glew.h
     GL/glxew.h
     GL/wglew.h
-    glew.c
+    ${GLEW_LIBRARY}
   )
   add_library(Ext::GLEW ALIAS glew)
   target_link_libraries(glew PUBLIC ${OPENGL_LIBRARIES})
