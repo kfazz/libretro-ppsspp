@@ -150,6 +150,7 @@ SOURCES_CXX += $(GPUCOMMONDIR)/TextureDecoder.cpp \
 				$(GPUDIR)/Common/TextureCacheCommon.cpp \
 				$(GPUDIR)/Common/TextureScalerCommon.cpp \
 				$(GPUDIR)/Common/SoftwareTransformCommon.cpp \
+				$(GPUDIR)/Common/StencilCommon.cpp \
 				$(GPUDIR)/Software/TransformUnit.cpp \
 				$(GPUDIR)/Software/SoftGpu.cpp \
 				$(GPUDIR)/Software/Sampler.cpp \
@@ -247,6 +248,7 @@ SOURCES_CXX += $(EXTDIR)/native/file/chunk_file.cpp \
 	       $(NATIVEDIR)/util/text/wrap_text.cpp \
 	       $(NATIVEDIR)/ext/jpge/jpgd.cpp \
 	       $(NATIVEDIR)/ext/jpge/jpge.cpp \
+	       $(COREDIR)/AVIDump.cpp \
 	       $(COREDIR)/Config.cpp \
 	       $(COREDIR)/TextureReplacer.cpp \
 	       $(COREDIR)/Core.cpp \
