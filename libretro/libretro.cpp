@@ -750,9 +750,6 @@ static void check_variables(void)
    else
       g_Config.bTexDeposterize = false;
 
-
-   g_Config.bSeparateCPUThread = false;
-
    var.key = "ppsspp_separate_io_thread";
    var.value = NULL;
 
