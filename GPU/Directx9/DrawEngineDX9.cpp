@@ -155,9 +155,6 @@ static const DeclTypeInfo VComp[] = {
 	{0, "UNUSED_DEC_U16_2" },	// 	DEC_U16_2,
 	{D3DDECLTYPE_USHORT4N	,"D3DDECLTYPE_USHORT4N "}, // DEC_U16_3,
 	{D3DDECLTYPE_USHORT4N	,"D3DDECLTYPE_USHORT4N "}, // DEC_U16_4,
-	// Not supported in regular DX9 so faking, will cause graphics bugs until worked around
-	{0,"UNUSED_DEC_U8A_2"}, // DEC_U8A_2,
-	{0,"UNUSED_DEC_U16A_2" }, // DEC_U16A_2,
 };
 
 static void VertexAttribSetup(D3DVERTEXELEMENT9 * VertexElement, u8 fmt, u8 offset, u8 usage, u8 usage_index = 0) {
@@ -705,10 +702,6 @@ rotateVBO:
 	gstate_c.vertBounds.maxV = 0;
 
 	host->GPUNotifyDraw();
-}
-
-bool DrawEngineDX9::IsCodePtrVertexDecoder(const u8 *ptr) const {
-	return decJitCache_->IsInSpace(ptr);
 }
 
 void DrawEngineDX9::TessellationDataTransferDX9::SendDataToShader(const float * pos, const float * tex, const float * col, int size, bool hasColor, bool hasTexCoords)

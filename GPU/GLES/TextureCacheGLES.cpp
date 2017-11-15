@@ -508,14 +508,12 @@ void TextureCacheGLES::ApplyTextureFramebuffer(TexCacheEntry *entry, VirtualFram
 
 		TexCacheEntry::Status alphaStatus = CheckAlpha(clutBuf_, getClutDestFormat(clutFormat), clutTotalColors, clutTotalColors, 1);
 		gstate_c.SetTextureFullAlpha(alphaStatus == TexCacheEntry::STATUS_ALPHA_FULL);
-		gstate_c.SetTextureSimpleAlpha(alphaStatus == TexCacheEntry::STATUS_ALPHA_SIMPLE);
 	} else {
 		entry->status &= ~TexCacheEntry::STATUS_DEPALETTIZE;
 
 		framebufferManagerGL_->BindFramebufferAsColorTexture(0, framebuffer, BINDFBCOLOR_MAY_COPY_WITH_UV | BINDFBCOLOR_APPLY_TEX_OFFSET);
 
 		gstate_c.SetTextureFullAlpha(gstate.getTextureFormat() == GE_TFMT_5650);
-		gstate_c.SetTextureSimpleAlpha(gstate_c.textureFullAlpha);
 	}
 
 	framebufferManagerGL_->RebindFramebuffer();
@@ -869,17 +867,18 @@ void TextureCacheGLES::LoadTextureLevel(TexCacheEntry &entry, ReplacedTexture &r
 
 		// Textures are always aligned to 16 bytes bufw, so this could safely be 4 always.
 		texByteAlign = dstFmt == GL_UNSIGNED_BYTE ? 4 : 2;
-
 		pixelData = (u32 *)finalBuf;
-		if (scaleFactor > 1)
-			scaler.Scale(pixelData, dstFmt, w, h, scaleFactor);
 
+		// We check before scaling since scaling shouldn't invent alpha from a full alpha texture.
 		if ((entry.status & TexCacheEntry::STATUS_CHANGE_FREQUENT) == 0) {
 			TexCacheEntry::Status alphaStatus = CheckAlpha(pixelData, dstFmt, useUnpack ? bufw : w, w, h);
 			entry.SetAlphaStatus(alphaStatus, level);
 		} else {
 			entry.SetAlphaStatus(TexCacheEntry::STATUS_ALPHA_UNKNOWN);
 		}
+
+		if (scaleFactor > 1)
+			scaler.Scale(pixelData, dstFmt, w, h, scaleFactor);
 
 		if (replacer_.Enabled()) {
 			ReplacedTextureDecodeInfo replacedInfo;
@@ -1024,4 +1023,37 @@ bool TextureCacheGLES::DecodeTexture(u8* output, const GPUgstate &state) {
 
 	gstate = oldState;
 	return true;
+}
+
+bool TextureCacheGLES::GetCurrentTextureDebug(GPUDebugBuffer &buffer, int level) {
+#ifndef USING_GLES2
+	GPUgstate saved;
+	if (level != 0) {
+		saved = gstate;
+
+		// The way we set textures is a bit complex.  Let's just override level 0.
+		gstate.texsize[0] = gstate.texsize[level];
+		gstate.texaddr[0] = gstate.texaddr[level];
+		gstate.texbufwidth[0] = gstate.texbufwidth[level];
+	}
+
+	SetTexture(true);
+	ApplyTexture();
+	int w = gstate.getTextureWidth(level);
+	int h = gstate.getTextureHeight(level);
+	glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &w);
+	glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &h);
+
+	if (level != 0) {
+		gstate = saved;
+	}
+
+	buffer.Allocate(w, h, GE_FORMAT_8888, false);
+	glPixelStorei(GL_PACK_ALIGNMENT, 4);
+	glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, buffer.GetData());
+
+	return true;
+#else
+	return false;
+#endif
 }

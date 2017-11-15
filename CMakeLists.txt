@@ -760,7 +760,10 @@ elseif(TARGET SDL2::SDL2)
 		set(nativeExtra ${nativeExtra} SDL/SDLMain.h SDL/SDLMain.mm)
 		set(nativeExtraLibs ${nativeExtraLibs} ${COCOA_LIBRARY})
 	elseif(USING_EGL)
-		set(nativeExtraLibs ${nativeExtraLibs} pthread EGL)
+		if(NOT EGL_LIBRARIES)
+			set(EGL_LIBRARIES EGL)
+		endif()
+		set(nativeExtraLibs ${nativeExtraLibs} pthread ${EGL_LIBRARIES})
 	endif()
 	set(TargetBin PPSSPPSDL)
 elseif(WIN32)
@@ -818,7 +821,13 @@ endif()
 
 set(THIN3D_PLATFORMS ext/native/thin3d/thin3d_gl.cpp)
 if(VULKAN)
-  set(THIN3D_PLATFORMS ${THIN3D_PLATFORMS} ext/native/thin3d/thin3d_vulkan.cpp)
+  set(THIN3D_PLATFORMS ${THIN3D_PLATFORMS}
+    ext/native/thin3d/thin3d_vulkan.cpp
+	ext/native/thin3d/VulkanRenderManager.cpp
+	ext/native/thin3d/VulkanRenderManager.h
+	ext/native/thin3d/VulkanQueueRunner.cpp
+	ext/native/thin3d/VulkanQueueRunner.h
+	ext/native/thin3d/DataFormat.h)
 endif()
 if(WIN32)
   set(THIN3D_PLATFORMS ${THIN3D_PLATFORMS}
@@ -1183,6 +1192,7 @@ set(GPU_VULKAN
 	GPU/Vulkan/ShaderManagerVulkan.h
 	GPU/Vulkan/StateMappingVulkan.cpp
 	GPU/Vulkan/StateMappingVulkan.h
+	GPU/Vulkan/StencilBufferVulkan.cpp
 	GPU/Vulkan/TextureCacheVulkan.cpp
 	GPU/Vulkan/TextureCacheVulkan.h
 	GPU/Vulkan/TextureScalerVulkan.cpp
@@ -1272,8 +1282,12 @@ set(GPU_SOURCES
 	GPU/Common/ShaderUniforms.cpp
 	GPU/Common/ShaderUniforms.h
 	GPU/Common/ShaderCommon.h
+	GPU/Common/ShaderTranslation.cpp
+	GPU/Common/ShaderTranslation.h
 	GPU/Common/SplineCommon.cpp
 	GPU/Common/SplineCommon.h
+	GPU/Common/StencilCommon.cpp
+	GPU/Common/StencilCommon.h
 	GPU/Common/SoftwareTransformCommon.cpp
 	GPU/Common/SoftwareTransformCommon.h
 	GPU/Common/VertexDecoderCommon.cpp
@@ -1631,7 +1645,7 @@ add_library(${CoreLibName} ${CoreLinkType}
 if(ANDROID)
   set(CoreExtraLibs ${CoreExtraLibs} android)
   if(X86_64)
-    set(CoreExtraLibs -Wl,--gc-sections -Wl,--exclude-libs,ALL)
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-Bsymbolic")
   endif()
 endif()	
  

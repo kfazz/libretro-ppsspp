@@ -37,7 +37,7 @@ bool VulkanPushBuffer::AddBuffer() {
 	VkBufferCreateInfo b = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
 	b.size = size_;
 	b.flags = 0;
-	b.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+	b.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 	b.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 	b.queueFamilyIndexCount = 0;
 	b.pQueueFamilyIndices = nullptr;
@@ -47,10 +47,16 @@ bool VulkanPushBuffer::AddBuffer() {
 		return false;
 	}
 
+	// Make validation happy.
+	VkMemoryRequirements reqs;
+	vkGetBufferMemoryRequirements(device_, info.buffer, &reqs);
+	// TODO: We really should use memoryTypeIndex here..
+
 	// Okay, that's the buffer. Now let's allocate some memory for it.
 	VkMemoryAllocateInfo alloc = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+	// TODO: Should check here that memoryTypeIndex_ matches reqs.memoryTypeBits.
 	alloc.memoryTypeIndex = memoryTypeIndex_;
-	alloc.allocationSize = size_;
+	alloc.allocationSize = reqs.size;
 
 	res = vkAllocateMemory(device_, &alloc, nullptr, &info.deviceMemory);
 	if (VK_SUCCESS != res) {
@@ -72,7 +78,6 @@ void VulkanPushBuffer::Destroy(VulkanContext *vulkan) {
 		vulkan->Delete().QueueDeleteBuffer(info.buffer);
 		vulkan->Delete().QueueDeleteDeviceMemory(info.deviceMemory);
 	}
-
 	buffers_.clear();
 }
 
@@ -143,6 +148,7 @@ void VulkanDeviceAllocator::Destroy() {
 			}
 		}
 
+		assert(slab.deviceMemory);
 		vulkan_->Delete().QueueDeleteDeviceMemory(slab.deviceMemory);
 	}
 	slabs_.clear();

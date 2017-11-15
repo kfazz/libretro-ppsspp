@@ -53,7 +53,7 @@ void OutputDebugStringUTF8(const char *p);
 
 // Must only be used for logging
 #ifndef APP_NAME
-#define APP_NAME "NativeApp"
+#define APP_NAME "PPSSPP"
 #endif
 
 #ifdef _DEBUG
@@ -88,6 +88,8 @@ const char *GetFn(const char *fn);
 		OutputDebugStringUTF8(temp); \
 	} \
 } while (false)
+
+#define DUMPLOG(x) OutputDebugStringUTF8(x)
 
 #ifdef _DEBUG
 #define DLOG(...) XLOG_IMPL("D", __VA_ARGS__)

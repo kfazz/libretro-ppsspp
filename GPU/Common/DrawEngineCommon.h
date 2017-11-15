@@ -71,6 +71,10 @@ public:
 
 	void SetupVertexDecoder(u32 vertType);
 
+	bool IsCodePtrVertexDecoder(const u8 *ptr) const {
+		return decJitCache_->IsInSpace(ptr);
+	}
+
 protected:
 	virtual void ClearTrackedVertexArrays() {}
 
@@ -151,14 +155,19 @@ protected:
 	int numPatches;
 	class TessellationDataTransfer {
 	protected:
+		// TODO: These aren't used by all backends.
 		int prevSize;
 		int prevSizeTex;
 		int prevSizeCol;
 	public:
 		virtual ~TessellationDataTransfer() {}
 		// Send spline/bezier's control points to vertex shader through floating point texture.
+		virtual void PrepareBuffers(float *&pos, float *&tex, float *&col, int &posStride, int &texStride, int &colStride, int size, bool hasColor, bool hasTexCoords) {
+			posStride = 4;
+			texStride = 4;
+			colStride = 4;
+		}
 		virtual void SendDataToShader(const float *pos, const float *tex, const float *col, int size, bool hasColor, bool hasTexCoords) = 0;
-		virtual void PrepareBuffers(float *&pos, float *&tex, float *&col, int size, bool hasColor, bool hasTexCoords) {};
 	};
 	TessellationDataTransfer *tessDataTransfer;
 };

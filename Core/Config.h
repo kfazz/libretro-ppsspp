@@ -105,6 +105,7 @@ public:
 	bool bUseFFV1;
 	bool bDumpFrames;
 	bool bDumpAudio;
+	bool bSaveLoadResetsAVdumping;
 	bool bEnableLogging;
 	bool bDumpDecryptedEboot;
 	bool bFullscreenOnDoubleclick;
@@ -132,8 +133,6 @@ public:
 	bool bFuncReplacements;
 	bool bHideSlowWarnings;
 
-	// Definitely cannot be changed while game is running.
-	bool bSeparateCPUThread;
 	bool bSeparateSASThread;
 	bool bSeparateIOThread;
 	int iIOTimingMethod;
@@ -420,6 +419,7 @@ public:
 	int iButtonPreference;
 	int iLockParentalLevel;
 	bool bEncryptSave;
+	bool bSavedataUpgrade;
 
 	// Networking
 	bool bEnableWlan;
