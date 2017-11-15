@@ -35,6 +35,7 @@
 #endif
 
 #include <cstring>
+#include <cassert>
 
 #ifdef _WIN32
 // for MAX_PATH
@@ -1190,6 +1191,9 @@ void retro_run(void)
       {
 	      libretro_draw         = Draw::T3DCreateGLContext();
 	      coreParam.thin3d      = libretro_draw;
+
+	      bool success = libretro_draw->CreatePresets();
+	      assert(success);
 
 	      if(!PSP_Init(coreParam, &error_string))
 	      {
