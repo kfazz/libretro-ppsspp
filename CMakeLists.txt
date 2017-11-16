@@ -116,6 +116,7 @@ option(USE_SYSTEM_FFMPEG "Dynamically link against system FFMPEG" ${USE_SYSTEM_F
 
 if(LIBRETRO)
 	add_definitions(-D__LIBRETRO__)
+	add_definitions(-DGLEW_NO_GLU)
 	add_definitions(-fPIC)
 
 	include_directories(libretro)
