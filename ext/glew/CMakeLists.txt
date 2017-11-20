@@ -1,4 +1,6 @@
-find_package(GLEW)
+if(NOT LIBRETRO)
+  find_package(GLEW)
+endif()
 if(GLEW_FOUND)
   add_library(system_glew INTERFACE)
   add_library(Ext::GLEW ALIAS system_glew)
