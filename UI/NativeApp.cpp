@@ -43,6 +43,7 @@
 #endif
 
 #include "base/display.h"
+#include "base/timeutil.h"
 #include "base/logging.h"
 #include "base/NativeApp.h"
 #include "file/vfs.h"
@@ -302,12 +303,6 @@ bool CheckFontIsUsable(const wchar_t *fontFace) {
 #endif
 
 void NativeInit(int argc, const char *argv[], const char *savegame_dir, const char *external_dir, const char *cache_dir, bool fs) {
-#ifdef ANDROID_NDK_PROFILER
-	setenv("CPUPROFILE_FREQUENCY", "500", 1);
-	setenv("CPUPROFILE", "/sdcard/gmon.out", 1);
-	monstartup("ppsspp_jni.so");
-#endif
-
 	net::Init();  // This needs to happen before we load the config. So on Windows we also run it in Main. It's fine to call multiple times.
 
 	InitFastMath(cpu_info.bNEON);
@@ -400,6 +395,8 @@ void NativeInit(int argc, const char *argv[], const char *savegame_dir, const ch
 	const char *fileToLog = 0;
 	const char *stateToLoad = 0;
 
+	bool gotBootFilename = false;
+
 	// Parse command line
 	LogTypes::LOG_LEVELS logLevel = LogTypes::LINFO;
 	for (int i = 1; i < argc; i++) {
@@ -441,17 +438,34 @@ void NativeInit(int argc, const char *argv[], const char *savegame_dir, const ch
 				break;
 			}
 		} else {
-			if (boot_filename.empty()) {
-				boot_filename = argv[i];
-#ifdef _WIN32
-				boot_filename = ReplaceAll(boot_filename, "\\", "/");
-#endif
-				skipLogo = true;
+			// This parameter should be a boot filename. Only accept it if we
+			// don't already have one.
+			if (!gotBootFilename) {
+				gotBootFilename = true;
+				ILOG("Boot filename found in args: '%s'", argv[i]);
 
-				std::unique_ptr<FileLoader> fileLoader(ConstructFileLoader(boot_filename));
-				if (!fileLoader->Exists()) {
-					fprintf(stderr, "File not found: %s\n", boot_filename.c_str());
-					exit(1);
+				bool okToLoad = true;
+				if (System_GetPropertyBool(SYSPROP_SUPPORTS_PERMISSIONS)) {
+					PermissionStatus status = System_GetPermissionStatus(SYSTEM_PERMISSION_STORAGE);
+					if (status != PERMISSION_STATUS_GRANTED) {
+						ELOG("Storage permission not granted. Launching without argument.");
+						okToLoad = false;
+					} else {
+						ILOG("Storage permission granted.");
+					}
+				}
+				if (okToLoad) {
+					boot_filename = argv[i];
+#ifdef _WIN32
+					boot_filename = ReplaceAll(boot_filename, "\\", "/");
+#endif
+					skipLogo = true;
+
+					std::unique_ptr<FileLoader> fileLoader(ConstructFileLoader(boot_filename));
+					if (!fileLoader->Exists()) {
+						fprintf(stderr, "File not found: %s\n", boot_filename.c_str());
+						exit(1);
+					}
 				}
 			} else {
 				fprintf(stderr, "Can only boot one file");
@@ -460,7 +474,7 @@ void NativeInit(int argc, const char *argv[], const char *savegame_dir, const ch
 		}
 	}
 
-	if (fileToLog != NULL)
+	if (fileToLog)
 		LogManager::GetInstance()->ChangeFileLog(fileToLog);
 
 #ifndef _WIN32
@@ -874,8 +888,12 @@ void HandleGlobalMessage(const std::string &msg, const std::string &value) {
 		std::string setString = inputboxValue.size() > 1 ? inputboxValue[1] : "";
 		if (inputboxValue[0] == "IP")
 			g_Config.proAdhocServer = setString;
-		if (inputboxValue[0] == "nickname")
+		else if (inputboxValue[0] == "nickname")
 			g_Config.sNickName = setString;
+		else if (inputboxValue[0] == "remoteiso_subdir")
+			g_Config.sRemoteISOSubdir = setString;
+		else if (inputboxValue[0] == "remoteiso_server")
+			g_Config.sLastRemoteISOServer = setString;
 		inputboxValue.clear();
 	}
 	if (msg == "bgImage_updated") {

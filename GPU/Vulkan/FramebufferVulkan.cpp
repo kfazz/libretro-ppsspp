@@ -180,7 +180,9 @@ void FramebufferManagerVulkan::NotifyClear(bool clearColor, bool clearAlpha, boo
 	if (clearAlpha)
 		mask |= Draw::FBChannel::FB_STENCIL_BIT;
 
-	draw_->Clear(mask, color, depth, 0);
+	// Note that since the alpha channel and the stencil channel are shared on the PSP,
+	// when we clear alpha, we also clear stencil to the same value.
+	draw_->Clear(mask, color, depth, color >> 24);
 	if (clearColor || clearAlpha) {
 		SetColorUpdated(gstate_c.skipDrawReason);
 	}
@@ -365,16 +367,6 @@ void FramebufferManagerVulkan::BindPostShader(const PostShaderUniforms &uniforms
 	cur2DPipeline_ = pipelinePostShader_;
 
 	gstate_c.Dirty(DIRTY_VERTEXSHADER_STATE);
-}
-
-void FramebufferManagerVulkan::RebindFramebuffer() {
-	if (currentRenderVfb_ && currentRenderVfb_->fbo) {
-		draw_->BindFramebufferAsRenderTarget(currentRenderVfb_->fbo, { Draw::RPAction::KEEP, Draw::RPAction::KEEP });
-	} else {
-		// Should this even happen?
-		draw_->BindFramebufferAsRenderTarget(nullptr, { Draw::RPAction::KEEP, Draw::RPAction::KEEP });
-	}
-	gstate_c.Dirty(DIRTY_VIEWPORTSCISSOR_STATE);
 }
 
 int FramebufferManagerVulkan::GetLineWidth() {
