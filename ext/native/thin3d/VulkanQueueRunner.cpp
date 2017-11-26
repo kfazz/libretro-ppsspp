@@ -837,22 +837,6 @@ void VulkanQueueRunner::SetupTransitionToTransferDst(VKRImage &img, VkImageMemor
 }
 
 void VulkanQueueRunner::PerformReadback(const VKRStep &step, VkCommandBuffer cmd) {
-	VKRImage *srcImage;
-	if (step.readback.aspectMask & VK_IMAGE_ASPECT_COLOR_BIT) {
-		srcImage = &step.readback.src->color;
-	} else if (step.readback.aspectMask & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) {
-		srcImage = &step.readback.src->depth;
-	} else {
-		assert(false);
-	}
-
-	VkImageMemoryBarrier barrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
-	VkPipelineStageFlags stage = 0;
-	if (srcImage->layout != VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) {
-		SetupTransitionToTransferSrc(*srcImage, barrier, stage, step.readback.aspectMask);
-		vkCmdPipelineBarrier(cmd, stage, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
-	}
-
 	ResizeReadbackBuffer(sizeof(uint32_t) * step.readback.srcRect.extent.width * step.readback.srcRect.extent.height);
 
 	VkBufferImageCopy region{};
@@ -863,9 +847,55 @@ void VulkanQueueRunner::PerformReadback(const VKRStep &step, VkCommandBuffer cmd
 	region.bufferOffset = 0;
 	region.bufferRowLength = step.readback.srcRect.extent.width;
 	region.bufferImageHeight = step.readback.srcRect.extent.height;
-	vkCmdCopyImageToBuffer(cmd, srcImage->image, srcImage->layout, readbackBuffer_, 1, &region);
+
+	VkImage image;
+	VkImageLayout copyLayout;
+	// Special case for backbuffer readbacks.
+	if (step.readback.src == nullptr) {
+		// We only take screenshots after the main render pass (anything else would be stupid) so we need to transition out of PRESENT,
+		// and then back into it.
+		TransitionImageLayout2(cmd, backbufferImage_, VK_IMAGE_ASPECT_COLOR_BIT,
+			VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+			0, VK_ACCESS_TRANSFER_READ_BIT);
+		copyLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+		image = backbufferImage_;
+	} else {
+		VKRImage *srcImage;
+		if (step.readback.aspectMask & VK_IMAGE_ASPECT_COLOR_BIT) {
+			srcImage = &step.readback.src->color;
+		}
+		else if (step.readback.aspectMask & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) {
+			srcImage = &step.readback.src->depth;
+		}
+		else {
+			assert(false);
+		}
+
+		VkImageMemoryBarrier barrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+		VkPipelineStageFlags stage = 0;
+		if (srcImage->layout != VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) {
+			SetupTransitionToTransferSrc(*srcImage, barrier, stage, step.readback.aspectMask);
+			vkCmdPipelineBarrier(cmd, stage, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+		}
+		image = srcImage->image;
+		copyLayout = srcImage->layout;
+	}
+
+	vkCmdCopyImageToBuffer(cmd, image, copyLayout, readbackBuffer_, 1, &region);
 
 	// NOTE: Can't read the buffer using the CPU here - need to sync first.
+
+	// If we copied from the backbuffer, transition it back.
+	if (step.readback.src == nullptr) {
+		// We only take screenshots after the main render pass (anything else would be stupid) so we need to transition out of PRESENT,
+		// and then back into it.
+		TransitionImageLayout2(cmd, backbufferImage_, VK_IMAGE_ASPECT_COLOR_BIT,
+			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+			VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+			VK_ACCESS_TRANSFER_READ_BIT, 0);
+		copyLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+	}
 }
 
 void VulkanQueueRunner::PerformReadbackImage(const VKRStep &step, VkCommandBuffer cmd) {
@@ -908,9 +938,14 @@ void VulkanQueueRunner::CopyReadbackBuffer(int width, int height, Draw::DataForm
 	const size_t srcPixelSize = DataFormatSizeInBytes(srcFormat);
 
 	VkResult res = vkMapMemory(vulkan_->GetDevice(), readbackMemory_, 0, width * height * srcPixelSize, 0, &mappedData);
-	assert(res == VK_SUCCESS);
+	if (res != VK_SUCCESS) {
+		ELOG("CopyReadbackBuffer: vkMapMemory failed! result=%d", (int)res);
+		return;
+	}
 	if (srcFormat == Draw::DataFormat::R8G8B8A8_UNORM) {
 		ConvertFromRGBA8888(pixels, (const uint8_t *)mappedData, pixelStride, width, width, height, destFormat);
+	} else if (srcFormat == Draw::DataFormat::B8G8R8A8_UNORM) {
+		ConvertFromBGRA8888(pixels, (const uint8_t *)mappedData, pixelStride, width, width, height, destFormat);
 	} else if (srcFormat == destFormat) {
 		uint8_t *dst = pixels;
 		const uint8_t *src = (const uint8_t *)mappedData;
@@ -923,6 +958,7 @@ void VulkanQueueRunner::CopyReadbackBuffer(int width, int height, Draw::DataForm
 		ConvertToD32F(pixels, (const uint8_t *)mappedData, pixelStride, width, width, height, srcFormat);
 	} else {
 		// TODO: Maybe a depth conversion or something?
+		ELOG("CopyReadbackBuffer: Unknown format");
 		assert(false);
 	}
 	vkUnmapMemory(vulkan_->GetDevice(), readbackMemory_);

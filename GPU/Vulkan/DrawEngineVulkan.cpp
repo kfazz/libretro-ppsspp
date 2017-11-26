@@ -250,7 +250,11 @@ void DrawEngineVulkan::DestroyDeviceObjects() {
 	vertexCache_->Destroy(vulkan_);
 	delete vertexCache_;
 	vertexCache_ = nullptr;
-	vai_.Clear();  // Need to clear this to get rid of all remaining references to the dead buffers.
+	// Need to clear this to get rid of all remaining references to the dead buffers.
+	vai_.Iterate([](uint32_t hash, VertexArrayInfoVulkan *vai) {
+		delete vai;
+	});
+	vai_.Clear();
 }
 
 void DrawEngineVulkan::DeviceLost() {
@@ -427,37 +431,7 @@ void DrawEngineVulkan::SubmitPrim(void *verts, void *inds, GEPrimitiveType prim,
 	}
 }
 
-int DrawEngineVulkan::ComputeNumVertsToDecode() const {
-	int vertsToDecode = 0;
-	if (drawCalls[0].indexType == GE_VTYPE_IDX_NONE >> GE_VTYPE_IDX_SHIFT) {
-		for (int i = 0; i < numDrawCalls; i++) {
-			const DeferredDrawCall &dc = drawCalls[i];
-			vertsToDecode += dc.vertexCount;
-		}
-	} else {
-		// TODO: Share this computation with DecodeVertsStep?
-		for (int i = 0; i < numDrawCalls; i++) {
-			const DeferredDrawCall &dc = drawCalls[i];
-			int lastMatch = i;
-			const int total = numDrawCalls;
-			int indexLowerBound = dc.indexLowerBound;
-			int indexUpperBound = dc.indexUpperBound;
-			for (int j = i + 1; j < total; ++j) {
-				if (drawCalls[j].verts != dc.verts)
-					break;
-
-				indexLowerBound = std::min(indexLowerBound, (int)drawCalls[j].indexLowerBound);
-				indexUpperBound = std::max(indexUpperBound, (int)drawCalls[j].indexUpperBound);
-				lastMatch = j;
-			}
-			vertsToDecode += indexUpperBound - indexLowerBound + 1;
-			i = lastMatch;
-		}
-	}
-	return vertsToDecode;
-}
-
-void DrawEngineVulkan::DecodeVerts(VulkanPushBuffer *push, uint32_t *bindOffset, VkBuffer *vkbuf) {
+void DrawEngineVulkan::DecodeVertsToPushBuffer(VulkanPushBuffer *push, uint32_t *bindOffset, VkBuffer *vkbuf) {
 	u8 *dest = decoded;
 
 	// Figure out how much pushbuffer space we need to allocate.
@@ -465,20 +439,7 @@ void DrawEngineVulkan::DecodeVerts(VulkanPushBuffer *push, uint32_t *bindOffset,
 		int vertsToDecode = ComputeNumVertsToDecode();
 		dest = (u8 *)push->Push(vertsToDecode * dec_->GetDecVtxFmt().stride, bindOffset, vkbuf);
 	}
-
-	const UVScale origUV = gstate_c.uv;
-	for (; decodeCounter_ < numDrawCalls; decodeCounter_++) {
-		gstate_c.uv = uvScale[decodeCounter_];
-		DecodeVertsStep(dest, decodeCounter_, decodedVerts_);  // NOTE! DecodeVertsStep can modify decodeCounter_!
-	}
-	gstate_c.uv = origUV;
-
-	// Sanity check
-	if (indexGen.Prim() < 0) {
-		ERROR_LOG_REPORT(G3D, "DecodeVerts: Failed to deduce prim: %i", indexGen.Prim());
-		// Force to points (0)
-		indexGen.AddPrim(GE_PRIM_POINTS, 0);
-	}
+	DecodeVerts(dest);
 }
 
 void DrawEngineVulkan::SetLineWidth(float lineWidth) {
@@ -516,23 +477,23 @@ VkDescriptorSet DrawEngineVulkan::GetOrCreateDescriptorSet(VkImageView imageView
 	descAlloc.descriptorSetCount = 1;
 	VkResult result = vkAllocateDescriptorSets(vulkan_->GetDevice(), &descAlloc, &desc);
 	// Even in release mode, this is bad.
-	_assert_msg_(G3D, result == VK_SUCCESS, "Ran out of descriptors in pool. sz=%d", (int)frame->descSets.size());
+	_assert_msg_(G3D, result == VK_SUCCESS, "Ran out of descriptor space in pool. sz=%d res=%d", (int)frame->descSets.size(), (int)result);
 
 	// We just don't write to the slots we don't care about.
 	// We need 8 now that we support secondary texture bindings.
 	VkWriteDescriptorSet writes[8]{};
 	// Main texture
 	int n = 0;
-	VkDescriptorImageInfo tex{};
+	VkDescriptorImageInfo tex[2]{};
 	if (imageView) {
 		// TODO: Also support LAYOUT_GENERAL to be able to texture from framebuffers without transitioning them?
-		tex.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-		tex.imageView = imageView;
-		tex.sampler = sampler;
+		tex[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		tex[0].imageView = imageView;
+		tex[0].sampler = sampler;
 		writes[n].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		writes[n].pNext = nullptr;
 		writes[n].dstBinding = DRAW_BINDING_TEXTURE;
-		writes[n].pImageInfo = &tex;
+		writes[n].pImageInfo = &tex[0];
 		writes[n].descriptorCount = 1;
 		writes[n].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		writes[n].dstSet = desc;
@@ -541,13 +502,13 @@ VkDescriptorSet DrawEngineVulkan::GetOrCreateDescriptorSet(VkImageView imageView
 
 	if (boundSecondary_) {
 		// TODO: Also support LAYOUT_GENERAL to be able to texture from framebuffers without transitioning them?
-		tex.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-		tex.imageView = boundSecondary_;
-		tex.sampler = samplerSecondary_;
+		tex[1].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		tex[1].imageView = boundSecondary_;
+		tex[1].sampler = samplerSecondary_;
 		writes[n].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		writes[n].pNext = nullptr;
 		writes[n].dstBinding = DRAW_BINDING_2ND_TEXTURE;
-		writes[n].pImageInfo = &tex;
+		writes[n].pImageInfo = &tex[1];
 		writes[n].descriptorCount = 1;
 		writes[n].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		writes[n].dstSet = desc;
@@ -706,7 +667,7 @@ void DrawEngineVulkan::DoFlush() {
 				vai->minihash = ComputeMiniHash();
 				vai->status = VertexArrayInfoVulkan::VAI_HASHING;
 				vai->drawsUntilNextFullHash = 0;
-				DecodeVerts(frame->pushVertex, &vbOffset, &vbuf);  // writes to indexGen
+				DecodeVertsToPushBuffer(frame->pushVertex, &vbOffset, &vbuf);  // writes to indexGen
 				vai->numVerts = indexGen.VertexCount();
 				vai->prim = indexGen.Prim();
 				vai->maxIndex = indexGen.MaxIndex();
@@ -732,7 +693,7 @@ void DrawEngineVulkan::DoFlush() {
 					}
 					if (newMiniHash != vai->minihash || newHash != vai->hash) {
 						MarkUnreliable(vai);
-						DecodeVerts(frame->pushVertex, &vbOffset, &vbuf);
+						DecodeVertsToPushBuffer(frame->pushVertex, &vbOffset, &vbuf);
 						goto rotateVBO;
 					}
 					if (vai->numVerts > 64) {
@@ -751,14 +712,14 @@ void DrawEngineVulkan::DoFlush() {
 					u32 newMiniHash = ComputeMiniHash();
 					if (newMiniHash != vai->minihash) {
 						MarkUnreliable(vai);
-						DecodeVerts(frame->pushVertex, &vbOffset, &vbuf);
+						DecodeVertsToPushBuffer(frame->pushVertex, &vbOffset, &vbuf);
 						goto rotateVBO;
 					}
 				}
 
 				if (!vai->vb) {
 					// Directly push to the vertex cache.
-					DecodeVerts(vertexCache_, &vai->vbOffset, &vai->vb);
+					DecodeVertsToPushBuffer(vertexCache_, &vai->vbOffset, &vai->vb);
 					_dbg_assert_msg_(G3D, gstate_c.vertBounds.minV >= gstate_c.vertBounds.maxV, "Should not have checked UVs when caching.");
 					vai->numVerts = indexGen.VertexCount();
 					vai->prim = indexGen.Prim();
@@ -819,7 +780,7 @@ void DrawEngineVulkan::DoFlush() {
 				if (vai->lastFrame != gpuStats.numFlips) {
 					vai->numFrames++;
 				}
-				DecodeVerts(frame->pushVertex, &vbOffset, &vbuf);
+				DecodeVertsToPushBuffer(frame->pushVertex, &vbOffset, &vbuf);
 				goto rotateVBO;
 			}
 			default:
@@ -833,7 +794,7 @@ void DrawEngineVulkan::DoFlush() {
 				memcpy(dest, decoded, size);
 			} else {
 				// Decode directly into the pushbuffer
-				DecodeVerts(frame->pushVertex, &vbOffset, &vbuf);
+				DecodeVertsToPushBuffer(frame->pushVertex, &vbOffset, &vbuf);
 			}
 
 	rotateVBO:
@@ -877,6 +838,7 @@ void DrawEngineVulkan::DoFlush() {
 				// Already logged, let's bail out.
 				return;
 			}
+			BindShaderBlendTex();  // This might cause copies so important to do before BindPipeline.
 			renderManager->BindPipeline(pipeline->pipeline);
 			if (pipeline != lastPipeline_) {
 				if (lastPipeline_ && !lastPipeline_->useBlendConstant && pipeline->useBlendConstant) {
@@ -915,7 +877,7 @@ void DrawEngineVulkan::DoFlush() {
 	} else {
 		PROFILE_THIS_SCOPE("soft");
 		// Decode to "decoded"
-		DecodeVerts(nullptr, nullptr, nullptr);
+		DecodeVertsToPushBuffer(nullptr, nullptr, nullptr);
 		bool hasColor = (lastVType_ & GE_VTYPE_COL_MASK) != GE_VTYPE_COL_NONE;
 		if (gstate.isModeThrough()) {
 			gstate_c.vertexFullAlpha = gstate_c.vertexFullAlpha && (hasColor || gstate.getMaterialAmbientA() == 255);
@@ -976,6 +938,7 @@ void DrawEngineVulkan::DoFlush() {
 					// Already logged, let's bail out.
 					return;
 				}
+				BindShaderBlendTex();  // This might cause copies so super important to do before BindPipeline.
 				renderManager->BindPipeline(pipeline->pipeline);
 				if (pipeline != lastPipeline_) {
 					if (lastPipeline_ && !lastPipeline_->useBlendConstant && pipeline->useBlendConstant) {
@@ -1082,8 +1045,6 @@ DrawEngineVulkan::TessellationDataTransferVulkan::~TessellationDataTransferVulka
 void DrawEngineVulkan::TessellationDataTransferVulkan::PrepareBuffers(float *&pos, float *&tex, float *&col, int &posStride, int &texStride, int &colStride, int size, bool hasColor, bool hasTexCoords) {
 	colStride = 4;
 
-	assert(size > 0);
-
 	// TODO: This SHOULD work without padding but I can't get it to work on nvidia, so had
 	// to expand to vec4. Driver bug?
 	struct TessData {
@@ -1105,6 +1066,5 @@ void DrawEngineVulkan::TessellationDataTransferVulkan::PrepareBuffers(float *&po
 }
 
 void DrawEngineVulkan::TessellationDataTransferVulkan::SendDataToShader(const float *pos, const float *tex, const float *col, int size, bool hasColor, bool hasTexCoords) {
-	assert(pos);
 	// Nothing to do here!
 }

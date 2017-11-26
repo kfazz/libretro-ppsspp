@@ -433,7 +433,9 @@ static int DefaultInternalResolution() {
 	return 0;
 #else
 	int longestDisplaySide = std::max(System_GetPropertyInt(SYSPROP_DISPLAY_XRES), System_GetPropertyInt(SYSPROP_DISPLAY_YRES));
-	return longestDisplaySide >= 1000 ? 2 : 1;
+	int scale = longestDisplaySide >= 1000 ? 2 : 1;
+	ILOG("Longest display side: %d pixels. Choosing scale %d", longestDisplaySide, scale);
+	return scale;
 #endif
 }
 
@@ -545,6 +547,7 @@ static ConfigSetting graphicsSettings[] = {
 	ReportedConfigSetting("FragmentTestCache", &g_Config.bFragmentTestCache, true, true, true),
 
 	ConfigSetting("GfxDebugOutput", &g_Config.bGfxDebugOutput, false, false, false),
+	ConfigSetting("GfxDebugSplitSubmit", &g_Config.bGfxDebugSplitSubmit, false, false, false),
 	ConfigSetting("LogFrameDrops", &g_Config.bLogFrameDrops, false, true, false),
 
 	ConfigSetting(false),

@@ -22,6 +22,7 @@
 #include <assert.h>
 
 #include "Common/Vulkan/SPIRVDisasm.h"
+#include "Core/Config.h"
 
 #include "base/logging.h"
 #include "base/display.h"
@@ -348,7 +349,7 @@ class VKFramebuffer;
 
 class VKContext : public DrawContext {
 public:
-	VKContext(VulkanContext *vulkan);
+	VKContext(VulkanContext *vulkan, bool splitSubmit);
 	virtual ~VKContext();
 
 	const DeviceCaps &GetDeviceCaps() const override {
@@ -674,7 +675,7 @@ bool VKTexture::Create(VkCommandBuffer cmd, const TextureDesc &desc) {
 	return true;
 }
 
-VKContext::VKContext(VulkanContext *vulkan)
+VKContext::VKContext(VulkanContext *vulkan, bool splitSubmit)
 	: vulkan_(vulkan), caps_{}, renderManager_(vulkan) {
 	caps_.anisoSupported = vulkan->GetFeaturesAvailable().samplerAnisotropy != 0;
 	caps_.geometryShaderSupported = vulkan->GetFeaturesAvailable().geometryShader != 0;
@@ -686,6 +687,17 @@ VKContext::VKContext(VulkanContext *vulkan)
 	caps_.framebufferDepthBlitSupported = false;  // Can be checked for.
 	caps_.framebufferDepthCopySupported = true;   // Will pretty much always be the case.
 	caps_.preferredDepthBufferFormat = DataFormat::D24_S8;  // TODO: Ask vulkan.
+
+	switch (vulkan->GetPhysicalDeviceProperties().vendorID) {
+	case VULKAN_VENDOR_AMD: caps_.vendor = GPUVendor::VENDOR_AMD; break;
+	case VULKAN_VENDOR_ARM: caps_.vendor = GPUVendor::VENDOR_ARM; break;
+	case VULKAN_VENDOR_IMGTEC: caps_.vendor = GPUVendor::VENDOR_IMGTEC; break;
+	case VULKAN_VENDOR_NVIDIA: caps_.vendor = GPUVendor::VENDOR_NVIDIA; break;
+	case VULKAN_VENDOR_QUALCOMM: caps_.vendor = GPUVendor::VENDOR_QUALCOMM; break;
+	case VULKAN_VENDOR_INTEL: caps_.vendor = GPUVendor::VENDOR_INTEL; break;
+	default:
+		caps_.vendor = GPUVendor::VENDOR_UNKNOWN;
+	}
 
 	device_ = vulkan->GetDevice();
 
@@ -744,6 +756,8 @@ VKContext::VKContext(VulkanContext *vulkan)
 	assert(VK_SUCCESS == res);
 
 	pipelineCache_ = vulkan_->CreatePipelineCache();
+
+	renderManager_.SetSplitSubmit(splitSubmit);
 }
 
 VKContext::~VKContext() {
@@ -1177,14 +1191,28 @@ void VKContext::Clear(int clearMask, uint32_t colorval, float depthVal, int sten
 	renderManager_.Clear(colorval, depthVal, stencilVal, mask);
 }
 
-DrawContext *T3DCreateVulkanContext(VulkanContext *vulkan) {
-	return new VKContext(vulkan);
+DrawContext *T3DCreateVulkanContext(VulkanContext *vulkan, bool split) {
+	return new VKContext(vulkan, split);
 }
 
 void AddFeature(std::vector<std::string> &features, const char *name, VkBool32 available, VkBool32 enabled) {
 	char buf[512];
 	snprintf(buf, sizeof(buf), "%s: Available: %d Enabled: %d", name, (int)available, (int)enabled);
 	features.push_back(buf);
+}
+
+// Limited to depth buffer formats as that's what we need right now.
+static const char *VulkanFormatToString(VkFormat fmt) {
+	switch (fmt) {
+	case VkFormat::VK_FORMAT_D24_UNORM_S8_UINT: return "D24S8";
+	case VkFormat::VK_FORMAT_D16_UNORM: return "D16";
+	case VkFormat::VK_FORMAT_D16_UNORM_S8_UINT: return "D16S8";
+	case VkFormat::VK_FORMAT_D32_SFLOAT: return "D32f";
+	case VkFormat::VK_FORMAT_D32_SFLOAT_S8_UINT: return "D32fS8";
+	case VkFormat::VK_FORMAT_S8_UINT: return "S8";
+	case VkFormat::VK_FORMAT_UNDEFINED: return "UNDEFINED (BAD!)";
+	default: return "UNKNOWN";
+	}
 }
 
 std::vector<std::string> VKContext::GetFeatureList() const {
@@ -1209,6 +1237,8 @@ std::vector<std::string> VKContext::GetFeatureList() const {
 	AddFeature(features, "shaderCullDistance", available.shaderCullDistance, enabled.shaderCullDistance);
 	AddFeature(features, "occlusionQueryPrecise", available.occlusionQueryPrecise, enabled.occlusionQueryPrecise);
 	AddFeature(features, "multiDrawIndirect", available.multiDrawIndirect, enabled.multiDrawIndirect);
+
+	features.push_back(std::string("Preferred depth buffer format: ") + VulkanFormatToString(vulkan_->GetDeviceInfo().preferredDepthStencilFormat));
 
 	// Also list texture formats and their properties.
 	for (int i = VK_FORMAT_BEGIN_RANGE; i <= VK_FORMAT_END_RANGE; i++) {
@@ -1321,8 +1351,7 @@ bool VKContext::CopyFramebufferToMemorySync(Framebuffer *srcfb, int channelBits,
 	if (channelBits & FBChannel::FB_DEPTH_BIT) aspectMask |= VK_IMAGE_ASPECT_DEPTH_BIT;
 	if (channelBits & FBChannel::FB_STENCIL_BIT) aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
 
-	renderManager_.CopyFramebufferToMemorySync(src->GetFB(), aspectMask, x, y, w, h, format, (uint8_t *)pixels, pixelStride);
-	return true;
+	return renderManager_.CopyFramebufferToMemorySync(src ? src->GetFB() : nullptr, aspectMask, x, y, w, h, format, (uint8_t *)pixels, pixelStride);
 }
 
 void VKContext::BindFramebufferAsRenderTarget(Framebuffer *fbo, const RenderPassInfo &rp) {

@@ -44,6 +44,7 @@
 #include "Core/System.h"
 #include "Common/CPUDetect.h"
 #include "Common/GraphicsContext.h"
+#include "Common/Log.h"
 #include "Common/GL/GLInterfaceBase.h"
 #include "Common/Vulkan/VulkanLoader.h"
 #include "Common/Vulkan/VulkanContext.h"
@@ -291,6 +292,7 @@ bool AndroidVulkanContext::Init(ANativeWindow *wnd, int desiredBackbufferSizeX, 
 	}
 	if (VK_SUCCESS != g_Vulkan->CreateInstance("PPSSPP", gitVer.ToInteger(), VULKAN_FLAG_PRESENT_MAILBOX | VULKAN_FLAG_PRESENT_FIFO_RELAXED)) {
 		ELOG("Failed to create vulkan context: %s", g_Vulkan->InitError().c_str());
+		System_SendMessage("toast", "No Vulkan compatible device found. Using OpenGL instead.");
 		delete g_Vulkan;
 		g_Vulkan = nullptr;
 		return false;
@@ -299,6 +301,7 @@ bool AndroidVulkanContext::Init(ANativeWindow *wnd, int desiredBackbufferSizeX, 
 	int physicalDevice = g_Vulkan->GetBestPhysicalDevice();
 	if (physicalDevice < 0) {
 		ELOG("No usable Vulkan device found.");
+		g_Vulkan->DestroyInstance();
 		delete g_Vulkan;
 		g_Vulkan = nullptr;
 		return false;
@@ -311,6 +314,7 @@ bool AndroidVulkanContext::Init(ANativeWindow *wnd, int desiredBackbufferSizeX, 
 	if (g_Vulkan->CreateDevice() != VK_SUCCESS) {
 		ILOG("Failed to create vulkan device: %s", g_Vulkan->InitError().c_str());
 		System_SendMessage("toast", "No Vulkan driver found. Using OpenGL instead.");
+		g_Vulkan->DestroyInstance();
 		delete g_Vulkan;
 		g_Vulkan = nullptr;
 		return false;
@@ -330,7 +334,7 @@ bool AndroidVulkanContext::Init(ANativeWindow *wnd, int desiredBackbufferSizeX, 
 
 	bool success = true;
 	if (g_Vulkan->InitObjects()) {
-		draw_ = Draw::T3DCreateVulkanContext(g_Vulkan);
+		draw_ = Draw::T3DCreateVulkanContext(g_Vulkan, g_Config.bGfxDebugSplitSubmit);
 		success = draw_->CreatePresets();  // Doesn't fail, we ship the compiler.
 		assert(success);
 		draw_->HandleEvent(Draw::Event::GOT_BACKBUFFER, g_Vulkan->GetBackbufferWidth(), g_Vulkan->GetBackbufferHeight());
@@ -597,6 +601,9 @@ extern "C" void Java_org_ppsspp_ppsspp_NativeApp_init
 	env->GetJavaVM(&javaVM);
 
 	setCurrentThreadName("androidInit");
+
+	// Makes sure we get early permission grants.
+	ProcessFrameCommands(env);
 
 	ILOG("NativeApp.init() -- begin");
 	PROFILE_INIT();
@@ -964,13 +971,16 @@ extern "C" void JNICALL Java_org_ppsspp_ppsspp_NativeApp_sendMessage(JNIEnv *env
 	if (msg == "moga") {
 		mogaVersion = prm;
 	} else if (msg == "permission_pending") {
+		ILOG("STORAGE PERMISSION: PENDING");
 		// TODO: Add support for other permissions
 		permissions[SYSTEM_PERMISSION_STORAGE] = PERMISSION_STATUS_PENDING;
 		NativePermissionStatus(SYSTEM_PERMISSION_STORAGE, PERMISSION_STATUS_PENDING);
 	} else if (msg == "permission_denied") {
+		ILOG("STORAGE PERMISSION: DENIED");
 		permissions[SYSTEM_PERMISSION_STORAGE] = PERMISSION_STATUS_DENIED;
 		NativePermissionStatus(SYSTEM_PERMISSION_STORAGE, PERMISSION_STATUS_PENDING);
 	} else if (msg == "permission_granted") {
+		ILOG("STORAGE PERMISSION: GRANTED");
 		permissions[SYSTEM_PERMISSION_STORAGE] = PERMISSION_STATUS_GRANTED;
 		NativePermissionStatus(SYSTEM_PERMISSION_STORAGE, PERMISSION_STATUS_PENDING);
 	} else if (msg == "sustained_perf_supported") {

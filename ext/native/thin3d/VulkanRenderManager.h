@@ -94,7 +94,7 @@ public:
 
 	void BindFramebufferAsRenderTarget(VKRFramebuffer *fb, VKRRenderPassAction color, VKRRenderPassAction depth, uint32_t clearColor, float clearDepth, uint8_t clearStencil);
 	VkImageView BindFramebufferAsTexture(VKRFramebuffer *fb, int binding, int aspectBit, int attachment);
-	void CopyFramebufferToMemorySync(VKRFramebuffer *src, int aspectBits, int x, int y, int w, int h, Draw::DataFormat destFormat, uint8_t *pixels, int pixelStride);
+	bool CopyFramebufferToMemorySync(VKRFramebuffer *src, int aspectBits, int x, int y, int w, int h, Draw::DataFormat destFormat, uint8_t *pixels, int pixelStride);
 	void CopyImageToMemorySync(VkImage image, int mipLevel, int x, int y, int w, int h, Draw::DataFormat destFormat, uint8_t *pixels, int pixelStride);
 
 	void CopyFramebuffer(VKRFramebuffer *src, VkRect2D srcRect, VKRFramebuffer *dst, VkOffset2D dstPos, int aspectMask);
@@ -208,6 +208,10 @@ public:
 		return !framebuffers_.empty();
 	}
 
+	void SetSplitSubmit(bool split) {
+		splitSubmit_ = split;
+	}
+
 private:
 	bool InitBackbufferFramebuffers(int width, int height);
 	bool InitDepthStencilBuffer(VkCommandBuffer cmd);  // Used for non-buffered rendering.
@@ -259,6 +263,7 @@ private:
 	bool insideFrame_ = false;
 	VKRStep *curRenderStep_ = nullptr;
 	std::vector<VKRStep *> steps_;
+	bool splitSubmit_ = false;
 
 	// Execution time state
 	bool run_ = true;
@@ -283,4 +288,7 @@ private:
 		VkImageView view = VK_NULL_HANDLE;
 	};
 	DepthBufferInfo depth_;
+
+	// This works great - except see issue #10097. WTF?
+	bool useThread_ = true;
 };

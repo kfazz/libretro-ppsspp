@@ -682,7 +682,7 @@ elseif(IOS)
 	if(EXISTS "${CMAKE_IOS_SDK_ROOT}/System/Library/Frameworks/GameController.framework")
 		set(nativeExtraLibs ${nativeExtraLibs} "-weak_framework GameController")
 	endif()
-	
+
 	if(NOT ICONV_LIBRARY)
 		set(nativeExtraLibs ${nativeExtraLibs} iconv)
 	endif()
@@ -1647,8 +1647,8 @@ if(ANDROID)
   if(X86_64)
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-Bsymbolic")
   endif()
-endif()	
- 
+endif()
+
 set(CoreExtraLibs ${CoreExtraLibs} armips)
 
 set(GlslangLibs glslang OGLCompiler OSDependent SPIRV SPVRemapper)

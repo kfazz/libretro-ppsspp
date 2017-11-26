@@ -11,9 +11,6 @@
 #define VLOG(...)
 #endif
 
-// This works great. Not much reason to disable so let's not even bother with an option.
-const bool useThread = true;
-
 #ifndef UINT64_MAX
 #define UINT64_MAX 0xFFFFFFFFFFFFFFFFULL
 #endif
@@ -127,6 +124,11 @@ VulkanRenderManager::VulkanRenderManager(VulkanContext *vulkan) : vulkan_(vulkan
 	}
 
 	queueRunner_.CreateDeviceObjects();
+
+	// Temporary AMD hack for issue #10097
+	if (vulkan_->GetPhysicalDeviceProperties().vendorID == VULKAN_VENDOR_AMD) {
+		useThread_ = false;
+	}
 }
 
 void VulkanRenderManager::CreateBackbuffers() {
@@ -135,8 +137,8 @@ void VulkanRenderManager::CreateBackbuffers() {
 
 	VkImage *swapchainImages = new VkImage[swapchainImageCount_];
 	res = vkGetSwapchainImagesKHR(vulkan_->GetDevice(), vulkan_->GetSwapchain(), &swapchainImageCount_, swapchainImages);
-	assert(res == VK_SUCCESS);
 	if (res != VK_SUCCESS) {
+		ELOG("vkGetSwapchainImagesKHR failed");
 		delete[] swapchainImages;
 		return;
 	}
@@ -188,7 +190,7 @@ void VulkanRenderManager::CreateBackbuffers() {
 	}
 
 	// Start the thread.
-	if (useThread && HasBackbuffers()) {
+	if (useThread_ && HasBackbuffers()) {
 		run_ = true;
 		// Won't necessarily be 0.
 		threadInitFrame_ = vulkan_->GetCurFrame();
@@ -198,7 +200,7 @@ void VulkanRenderManager::CreateBackbuffers() {
 }
 
 void VulkanRenderManager::StopThread() {
-	if (useThread && run_) {
+	if (useThread_ && run_) {
 		run_ = false;
 		// Stop the thread.
 		for (int i = 0; i < vulkan_->GetInflightFrames(); i++) {
@@ -337,7 +339,7 @@ void VulkanRenderManager::BeginFrame() {
 	FrameData &frameData = frameData_[curFrame];
 
 	// Make sure the very last command buffer from the frame before the previous has been fully executed.
-	if (useThread) {
+	if (useThread_) {
 		std::unique_lock<std::mutex> lock(frameData.push_mutex);
 		while (!frameData.readyForFence) {
 			VLOG("PUSH: Waiting for frame[%d].readyForFence = 1", curFrame);
@@ -413,7 +415,7 @@ void VulkanRenderManager::BindFramebufferAsRenderTarget(VKRFramebuffer *fb, VKRR
 	curHeight_ = fb ? fb->height : vulkan_->GetBackbufferHeight();
 }
 
-void VulkanRenderManager::CopyFramebufferToMemorySync(VKRFramebuffer *src, int aspectBits, int x, int y, int w, int h, Draw::DataFormat destFormat, uint8_t *pixels, int pixelStride) {
+bool VulkanRenderManager::CopyFramebufferToMemorySync(VKRFramebuffer *src, int aspectBits, int x, int y, int w, int h, Draw::DataFormat destFormat, uint8_t *pixels, int pixelStride) {
 	VKRStep *step = new VKRStep{ VKRStepType::READBACK };
 	step->readback.aspectMask = aspectBits;
 	step->readback.src = src;
@@ -427,9 +429,26 @@ void VulkanRenderManager::CopyFramebufferToMemorySync(VKRFramebuffer *src, int a
 
 	Draw::DataFormat srcFormat;
 	if (aspectBits & VK_IMAGE_ASPECT_COLOR_BIT) {
-		switch (src->color.format) {
-		case VK_FORMAT_R8G8B8A8_UNORM: srcFormat = Draw::DataFormat::R8G8B8A8_UNORM; break;
-		default: assert(false);
+		if (src) {
+			switch (src->color.format) {
+			case VK_FORMAT_R8G8B8A8_UNORM: srcFormat = Draw::DataFormat::R8G8B8A8_UNORM; break;
+			default: assert(false);
+			}
+		}
+		else {
+			// Backbuffer.
+			if (!(vulkan_->GetSurfaceCapabilities().supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT)) {
+				ELOG("Copying from backbuffer not supported, can't take screenshots");
+				return false;
+			}
+			switch (vulkan_->GetSwapchainFormat()) {
+			case VK_FORMAT_B8G8R8A8_UNORM: srcFormat = Draw::DataFormat::B8G8R8A8_UNORM; break;
+			case VK_FORMAT_R8G8B8A8_UNORM: srcFormat = Draw::DataFormat::R8G8B8A8_UNORM; break;
+			// NOTE: If you add supported formats here, make sure to also support them in VulkanQueueRunner::CopyReadbackBuffer.
+			default:
+				ELOG("Unsupported backbuffer format for screenshots");
+				return false;
+			}
 		}
 	} else if (aspectBits & VK_IMAGE_ASPECT_STENCIL_BIT) {
 		// Copies from stencil are always S8.
@@ -446,6 +465,7 @@ void VulkanRenderManager::CopyFramebufferToMemorySync(VKRFramebuffer *src, int a
 	}
 	// Need to call this after FlushSync so the pixels are guaranteed to be ready in CPU-accessible VRAM.
 	queueRunner_.CopyReadbackBuffer(w, h, srcFormat, destFormat, pixelStride, pixels);
+	return true;
 }
 
 void VulkanRenderManager::CopyImageToMemorySync(VkImage image, int mipLevel, int x, int y, int w, int h, Draw::DataFormat destFormat, uint8_t *pixels, int pixelStride) {
@@ -675,7 +695,7 @@ void VulkanRenderManager::Finish() {
 	curRenderStep_ = nullptr;
 	int curFrame = vulkan_->GetCurFrame();
 	FrameData &frameData = frameData_[curFrame];
-	if (!useThread) {
+	if (!useThread_) {
 		frameData.steps = std::move(steps_);
 		frameData.type = VKRRunType::END;
 		Run(curFrame);
@@ -709,22 +729,19 @@ void VulkanRenderManager::BeginSubmitFrame(int frame) {
 		// Now, I wonder if we should do this early in the frame or late? Right now we do it early, which should be fine.
 		VkResult res = vkAcquireNextImageKHR(vulkan_->GetDevice(), vulkan_->GetSwapchain(), UINT64_MAX, acquireSemaphore_, (VkFence)VK_NULL_HANDLE, &frameData.curSwapchainImage);
 		if (res == VK_SUBOPTIMAL_KHR) {
-			// Hopefully the resize will happen shortly. Ignore.
+			// Hopefully the resize will happen shortly. Ignore - one frame might look bad or something.
 		} else if (res == VK_ERROR_OUT_OF_DATE_KHR) {
 			frameData.skipSwap = true;
 		} else {
-			assert(res == VK_SUCCESS);
+			_assert_msg_(G3D, res == VK_SUCCESS, "vkAcquireNextImageKHR failed! result=%d", (int)res);
 		}
-		// TODO: Deal with the VK_SUBOPTIMAL_KHR and VK_ERROR_OUT_OF_DATE_KHR
-		// return codes
 
 		VkCommandBufferBeginInfo begin{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
 		begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 		res = vkBeginCommandBuffer(frameData.mainCmd, &begin);
+		_assert_msg_(G3D, res == VK_SUCCESS, "vkBeginCommandBuffer failed! result=%d", (int)res);
 
-		assert(res == VK_SUCCESS);
-
-		queueRunner_.SetBackbuffer(framebuffers_[frameData.curSwapchainImage]);
+		queueRunner_.SetBackbuffer(framebuffers_[frameData.curSwapchainImage], swapchainImages_[frameData.curSwapchainImage].image);
 
 		frameData.hasBegun = true;
 	}
@@ -734,30 +751,30 @@ void VulkanRenderManager::Submit(int frame, bool triggerFence) {
 	FrameData &frameData = frameData_[frame];
 	if (frameData.hasInitCommands) {
 		VkResult res = vkEndCommandBuffer(frameData.initCmd);
-		assert(res == VK_SUCCESS);
+		_assert_msg_(G3D, res == VK_SUCCESS, "vkEndCommandBuffer failed (init)! result=%d", (int)res);
 	}
 
 	VkResult res = vkEndCommandBuffer(frameData.mainCmd);
-	assert(res == VK_SUCCESS);
+	_assert_msg_(G3D, res == VK_SUCCESS, "vkEndCommandBuffer failed (main)! result=%d", (int)res);
 
 	VkCommandBuffer cmdBufs[2];
 	int numCmdBufs = 0;
 	if (frameData.hasInitCommands) {
 		cmdBufs[numCmdBufs++] = frameData.initCmd;
 		frameData.hasInitCommands = false;
-	}
-	if (false) {
-		// Send the init commands off separately. Used this once to confirm that the cause of a device loss was in the init cmdbuf.
-		VkSubmitInfo submit_info{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
-		submit_info.commandBufferCount = (uint32_t)numCmdBufs;
-		submit_info.pCommandBuffers = cmdBufs;
-		res = vkQueueSubmit(vulkan_->GetGraphicsQueue(), 1, &submit_info, VK_NULL_HANDLE);
-		if (res == VK_ERROR_DEVICE_LOST) {
-			_assert_msg_(G3D, false, "Lost the Vulkan device!");
-		} else {
-			assert(res == VK_SUCCESS);
+		if (splitSubmit_) {
+			// Send the init commands off separately. Used this once to confirm that the cause of a device loss was in the init cmdbuf.
+			VkSubmitInfo submit_info{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
+			submit_info.commandBufferCount = (uint32_t)numCmdBufs;
+			submit_info.pCommandBuffers = cmdBufs;
+			res = vkQueueSubmit(vulkan_->GetGraphicsQueue(), 1, &submit_info, VK_NULL_HANDLE);
+			if (res == VK_ERROR_DEVICE_LOST) {
+				_assert_msg_(G3D, false, "Lost the Vulkan device!");
+			} else {
+				_assert_msg_(G3D, res == VK_SUCCESS, "vkQueueSubmit failed (init)! result=%d", (int)res);
+			}
+			numCmdBufs = 0;
 		}
-		numCmdBufs = 0;
 	}
 	cmdBufs[numCmdBufs++] = frameData.mainCmd;
 
@@ -778,11 +795,11 @@ void VulkanRenderManager::Submit(int frame, bool triggerFence) {
 	if (res == VK_ERROR_DEVICE_LOST) {
 		_assert_msg_(G3D, false, "Lost the Vulkan device!");
 	} else {
-		assert(res == VK_SUCCESS);
+		_assert_msg_(G3D, res == VK_SUCCESS, "vkQueueSubmit failed (main, split=%d)! result=%d", (int)splitSubmit_, (int)res);
 	}
 
 	// When !triggerFence, we notify after syncing with Vulkan.
-	if (useThread && triggerFence) {
+	if (useThread_ && triggerFence) {
 		VLOG("PULL: Frame %d.readyForFence = true", frame);
 		std::unique_lock<std::mutex> lock(frameData.push_mutex);
 		frameData.readyForFence = true;
@@ -806,11 +823,11 @@ void VulkanRenderManager::EndSubmitFrame(int frame) {
 		present.waitSemaphoreCount = 1;
 
 		VkResult res = vkQueuePresentKHR(vulkan_->GetGraphicsQueue(), &present);
-		// TODO: Deal with VK_SUBOPTIMAL_WSI ?
-		if (res == VK_ERROR_OUT_OF_DATE_KHR) {
+		// TODO: Deal with VK_SUBOPTIMAL_KHR ?
+		if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR) {
 			// ignore, it'll be fine. this happens sometimes during resizes, and we do make sure to recreate the swap chain.
 		} else {
-			assert(res == VK_SUCCESS);
+			_assert_msg_(G3D, res == VK_SUCCESS, "vkQueuePresentKHR failed! result=%d", (int)res);
 		}
 	} else {
 		frameData.skipSwap = false;
@@ -862,7 +879,7 @@ void VulkanRenderManager::EndSyncFrame(int frame) {
 	VkResult res = vkBeginCommandBuffer(frameData.mainCmd, &begin);
 	assert(res == VK_SUCCESS);
 
-	if (useThread) {
+	if (useThread_) {
 		std::unique_lock<std::mutex> lock(frameData.push_mutex);
 		frameData.readyForFence = true;
 		frameData.push_condVar.notify_all();
@@ -873,7 +890,7 @@ void VulkanRenderManager::FlushSync() {
 	// TODO: Reset curRenderStep_?
 	int curFrame = vulkan_->GetCurFrame();
 	FrameData &frameData = frameData_[curFrame];
-	if (!useThread) {
+	if (!useThread_) {
 		frameData.steps = std::move(steps_);
 		frameData.type = VKRRunType::SYNC;
 		Run(curFrame);
@@ -887,7 +904,7 @@ void VulkanRenderManager::FlushSync() {
 		frameData.pull_condVar.notify_all();
 	}
 
-	if (useThread) {
+	if (useThread_) {
 		std::unique_lock<std::mutex> lock(frameData.push_mutex);
 		// Wait for the flush to be hit, since we're syncing.
 		while (!frameData.readyForFence) {
