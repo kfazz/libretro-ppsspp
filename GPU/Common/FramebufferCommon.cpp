@@ -136,6 +136,8 @@ FramebufferManagerCommon::~FramebufferManagerCommon() {
 		DestroyFramebuf(vfb);
 	}
 	bvfbs_.clear();
+
+	SetNumExtraFBOs(0);
 }
 
 void FramebufferManagerCommon::Init() {
@@ -198,7 +200,7 @@ bool FramebufferManagerCommon::ShouldDownloadFramebuffer(const VirtualFramebuffe
 
 void FramebufferManagerCommon::SetNumExtraFBOs(int num) {
 	for (size_t i = 0; i < extraFBOs_.size(); i++) {
-		extraFBOs_[i]->Release();
+		extraFBOs_[i]->ReleaseAssertLast();
 	}
 	extraFBOs_.clear();
 	for (int i = 0; i < num; i++) {
@@ -207,7 +209,8 @@ void FramebufferManagerCommon::SetNumExtraFBOs(int num) {
 		extraFBOs_.push_back(fbo);
 	}
 	currentRenderVfb_ = 0;
-	draw_->BindFramebufferAsRenderTarget(nullptr, { Draw::RPAction::KEEP, Draw::RPAction::KEEP });
+	if (num != 0)
+		draw_->BindFramebufferAsRenderTarget(nullptr, { Draw::RPAction::KEEP, Draw::RPAction::KEEP });
 }
 
 // Heuristics to figure out the size of FBO to create.
@@ -481,7 +484,7 @@ VirtualFramebuffer *FramebufferManagerCommon::DoSetRenderFrameBuffer(const Frame
 				// This happens a lot, but virtually always it's cleared.
 				// It's possible the other might not clear, but when every game is reported it's not useful.
 				if (params.isWritingDepth) {
-					WARN_LOG_REPORT(SCEGE, "FBO reusing depthbuffer, %08x/%08x and %08x/%08x", params.fb_address, params.z_address, vfbs_[i]->fb_address, vfbs_[i]->z_address);
+					WARN_LOG(SCEGE, "FBO reusing depthbuffer, %08x/%08x and %08x/%08x", params.fb_address, params.z_address, vfbs_[i]->fb_address, vfbs_[i]->z_address);
 					sharingReported = true;
 				}
 			}
@@ -2040,7 +2043,7 @@ void FramebufferManagerCommon::ReadFramebufferToMemory(VirtualFramebuffer *vfb, 
 	if (x + w >= vfb->bufferWidth) {
 		w = vfb->bufferWidth - x;
 	}
-	if (vfb) {
+	if (vfb && vfb->fbo) {
 		// We'll pseudo-blit framebuffers here to get a resized version of vfb.
 		OptimizeDownloadRange(vfb, x, y, w, h);
 		if (vfb->renderWidth == vfb->width && vfb->renderHeight == vfb->height) {

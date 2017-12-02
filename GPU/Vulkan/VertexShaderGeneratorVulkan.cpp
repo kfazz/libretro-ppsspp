@@ -97,7 +97,7 @@ enum DoLightComputation {
 // TODO: Skip all this if we can actually get a 16-bit depth buffer along with stencil, which
 // is a bit of a rare configuration, although quite common on mobile.
 
-bool GenerateVulkanGLSLVertexShader(const ShaderID &id, char *buffer, bool *usesLighting) {
+bool GenerateVulkanGLSLVertexShader(const VShaderID &id, char *buffer, bool *usesLighting) {
 	char *p = buffer;
 
 	WRITE(p, "%s", vulkan_glsl_preamble);
@@ -106,7 +106,7 @@ bool GenerateVulkanGLSLVertexShader(const ShaderID &id, char *buffer, bool *uses
 	bool highpTexcoord = false;
 
 	bool isModeThrough = id.Bit(VS_BIT_IS_THROUGH);
-	bool lmode = id.Bit(VS_BIT_LMODE) && !isModeThrough;  // TODO: Different expression than in shaderIDgen
+	bool lmode = id.Bit(VS_BIT_LMODE);
 	bool doTexture = id.Bit(VS_BIT_DO_TEXTURE);
 	bool doTextureTransform = id.Bit(VS_BIT_DO_TEXTURE_TRANSFORM);
 

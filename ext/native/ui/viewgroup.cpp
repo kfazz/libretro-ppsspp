@@ -1314,8 +1314,6 @@ EventReturn ListView::OnItemCallback(int num, EventParams &e) {
 	View *focused = GetFocusedView();
 	OnChoice.Trigger(ev);
 	CreateAllItems();
-	if (focused)
-		SetFocusedView(e.v);
 	return EVENT_DONE;
 }
 
