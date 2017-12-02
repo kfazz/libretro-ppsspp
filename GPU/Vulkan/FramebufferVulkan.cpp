@@ -450,7 +450,7 @@ VkImageView FramebufferManagerVulkan::BindFramebufferAsColorTexture(int stage, V
 		draw_->BindFramebufferAsTexture(framebuffer->fbo, stage, Draw::FB_COLOR_BIT, 0);
 		return (VkImageView)draw_->GetNativeObject(Draw::NativeObject::BOUND_TEXTURE0_IMAGEVIEW);
 	} else {
-		ERROR_LOG_REPORT_ONCE(vulkanSelfTexture, G3D, "Attempting to texture from target");
+		ERROR_LOG_REPORT_ONCE(vulkanSelfTexture, G3D, "Attempting to texture from target (src=%08x / target=%08x / flags=%d)", framebuffer->fb_address, currentRenderVfb_->fb_address, flags);
 		// To do this safely in Vulkan, we need to use input attachments.
 		return VK_NULL_HANDLE;
 	}
@@ -583,8 +583,6 @@ void FramebufferManagerVulkan::EndFrame() {
 }
 
 void FramebufferManagerVulkan::DeviceLost() {
-	vulkan2D_->DeviceLost();
-
 	DestroyAllFBOs();
 	DestroyDeviceObjects();
 }
@@ -593,7 +591,6 @@ void FramebufferManagerVulkan::DeviceRestore(VulkanContext *vulkan, Draw::DrawCo
 	vulkan_ = vulkan;
 	draw_ = draw;
 
-	vulkan2D_->DeviceRestore(vulkan_);
 	InitDeviceObjects();
 }
 
@@ -615,6 +612,13 @@ void FramebufferManagerVulkan::DestroyAllFBOs() {
 		DestroyFramebuf(vfb);
 	}
 	bvfbs_.clear();
+
+	for (auto it = tempFBOs_.begin(), end = tempFBOs_.end(); it != end; ++it) {
+		it->second.fbo->Release();
+	}
+	tempFBOs_.clear();
+
+	SetNumExtraFBOs(0);
 }
 
 void FramebufferManagerVulkan::Resized() {
@@ -685,10 +689,10 @@ void FramebufferManagerVulkan::CompilePostShader() {
 
 	if (postVs_ && postFs_) {
 		pipelinePostShader_ = vulkan2D_->GetPipeline(backbufferRP, postVs_, postFs_, true, Vulkan2D::VK2DDepthStencilMode::NONE);
+		usePostShader_ = true;
 	} else {
 		ELOG("Failed to compile.");
+		pipelinePostShader_ = VK_NULL_HANDLE;
+		usePostShader_ = false;
 	}
-
-
-	usePostShader_ = true;
 }

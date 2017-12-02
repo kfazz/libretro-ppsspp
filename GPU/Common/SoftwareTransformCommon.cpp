@@ -207,7 +207,6 @@ void SoftwareTransform(
 			float uv[3] = {0, 0, 1};
 			float fogCoef = 1.0f;
 
-			// We do software T&L for now
 			float out[3];
 			float pos[3];
 			Vec3f normal(0, 0, 1);
@@ -395,7 +394,7 @@ void SoftwareTransform(
 	// TODO: This bleeds outside the play area in non-buffered mode. Big deal? Probably not.
 	// TODO: Allow creating a depth clear and a color draw.
 	bool reallyAClear = false;
-	if (maxIndex > 1 && prim == GE_PRIM_RECTANGLES && gstate.isModeClear()) {
+	if (maxIndex > 1 && prim == GE_PRIM_RECTANGLES && gstate.isModeClear() && params->allowClear) {
 		int scissorX2 = gstate.getScissorX2() + 1;
 		int scissorY2 = gstate.getScissorY2() + 1;
 		reallyAClear = IsReallyAClear(transformed, maxIndex, scissorX2, scissorY2);

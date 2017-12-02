@@ -43,20 +43,20 @@ enum {
 
 class LinkedShader {
 public:
-	LinkedShader(ShaderID VSID, Shader *vs, ShaderID FSID, Shader *fs, bool useHWTransform);
+	LinkedShader(VShaderID VSID, Shader *vs, FShaderID FSID, Shader *fs, bool useHWTransform, bool preloading = false);
 	~LinkedShader();
 
-	void use(const ShaderID &VSID, LinkedShader *previous);
+	void use(const VShaderID &VSID, LinkedShader *previous);
 	void stop();
-	void UpdateUniforms(u32 vertType, const ShaderID &VSID);
+	void UpdateUniforms(u32 vertType, const VShaderID &VSID);
 
 	Shader *vs_;
 	// Set to false if the VS failed, happens on Mali-400 a lot for complex shaders.
 	bool useHWTransform_;
 
-	uint32_t program;
+	uint32_t program = 0;
 	uint64_t availableUniforms;
-	uint64_t dirtyUniforms;
+	uint64_t dirtyUniforms = 0;
 
 	// Present attributes in the shader.
 	int attrMask;  // 1 << ATTR_ ... or-ed together.
@@ -124,7 +124,7 @@ public:
 
 class Shader {
 public:
-	Shader(const char *code, uint32_t glShaderType, bool useHWTransform, uint32_t attrMask, uint64_t uniformMask);
+	Shader(const ShaderID &id, const char *code, uint32_t glShaderType, bool useHWTransform, uint32_t attrMask, uint64_t uniformMask);
 	~Shader();
 	uint32_t shader;
 
@@ -154,8 +154,8 @@ public:
 
 	// This is the old ApplyShader split into two parts, because of annoying information dependencies.
 	// If you call ApplyVertexShader, you MUST call ApplyFragmentShader soon afterwards.
-	Shader *ApplyVertexShader(int prim, u32 vertType, ShaderID *VSID);
-	LinkedShader *ApplyFragmentShader(ShaderID VSID, Shader *vs, u32 vertType, int prim);
+	Shader *ApplyVertexShader(int prim, u32 vertType, VShaderID *VSID);
+	LinkedShader *ApplyFragmentShader(VShaderID VSID, Shader *vs, u32 vertType, int prim);
 
 	void DirtyShader();
 	void DirtyLastShader() override;  // disables vertex arrays
@@ -172,8 +172,8 @@ public:
 
 private:
 	void Clear();
-	Shader *CompileFragmentShader(ShaderID id);
-	Shader *CompileVertexShader(ShaderID id);
+	Shader *CompileFragmentShader(FShaderID id);
+	Shader *CompileVertexShader(VShaderID id);
 
 	struct LinkedShaderCacheEntry {
 		LinkedShaderCacheEntry(Shader *vs_, Shader *fs_, LinkedShader *ls_)
@@ -189,17 +189,17 @@ private:
 
 	bool lastVShaderSame_;
 
-	ShaderID lastFSID_;
-	ShaderID lastVSID_;
+	FShaderID lastFSID_;
+	VShaderID lastVSID_;
 
 	LinkedShader *lastShader_;
 	u64 shaderSwitchDirtyUniforms_;
 	char *codeBuffer_;
 
-	typedef DenseHashMap<ShaderID, Shader *, nullptr> FSCache;
+	typedef DenseHashMap<FShaderID, Shader *, nullptr> FSCache;
 	FSCache fsCache_;
 
-	typedef DenseHashMap<ShaderID, Shader *, nullptr> VSCache;
+	typedef DenseHashMap<VShaderID, Shader *, nullptr> VSCache;
 	VSCache vsCache_;
 
 	bool diskCacheDirty_;

@@ -2,7 +2,7 @@
 #include "VulkanQueueRunner.h"
 #include "VulkanRenderManager.h"
 
-// Debug help: adb logcat -s DEBUG PPSSPPNativeActivity PPSSPP
+// Debug help: adb logcat -s DEBUG PPSSPPNativeActivity PPSSPP NativeGLView NativeRenderer NativeSurfaceView PowerSaveModeReceiver InputDeviceState
 
 void VulkanQueueRunner::CreateDeviceObjects() {
 	ILOG("VulkanQueueRunner::CreateDeviceObjects");
@@ -467,7 +467,8 @@ void VulkanQueueRunner::PerformRenderPass(const VKRStep &step, VkCommandBuffer c
 	vkCmdEndRenderPass(cmd);
 
 	// Transition the framebuffer if requested.
-	if (fb && step.render.finalColorLayout != VK_IMAGE_LAYOUT_UNDEFINED) {
+	// Don't need to transition it if VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL.
+	if (fb && step.render.finalColorLayout != VK_IMAGE_LAYOUT_UNDEFINED && step.render.finalColorLayout != VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
 		VkImageMemoryBarrier barrier{};
 		barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 		barrier.oldLayout = fb->color.layout;
@@ -489,6 +490,9 @@ void VulkanQueueRunner::PerformRenderPass(const VKRStep &step, VkCommandBuffer c
 		switch (barrier.newLayout) {
 		case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
 			barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+			break;
+		case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+			barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
 			break;
 		default:
 			Crash();
@@ -517,8 +521,8 @@ void VulkanQueueRunner::PerformBindFramebufferAsRenderTarget(const VKRStep &step
 		// Now, if the image needs transitioning, let's transition.
 		// The backbuffer does not, that's handled by VulkanContext.
 		if (step.render.framebuffer->color.layout != VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
-			VkAccessFlags srcAccessMask;
-			VkPipelineStageFlags srcStage;
+			VkAccessFlags srcAccessMask = 0;
+			VkPipelineStageFlags srcStage = 0;
 			switch (fb->color.layout) {
 			case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
 				srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
@@ -533,7 +537,7 @@ void VulkanQueueRunner::PerformBindFramebufferAsRenderTarget(const VKRStep &step
 				srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
 				break;
 			default:
-				Crash();
+				_dbg_assert_msg_(G3D, false, "PerformBindRT: Unexpected color layout %d", (int)fb->color.layout);
 				break;
 			}
 
@@ -545,8 +549,8 @@ void VulkanQueueRunner::PerformBindFramebufferAsRenderTarget(const VKRStep &step
 			fb->color.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		}
 		if (fb->depth.layout != VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
-			VkAccessFlags srcAccessMask;
-			VkPipelineStageFlags srcStage;
+			VkAccessFlags srcAccessMask = 0;
+			VkPipelineStageFlags srcStage = 0;
 
 			switch (fb->depth.layout) {
 			case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
@@ -562,7 +566,7 @@ void VulkanQueueRunner::PerformBindFramebufferAsRenderTarget(const VKRStep &step
 				srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
 				break;
 			default:
-				Crash();
+				_dbg_assert_msg_(G3D, false, "PerformBindRT: Unexpected depth layout %d", (int)fb->color.layout);
 				break;
 			}
 
@@ -590,8 +594,6 @@ void VulkanQueueRunner::PerformBindFramebufferAsRenderTarget(const VKRStep &step
 		w = vulkan_->GetBackbufferWidth();
 		h = vulkan_->GetBackbufferHeight();
 		renderPass = GetBackbufferRenderPass();
-		assert(step.render.color == VKRRenderPassAction::CLEAR || step.render.color == VKRRenderPassAction::DONT_CARE);
-		assert(step.render.depthStencil == VKRRenderPassAction::CLEAR || step.render.depthStencil == VKRRenderPassAction::DONT_CARE);
 		Uint8x4ToFloat4(clearVal[0].color.float32, step.render.clearColor);
 		numClearVals = 2;  // We don't bother with a depth buffer here.
 		clearVal[1].depthStencil.depth = 0.0f;
@@ -791,7 +793,8 @@ void VulkanQueueRunner::SetupTransitionToTransferSrc(VKRImage &img, VkImageMemor
 		stage |= VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
 		break;
 	default:
-		Crash();
+		_dbg_assert_msg_(G3D, false, "Transition from this layout to transfer src not supported (%d)", (int)img.layout);
+		break;
 	}
 	barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
 	barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
@@ -826,7 +829,8 @@ void VulkanQueueRunner::SetupTransitionToTransferDst(VKRImage &img, VkImageMemor
 		stage |= VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
 		break;
 	default:
-		Crash();
+		_dbg_assert_msg_(G3D, false, "Transition from this layout to transfer dst not supported (%d)", (int)img.layout);
+		break;
 	}
 	barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 	barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
@@ -869,7 +873,8 @@ void VulkanQueueRunner::PerformReadback(const VKRStep &step, VkCommandBuffer cmd
 			srcImage = &step.readback.src->depth;
 		}
 		else {
-			assert(false);
+			_dbg_assert_msg_(G3D, false, "No image aspect to readback?");
+			return;
 		}
 
 		VkImageMemoryBarrier barrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };

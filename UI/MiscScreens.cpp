@@ -507,14 +507,13 @@ void LogoScreen::render() {
 	dc.SetFontStyle(dc.theme->uiFont);
 	dc.DrawText(temp, bounds.centerX(), bounds.centerY() + 40, textColor, ALIGN_CENTER);
 	dc.DrawText(cr->T("license", "Free Software under GPL 2.0+"), bounds.centerX(), bounds.centerY() + 70, textColor, ALIGN_CENTER);
-	dc.DrawText("www.ppsspp.org", bounds.centerX(), yres / 2 + 130, textColor, ALIGN_CENTER);
-	if (boot_filename.size()) {
-		dc.DrawTextShadow(boot_filename.c_str(), bounds.centerX(), bounds.centerY() + 180, textColor, ALIGN_CENTER);
-	}
+
+	int ppsspp_org_y = yres / 2 + 130;
+	dc.DrawText("www.ppsspp.org", bounds.centerX(), ppsspp_org_y, textColor, ALIGN_CENTER);
 
 #if (defined(_WIN32) && !PPSSPP_PLATFORM(UWP)) || PPSSPP_PLATFORM(ANDROID)
 	// Draw the graphics API, except on UWP where it's always D3D11
-	dc.DrawText(screenManager()->getDrawContext()->GetInfoString(InfoField::APINAME).c_str(), bounds.centerX(), bounds.y2() - 100, textColor, ALIGN_CENTER);
+	dc.DrawText(screenManager()->getDrawContext()->GetInfoString(InfoField::APINAME).c_str(), bounds.centerX(), ppsspp_org_y + 50, textColor, ALIGN_CENTER);
 #endif
 
 	dc.End();
@@ -535,6 +534,7 @@ void CreditsScreen::CreateViews() {
 	}
 	root_->Add(new Button(cr->T("PPSSPP Forums"), new AnchorLayoutParams(260, 64, 10, NONE, NONE, 84, false)))->OnClick.Handle(this, &CreditsScreen::OnForums);
 	root_->Add(new Button("www.ppsspp.org", new AnchorLayoutParams(260, 64, 10, NONE, NONE, 158, false)))->OnClick.Handle(this, &CreditsScreen::OnPPSSPPOrg);
+	root_->Add(new Button(cr->T("Privacy Policy"), new AnchorLayoutParams(260, 64, 10, NONE, NONE, 232, false)))->OnClick.Handle(this, &CreditsScreen::OnPrivacy);
 #ifdef __ANDROID__
 	root_->Add(new Button(cr->T("Share PPSSPP"), new AnchorLayoutParams(260, 64, NONE, NONE, 10, 84, false)))->OnClick.Handle(this, &CreditsScreen::OnShare);
 	root_->Add(new Button(cr->T("Twitter @PPSSPP_emu"), new AnchorLayoutParams(260, 64, NONE, NONE, 10, 154, false)))->OnClick.Handle(this, &CreditsScreen::OnTwitter);
@@ -566,6 +566,11 @@ UI::EventReturn CreditsScreen::OnTwitter(UI::EventParams &e) {
 
 UI::EventReturn CreditsScreen::OnPPSSPPOrg(UI::EventParams &e) {
 	LaunchBrowser("https://www.ppsspp.org");
+	return UI::EVENT_DONE;
+}
+
+UI::EventReturn CreditsScreen::OnPrivacy(UI::EventParams &e) {
+	LaunchBrowser("https://www.ppsspp.org/privacy.html");
 	return UI::EVENT_DONE;
 }
 

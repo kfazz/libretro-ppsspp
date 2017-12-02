@@ -43,7 +43,7 @@
 #include "GPU/GLES/DrawEngineGLES.h"
 #include "FramebufferManagerGLES.h"
 
-Shader::Shader(const char *code, uint32_t glShaderType, bool useHWTransform, uint32_t attrMask, uint64_t uniformMask)
+Shader::Shader(const ShaderID &id, const char *code, uint32_t glShaderType, bool useHWTransform, uint32_t attrMask, uint64_t uniformMask)
 	  : failed_(false), useHWTransform_(useHWTransform), attrMask_(attrMask), uniformMask_(uniformMask) {
 	PROFILE_THIS_SCOPE("shadercomp");
 	isFragment_ = glShaderType == GL_FRAGMENT_SHADER;
@@ -70,10 +70,12 @@ Shader::Shader(const char *code, uint32_t glShaderType, bool useHWTransform, uin
 		ELOG("Error in shader compilation! %s\n", infoLog);
 		ELOG("Shader source:\n%s\n", (const char *)code);
 #endif
-		ERROR_LOG(G3D, "Error in shader compilation!\n");
-		ERROR_LOG(G3D, "Info log: %s\n", infoLog);
+
+		std::string desc = GetShaderString(SHADER_STRING_SHORT_DESC, id);
+		ERROR_LOG(G3D, "Error in shader compilation for: %s", desc.c_str());
+		ERROR_LOG(G3D, "Info log: %s", infoLog);
 		ERROR_LOG(G3D, "Shader source:\n%s\n", (const char *)code);
-		Reporting::ReportMessage("Error in shader compilation: info: %s / code: %s", infoLog, (const char *)code);
+		Reporting::ReportMessage("Error in shader compilation: info: %s\n%s\n%s", infoLog, desc.c_str(), (const char *)code);
 #ifdef SHADERLOG
 		OutputDebugStringUTF8(infoLog);
 #endif
@@ -90,8 +92,8 @@ Shader::~Shader() {
 		glDeleteShader(shader);
 }
 
-LinkedShader::LinkedShader(ShaderID VSID, Shader *vs, ShaderID FSID, Shader *fs, bool useHWTransform)
-		: useHWTransform_(useHWTransform), program(0), dirtyUniforms(0) {
+LinkedShader::LinkedShader(VShaderID VSID, Shader *vs, FShaderID FSID, Shader *fs, bool useHWTransform, bool preloading)
+		: useHWTransform_(useHWTransform) {
 	PROFILE_THIS_SCOPE("shaderlink");
 
 	program = glCreateProgram();
@@ -141,13 +143,21 @@ LinkedShader::LinkedShader(ShaderID VSID, Shader *vs, ShaderID FSID, Shader *fs,
 			ELOG("Could not link program:\n %s", buf);
 #endif
 			ERROR_LOG(G3D, "Could not link program:\n %s", buf);
-			ERROR_LOG(G3D, "VS desc:\n%s\n", vs->GetShaderString(SHADER_STRING_SHORT_DESC, VSID).c_str());
-			ERROR_LOG(G3D, "FS desc:\n%s\n", fs->GetShaderString(SHADER_STRING_SHORT_DESC, FSID).c_str());
+
+			std::string vs_desc = vs->GetShaderString(SHADER_STRING_SHORT_DESC, VSID);
+			std::string fs_desc = fs->GetShaderString(SHADER_STRING_SHORT_DESC, FSID);
 			std::string vs_source = vs->GetShaderString(SHADER_STRING_SOURCE_CODE, VSID);
 			std::string fs_source = fs->GetShaderString(SHADER_STRING_SOURCE_CODE, FSID);
+
+			ERROR_LOG(G3D, "VS desc:\n%s", vs_desc.c_str());
+			ERROR_LOG(G3D, "FS desc:\n%s", fs_desc.c_str());
 			ERROR_LOG(G3D, "VS:\n%s\n", vs_source.c_str());
 			ERROR_LOG(G3D, "FS:\n%s\n", fs_source.c_str());
-			Reporting::ReportMessage("Error in shader program link: info: %s / fs: %s / vs: %s", buf, fs_source.c_str(), vs_source.c_str());
+			if (preloading) {
+				Reporting::ReportMessage("Error in shader program link during preload: info: %s\nfs: %s\n%s\nvs: %s\n%s", buf, fs_desc.c_str(), fs_source.c_str(), vs_desc.c_str(), vs_source.c_str());
+			} else {
+				Reporting::ReportMessage("Error in shader program link: info: %s\nfs: %s\n%s\nvs: %s\n%s", buf, fs_desc.c_str(), fs_source.c_str(), vs_desc.c_str(), vs_source.c_str());
+			}
 #ifdef SHADERLOG
 			OutputDebugStringUTF8(buf);
 			OutputDebugStringUTF8(vs_source.c_str());
@@ -349,7 +359,7 @@ static inline void ScaleProjMatrix(Matrix4x4 &in) {
 	in.translateAndScale(trans, scale);
 }
 
-void LinkedShader::use(const ShaderID &VSID, LinkedShader *previous) {
+void LinkedShader::use(const VShaderID &VSID, LinkedShader *previous) {
 	glUseProgram(program);
 	int enable, disable;
 	if (previous) {
@@ -374,7 +384,7 @@ void LinkedShader::stop() {
 	}
 }
 
-void LinkedShader::UpdateUniforms(u32 vertType, const ShaderID &vsid) {
+void LinkedShader::UpdateUniforms(u32 vertType, const VShaderID &vsid) {
 	CHECK_GL_ERROR_IF_DEBUG();
 
 	u64 dirty = dirtyUniforms & availableUniforms;
@@ -700,10 +710,10 @@ void ShaderManagerGLES::Clear() {
 	for (auto iter = linkedShaderCache_.begin(); iter != linkedShaderCache_.end(); ++iter) {
 		delete iter->ls;
 	}
-	fsCache_.Iterate([&](const ShaderID &key, Shader *shader) {
+	fsCache_.Iterate([&](const FShaderID &key, Shader *shader) {
 		delete shader;
 	});
-	vsCache_.Iterate([&](const ShaderID &key, Shader *shader) {
+	vsCache_.Iterate([&](const VShaderID &key, Shader *shader) {
 		delete shader;
 	});
 	linkedShaderCache_.clear();
@@ -733,23 +743,23 @@ void ShaderManagerGLES::DirtyLastShader() { // disables vertex arrays
 	lastVShaderSame_ = false;
 }
 
-Shader *ShaderManagerGLES::CompileFragmentShader(ShaderID FSID) {
+Shader *ShaderManagerGLES::CompileFragmentShader(FShaderID FSID) {
 	uint64_t uniformMask;
 	if (!GenerateFragmentShader(FSID, codeBuffer_, &uniformMask)) {
 		return nullptr;
 	}
-	return new Shader(codeBuffer_, GL_FRAGMENT_SHADER, false, 0, uniformMask);
+	return new Shader(FSID, codeBuffer_, GL_FRAGMENT_SHADER, false, 0, uniformMask);
 }
 
-Shader *ShaderManagerGLES::CompileVertexShader(ShaderID VSID) {
+Shader *ShaderManagerGLES::CompileVertexShader(VShaderID VSID) {
 	bool useHWTransform = VSID.Bit(VS_BIT_USE_HW_TRANSFORM);
 	uint32_t attrMask;
 	uint64_t uniformMask;
 	GenerateVertexShader(VSID, codeBuffer_, &attrMask, &uniformMask);
-	return new Shader(codeBuffer_, GL_VERTEX_SHADER, useHWTransform, attrMask, uniformMask);
+	return new Shader(VSID, codeBuffer_, GL_VERTEX_SHADER, useHWTransform, attrMask, uniformMask);
 }
 
-Shader *ShaderManagerGLES::ApplyVertexShader(int prim, u32 vertType, ShaderID *VSID) {
+Shader *ShaderManagerGLES::ApplyVertexShader(int prim, u32 vertType, VShaderID *VSID) {
 	uint64_t dirty = gstate_c.GetDirtyUniforms();
 	if (dirty) {
 		if (lastShader_)
@@ -758,10 +768,9 @@ Shader *ShaderManagerGLES::ApplyVertexShader(int prim, u32 vertType, ShaderID *V
 		gstate_c.CleanUniforms();
 	}
 
-	bool useHWTransform = CanUseHardwareTransform(prim);
-
 	if (gstate_c.IsDirty(DIRTY_VERTEXSHADER_STATE)) {
 		gstate_c.Clean(DIRTY_VERTEXSHADER_STATE);
+		bool useHWTransform = CanUseHardwareTransform(prim);
 		ComputeVertexShaderID(VSID, vertType, useHWTransform);
 	} else {
 		*VSID = lastVSID_;
@@ -792,12 +801,12 @@ Shader *ShaderManagerGLES::ApplyVertexShader(int prim, u32 vertType, ShaderID *V
 			// next time and we'll do this over and over...
 
 			// Can still work with software transform.
-			ShaderID vsidTemp;
+			VShaderID vsidTemp;
 			ComputeVertexShaderID(&vsidTemp, vertType, false);
 			uint32_t attrMask;
 			uint64_t uniformMask;
 			GenerateVertexShader(vsidTemp, codeBuffer_, &attrMask, &uniformMask);
-			vs = new Shader(codeBuffer_, GL_VERTEX_SHADER, false, attrMask, uniformMask);
+			vs = new Shader(vsidTemp, codeBuffer_, GL_VERTEX_SHADER, false, attrMask, uniformMask);
 		}
 
 		vsCache_.Insert(*VSID, vs);
@@ -806,8 +815,8 @@ Shader *ShaderManagerGLES::ApplyVertexShader(int prim, u32 vertType, ShaderID *V
 	return vs;
 }
 
-LinkedShader *ShaderManagerGLES::ApplyFragmentShader(ShaderID VSID, Shader *vs, u32 vertType, int prim) {
-	ShaderID FSID;
+LinkedShader *ShaderManagerGLES::ApplyFragmentShader(VShaderID VSID, Shader *vs, u32 vertType, int prim) {
+	FShaderID FSID;
 	if (gstate_c.IsDirty(DIRTY_FRAGMENTSHADER_STATE)) {
 		gstate_c.Clean(DIRTY_FRAGMENTSHADER_STATE);
 		ComputeFragmentShaderID(&FSID);
@@ -845,6 +854,11 @@ LinkedShader *ShaderManagerGLES::ApplyFragmentShader(ShaderID VSID, Shader *vs, 
 	shaderSwitchDirtyUniforms_ = 0;
 
 	if (ls == nullptr) {
+		_dbg_assert_(G3D, FSID.Bit(FS_BIT_LMODE) == VSID.Bit(VS_BIT_LMODE));
+		_dbg_assert_(G3D, FSID.Bit(FS_BIT_DO_TEXTURE) == VSID.Bit(VS_BIT_DO_TEXTURE));
+		_dbg_assert_(G3D, FSID.Bit(FS_BIT_ENABLE_FOG) == VSID.Bit(VS_BIT_ENABLE_FOG));
+		_dbg_assert_(G3D, FSID.Bit(FS_BIT_FLATSHADE) == VSID.Bit(VS_BIT_FLATSHADE));
+
 		// Check if we can link these.
 		ls = new LinkedShader(VSID, vs, FSID, fs, vs->UseHWTransform());
 		ls->use(VSID, lastShader_);
@@ -876,7 +890,7 @@ std::vector<std::string> ShaderManagerGLES::DebugGetShaderIDs(DebugShaderType ty
 	switch (type) {
 	case SHADER_TYPE_VERTEX:
 		{
-			vsCache_.Iterate([&](const ShaderID &id, Shader *shader) {
+			vsCache_.Iterate([&](const VShaderID &id, Shader *shader) {
 				std::string idstr;
 				id.ToString(&idstr);
 				ids.push_back(idstr);
@@ -885,7 +899,7 @@ std::vector<std::string> ShaderManagerGLES::DebugGetShaderIDs(DebugShaderType ty
 		break;
 	case SHADER_TYPE_FRAGMENT:
 		{
-			fsCache_.Iterate([&](const ShaderID &id, Shader *shader) {
+			fsCache_.Iterate([&](const FShaderID &id, Shader *shader) {
 				std::string idstr;
 				id.ToString(&idstr);
 				ids.push_back(idstr);
@@ -904,13 +918,13 @@ std::string ShaderManagerGLES::DebugGetShaderString(std::string id, DebugShaderT
 	switch (type) {
 	case SHADER_TYPE_VERTEX:
 	{
-		Shader *vs = vsCache_.Get(shaderId);
+		Shader *vs = vsCache_.Get(VShaderID(shaderId));
 		return vs ? vs->GetShaderString(stringType, shaderId) : "";
 	}
 
 	case SHADER_TYPE_FRAGMENT:
 	{
-		Shader *fs = fsCache_.Get(shaderId);
+		Shader *fs = fsCache_.Get(FShaderID(shaderId));
 		return fs->GetShaderString(stringType, shaderId);
 	}
 	default:
@@ -930,7 +944,7 @@ std::string ShaderManagerGLES::DebugGetShaderString(std::string id, DebugShaderT
 // as sometimes these features might have an effect on the ID bits.
 
 #define CACHE_HEADER_MAGIC 0x83277592
-#define CACHE_VERSION 4
+#define CACHE_VERSION 5
 struct CacheHeader {
 	uint32_t magic;
 	uint32_t version;
@@ -943,6 +957,7 @@ struct CacheHeader {
 
 void ShaderManagerGLES::LoadAndPrecompile(const std::string &filename) {
 	File::IOFile f(filename, "rb");
+	u64 sz = f.GetSize();
 	if (!f.IsOpen()) {
 		return;
 	}
@@ -957,16 +972,33 @@ void ShaderManagerGLES::LoadAndPrecompile(const std::string &filename) {
 	double start = time_now_d();
 
 	// Sanity check the file contents
-	if (header.numFragmentShaders > 1000 || header.numVertexShaders > 1000 || header.numLinkedPrograms > 1000)
+	if (header.numFragmentShaders > 1000 || header.numVertexShaders > 1000 || header.numLinkedPrograms > 1000) {
+		ERROR_LOG(G3D, "Corrupt shader cache file header, aborting.");
 		return;
+	}
+
+	// Also make sure the size makes sense, in case there's corruption.
+	u64 expectedSize = sizeof(header);
+	expectedSize += header.numVertexShaders * sizeof(VShaderID);
+	expectedSize += header.numFragmentShaders * sizeof(FShaderID);
+	expectedSize += header.numLinkedPrograms * (sizeof(VShaderID) + sizeof(FShaderID));
+	if (sz != expectedSize) {
+		ERROR_LOG(G3D, "Shader cache file is wrong size: %lld instead of %lld", sz, expectedSize);
+		return;
+	}
 
 	for (int i = 0; i < header.numVertexShaders; i++) {
-		ShaderID id;
+		VShaderID id;
 		if (!f.ReadArray(&id, 1)) {
-			ERROR_LOG(G3D, "Truncated shader cache file, aborting.");
 			return;
 		}
 		if (!vsCache_.Get(id)) {
+			if (id.Bit(VS_BIT_IS_THROUGH) && id.Bit(VS_BIT_USE_HW_TRANSFORM)) {
+				// Clearly corrupt, bailing.
+				ERROR_LOG_REPORT(G3D, "Corrupt shader cache: Both IS_THROUGH and USE_HW_TRANSFORM set.");
+				return;
+			}
+
 			Shader *vs = CompileVertexShader(id);
 			if (vs->Failed()) {
 				// Give up on using the cache, just bail. We can't safely create the fallback shaders here
@@ -981,9 +1013,8 @@ void ShaderManagerGLES::LoadAndPrecompile(const std::string &filename) {
 		}
 	}
 	for (int i = 0; i < header.numFragmentShaders; i++) {
-		ShaderID id;
+		FShaderID id;
 		if (!f.ReadArray(&id, 1)) {
-			ERROR_LOG(G3D, "Truncated shader cache file, aborting.");
 			return;
 		}
 		if (!fsCache_.Get(id)) {
@@ -993,19 +1024,18 @@ void ShaderManagerGLES::LoadAndPrecompile(const std::string &filename) {
 		}
 	}
 	for (int i = 0; i < header.numLinkedPrograms; i++) {
-		ShaderID vsid, fsid;
+		VShaderID vsid;
+		FShaderID fsid;
 		if (!f.ReadArray(&vsid, 1)) {
-			ERROR_LOG(G3D, "Truncated shader cache file, aborting.");
 			return;
 		}
 		if (!f.ReadArray(&fsid, 1)) {
-			ERROR_LOG(G3D, "Truncated shader cache file, aborting.");
 			return;
 		}
 		Shader *vs = vsCache_.Get(vsid);
 		Shader *fs = fsCache_.Get(fsid);
 		if (vs && fs) {
-			LinkedShader *ls = new LinkedShader(vsid, vs, fsid, fs, vs->UseHWTransform());
+			LinkedShader *ls = new LinkedShader(vsid, vs, fsid, fs, vs->UseHWTransform(), true);
 			LinkedShaderCacheEntry entry(vs, fs, ls);
 			linkedShaderCache_.push_back(entry);
 		}
