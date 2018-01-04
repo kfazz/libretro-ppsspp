@@ -50,7 +50,7 @@ using namespace Gen;
 #define SAVE_FLAGS PUSHF();
 #define LOAD_FLAGS POPF();
 
-#else
+#elif defined(_M_X64)
 
 static u64 saved_flags;
 
@@ -442,6 +442,10 @@ void Jit::AddContinuedBlock(u32 dest)
 }
 
 bool Jit::DescribeCodePtr(const u8 *ptr, std::string &name) {
+#if defined(_M_X64)
+	if (ptr == (const u8 *)&saved_flags)
+		name = "saved_flags";
+#endif
 	if (ptr == applyRoundingMode)
 		name = "applyRoundingMode";
 	else if (ptr == updateRoundingMode)
@@ -466,7 +470,7 @@ bool Jit::DescribeCodePtr(const u8 *ptr, std::string &name) {
 			name = "UnknownOrDeletedBlock";
 		} else if (jitAddr != (u32)-1) {
 			char temp[1024];
-			const std::string label = symbolMap.GetDescription(jitAddr);
+			const std::string label = g_symbolMap->GetDescription(jitAddr);
 			if (!label.empty())
 				snprintf(temp, sizeof(temp), "%08x_%s", jitAddr, label.c_str());
 			else
@@ -548,7 +552,7 @@ void Jit::Comp_ReplacementFunc(MIPSOpcode op)
 		return;
 	}
 
-	u32 funcSize = symbolMap.GetFunctionSize(GetCompilerPC());
+	u32 funcSize = g_symbolMap->GetFunctionSize(GetCompilerPC());
 	bool disabled = (entry->flags & REPFLAG_DISABLED) != 0;
 	if (!disabled && funcSize != SymbolMap::INVALID_ADDRESS && funcSize > sizeof(u32)) {
 		// We don't need to disable hooks, the code will still run.

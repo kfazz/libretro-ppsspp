@@ -37,7 +37,6 @@
 #if defined(_WIN32)
 #include "Windows/DSoundStream.h"
 #include "Windows/MainWindow.h"
-#include "Windows/D3D9Base.h"
 #endif
 
 #include "base/display.h"
@@ -68,6 +67,7 @@
 #include "Common/FileUtil.h"
 #include "Common/LogManager.h"
 #include "Common/MemArena.h"
+#include "Common/GraphicsContext.h"
 #include "Core/Config.h"
 #include "Core/Core.h"
 #include "Core/FileLoaders/DiskCachingFileLoader.h"
@@ -101,9 +101,9 @@
 
 static UI::Theme ui_theme;
 
-#ifdef ARM
+#if defined(ARM) && defined(ANDROID)
 #include "../../android/jni/ArmEmitterTest.h"
-#elif defined(ARM64)
+#elif defined(ARM64) && defined(ANDROID)
 #include "../../android/jni/Arm64EmitterTest.h"
 #endif
 
@@ -126,6 +126,7 @@ std::string config_filename;
 
 #ifdef IOS
 bool iosCanUseJit;
+bool targetIsJailbroken;
 #endif
 
 // Really need to clean this mess of globals up... but instead I add more :P
@@ -209,7 +210,8 @@ void QtHost::ShutdownSound() { }
 std::string NativeQueryConfig(std::string query) {
 	char temp[128];
 	if (query == "screenRotation") {
-		sprintf(temp, "%i", g_Config.iScreenRotation);
+		ILOG("g_Config.screenRotation = %d", g_Config.iScreenRotation);
+		snprintf(temp, sizeof(temp), "%d", g_Config.iScreenRotation);
 		return std::string(temp);
 	} else if (query == "immersiveMode") {
 		return std::string(g_Config.bImmersiveMode ? "1" : "0");
@@ -223,7 +225,7 @@ std::string NativeQueryConfig(std::string query) {
 		}
 
 		int max_res = std::max(System_GetPropertyInt(SYSPROP_DISPLAY_XRES), System_GetPropertyInt(SYSPROP_DISPLAY_YRES)) / 480 + 1;
-		sprintf(temp, "%i", std::min(scale, max_res));
+		snprintf(temp, sizeof(temp), "%d", std::min(scale, max_res));
 		return std::string(temp);
 	} else if (query == "force44khz") {
 		return std::string("0");
@@ -284,8 +286,7 @@ bool CheckFontIsUsable(const wchar_t *fontFace) {
 }
 #endif
 
-void NativeInit(int argc, const char *argv[],
-								const char *savegame_directory, const char *external_directory, const char *installID, bool fs) {
+void NativeInit(int argc, const char *argv[], const char *savegame_dir, const char *external_dir, const char *cache_dir, bool fs) {
 #ifdef ANDROID_NDK_PROFILER
 	setenv("CPUPROFILE_FREQUENCY", "500", 1);
 	setenv("CPUPROFILE", "/sdcard/gmon.out", 1);
@@ -297,7 +298,7 @@ void NativeInit(int argc, const char *argv[],
 
 	bool skipLogo = false;
 	setlocale( LC_ALL, "C" );
-	std::string user_data_path = savegame_directory;
+	std::string user_data_path = savegame_dir;
 	pendingMessages.clear();
 #ifdef IOS
 	user_data_path += "/";
@@ -308,7 +309,7 @@ void NativeInit(int argc, const char *argv[],
 	VFSRegister("", new AssetsAssetReader());
 #elif defined(BLACKBERRY) || defined(IOS)
 	// Packed assets are included in app
-	VFSRegister("", new DirectoryAssetReader(external_directory));
+	VFSRegister("", new DirectoryAssetReader(external_dir));
 #elif !defined(MOBILE_DEVICE) && !defined(_WIN32)
 	VFSRegister("", new DirectoryAssetReader((File::GetExeDirectory() + "assets/").c_str()));
 	VFSRegister("", new DirectoryAssetReader((File::GetExeDirectory()).c_str()));
@@ -316,22 +317,22 @@ void NativeInit(int argc, const char *argv[],
 #else
 	VFSRegister("", new DirectoryAssetReader("assets/"));
 #endif
-	VFSRegister("", new DirectoryAssetReader(savegame_directory));
+	VFSRegister("", new DirectoryAssetReader(savegame_dir));
 
 #if defined(MOBILE_DEVICE) || !defined(USING_QT_UI)
 	host = new NativeHost();
 #endif
 
 #if defined(ANDROID)
-	g_Config.internalDataDirectory = savegame_directory;
+	g_Config.internalDataDirectory = savegame_dir;
 	// Maybe there should be an option to use internal memory instead, but I think
 	// that for most people, using external memory (SDCard/USB Storage) makes the
 	// most sense.
-	g_Config.memStickDirectory = std::string(external_directory) + "/";
-	g_Config.flash0Directory = std::string(external_directory) + "/flash0/";
+	g_Config.memStickDirectory = std::string(external_dir) + "/";
+	g_Config.flash0Directory = std::string(external_dir) + "/flash0/";
 #elif defined(BLACKBERRY) || defined(__SYMBIAN32__) || defined(MAEMO) || defined(IOS)
 	g_Config.memStickDirectory = user_data_path;
-	g_Config.flash0Directory = std::string(external_directory) + "/flash0/";
+	g_Config.flash0Directory = std::string(external_dir) + "/flash0/";
 #elif !defined(_WIN32)
 	std::string config;
 	if (getenv("XDG_CONFIG_HOME") != NULL)
@@ -355,11 +356,11 @@ void NativeInit(int argc, const char *argv[],
 	g_Config.AddSearchPath(g_Config.memStickDirectory + "PSP/SYSTEM/");
 	g_Config.SetDefaultPath(g_Config.memStickDirectory + "PSP/SYSTEM/");
 	g_Config.Load();
-	g_Config.externalDirectory = external_directory;
+	g_Config.externalDirectory = external_dir;
 #endif
 
 #ifdef ANDROID
-	// On Android, create a PSP directory tree in the external_directory,
+	// On Android, create a PSP directory tree in the external_dir,
 	// to hopefully reduce confusion a bit.
 	ILOG("Creating %s", (g_Config.memStickDirectory + "PSP").c_str());
 	File::CreateDir((g_Config.memStickDirectory + "PSP").c_str());
@@ -426,9 +427,9 @@ void NativeInit(int argc, const char *argv[],
 #ifndef _WIN32
 	if (g_Config.currentDirectory == "") {
 #if defined(ANDROID)
-		g_Config.currentDirectory = external_directory;
+		g_Config.currentDirectory = external_dir;
 #elif defined(BLACKBERRY) || defined(__SYMBIAN32__) || defined(MAEMO) || defined(IOS) || defined(_WIN32)
-		g_Config.currentDirectory = savegame_directory;
+		g_Config.currentDirectory = savegame_dir;
 #else
 		if (getenv("HOME") != NULL)
 			g_Config.currentDirectory = getenv("HOME");
@@ -499,25 +500,20 @@ void NativeInit(int argc, const char *argv[],
 
 	// We do this here, instead of in NativeInitGraphics, because the display may be reset.
 	// When it's reset we don't want to forget all our managed things.
-	if (g_Config.iGPUBackend == GPU_BACKEND_OPENGL) {
+	SetGPUBackend((GPUBackend) g_Config.iGPUBackend);
+	if (GetGPUBackend() == GPUBackend::OPENGL) {
 		gl_lost_manager_init();
+	}
+
+	if (cache_dir && strlen(cache_dir)) {
+		DiskCachingFileLoaderCache::SetCacheDir(cache_dir);
+		g_Config.appCacheDirectory = cache_dir;
 	}
 }
 
-void NativeInitGraphics() {
-#ifndef _WIN32
-	// Force backend to GL
-	g_Config.iGPUBackend = GPU_BACKEND_OPENGL;
-#endif
-
-	if (g_Config.iGPUBackend == GPU_BACKEND_OPENGL) {
-		thin3d = T3DCreateGLContext();
-		CheckGLExtensions();
-	} else {
-#ifdef _WIN32
-		thin3d = D3D9_CreateThin3DContext();
-#endif
-	}
+void NativeInitGraphics(GraphicsContext *graphicsContext) {
+	Core_SetGraphicsContext(graphicsContext);
+	thin3d = graphicsContext->CreateThin3DContext();
 
 	ui_draw2d.SetAtlas(&ui_atlas);
 	ui_draw2d_front.SetAtlas(&ui_atlas);
@@ -690,27 +686,15 @@ void DrawDownloadsOverlay(UIContext &dc) {
 	dc.Flush();
 }
 
-void NativeRender() {
+void NativeRender(GraphicsContext *graphicsContext) {
 	g_GameManager.Update();
-
-	thin3d->Clear(T3DClear::COLOR | T3DClear::DEPTH | T3DClear::STENCIL, 0xFF000000, 0.0f, 0);
-
-	T3DViewport viewport;
-	viewport.TopLeftX = 0;
-	viewport.TopLeftY = 0;
-	viewport.Width = pixel_xres;
-	viewport.Height = pixel_yres;
-	viewport.MaxDepth = 1.0;
-	viewport.MinDepth = 0.0;
-	thin3d->SetViewports(1, &viewport);
-	thin3d->SetTargetSize(pixel_xres, pixel_yres);
 
 	float xres = dp_xres;
 	float yres = dp_yres;
 
 	// Apply the UIContext bounds as a 2D transformation matrix.
 	Matrix4x4 ortho;
-	if (g_Config.iGPUBackend == GPU_BACKEND_DIRECT3D9) {
+	if (GetGPUBackend() == GPUBackend::DIRECT3D9) {
 		ortho.setOrthoD3D(0.0f, xres, yres, 0.0f, -1.0f, 1.0f);
 		Matrix4x4 translation;
 		translation.setTranslation(Vec3(-0.5f, -0.5f, 0.0f));
@@ -735,21 +719,22 @@ void NativeRender() {
 
 	if (resized) {
 		resized = false;
-		if (g_Config.iGPUBackend == GPU_BACKEND_DIRECT3D9) {
-#ifdef _WIN32
-			D3D9_Resize(0);
-#endif
+
+		graphicsContext->Resize();
+		// TODO: Move this to new GraphicsContext objects for each backend.
+#ifndef _WIN32
+		if (GetGPUBackend() == GPUBackend::OPENGL) {
+			PSP_CoreParameter().pixelWidth = pixel_xres;
+			PSP_CoreParameter().pixelHeight = pixel_yres;
+			NativeMessageReceived("gpu resized", "");
 		}
+#endif
 	}
 }
 
 void HandleGlobalMessage(const std::string &msg, const std::string &value) {
 	if (msg == "inputDeviceConnected") {
 		KeyMap::NotifyPadConnected(value);
-	}
-
-	if (msg == "cacheDir") {
-		DiskCachingFileLoaderCache::SetCacheDir(value);
 	}
 }
 
@@ -773,7 +758,7 @@ void NativeDeviceLost() {
 	g_gameInfoCache.Clear();
 	screenManager->deviceLost();
 
-	if (g_Config.iGPUBackend == GPU_BACKEND_OPENGL) {
+	if (GetGPUBackend() == GPUBackend::OPENGL) {
 		gl_lost();
 	}
 	// Should dirty EVERYTHING
@@ -896,20 +881,7 @@ bool NativeAxis(const AxisInput &axis) {
 	//now transform out current tilt to the calibrated coordinate system
 	Tilt trueTilt = GenTilt(baseTilt, currentTilt, g_Config.bInvertTiltX, g_Config.bInvertTiltY, g_Config.fDeadzoneRadius, xSensitivity, ySensitivity);
 
-	//now send the appropriate tilt event
-	switch (g_Config.iTiltInputType) {
-		case TILT_ANALOG:
-			GenerateAnalogStickEvent(trueTilt);
-			break;
-		
-		case TILT_DPAD:
-			GenerateDPadEvent(trueTilt);
-			break;
-		
-		case TILT_ACTION_BUTTON:
-			GenerateActionButtonEvent(trueTilt);
-			break;
-	}
+	TranslateTiltToInput(trueTilt);
 	return true;
 }
 
@@ -944,7 +916,7 @@ void NativeResized() {
 }
 
 void NativeShutdown() {
-	if (g_Config.iGPUBackend == GPU_BACKEND_OPENGL) {
+	if (GetGPUBackend() == GPUBackend::OPENGL) {
 		gl_lost_manager_shutdown();
 	}
 
@@ -977,4 +949,8 @@ void NativeShutdown() {
 #ifdef _WIN32
 	RemoveFontResourceEx(L"assets/Roboto-Condensed.ttf", FR_PRIVATE, NULL);
 #endif
+}
+
+void NativePermissionStatus(SystemPermission permission, PermissionStatus status) {
+	// TODO: Send this through the screen system? Nicer than listening to string messages
 }

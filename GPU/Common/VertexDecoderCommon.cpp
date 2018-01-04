@@ -27,6 +27,8 @@
 #include "Core/MemMap.h"
 #include "Core/HDRemaster.h"
 #include "Core/Reporting.h"
+#include "Core/MIPS/JitCommon/JitCommon.h"
+#include "GPU/Common/ShaderCommon.h"
 #include "GPU/GPUState.h"
 #include "GPU/ge_constants.h"
 #include "GPU/Math3D.h"
@@ -136,7 +138,7 @@ void PrintDecodedVertex(VertexReader &vtx) {
 	printf("P: %f %f %f\n", pos[0], pos[1], pos[2]);
 }
 
-VertexDecoder::VertexDecoder() : jitted_(0), decoded_(nullptr), ptr_(nullptr) {
+VertexDecoder::VertexDecoder() : jitted_(0), jittedSize_(0), decoded_(nullptr), ptr_(nullptr) {
 }
 
 void VertexDecoder::Step_WeightsU8() const
@@ -1069,7 +1071,7 @@ void VertexDecoder::SetVertexType(u32 fmt, const VertexDecoderOptions &options, 
 
 	// Attempt to JIT as well
 	if (jitCache && g_Config.bVertexDecoderJit) {
-		jitted_ = jitCache->Compile(*this);
+		jitted_ = jitCache->Compile(*this, &jittedSize_);
 		if (!jitted_) {
 			WARN_LOG(G3D, "Vertex decoder JIT failed! fmt = %08x", fmt_);
 		}
@@ -1128,6 +1130,40 @@ int VertexDecoder::ToString(char *output) const {
 	return output - start;
 }
 
+std::string VertexDecoder::GetString(DebugShaderStringType stringType) {
+	char buffer[256];
+	switch (stringType) {
+	case SHADER_STRING_SHORT_DESC:
+		ToString(buffer);
+		return std::string(buffer);
+	case SHADER_STRING_SOURCE_CODE:
+		{
+			if (!jitted_)
+				return "Not compiled";
+			std::vector<std::string> lines;
+#if defined(ARM64)
+			lines = DisassembleArm64((const u8 *)jitted_, jittedSize_);
+#elif defined(ARM)
+			lines = DisassembleArm2((const u8 *)jitted_, jittedSize_);
+#elif defined(MIPS)
+			// No MIPS disassembler defined
+#else
+			lines = DisassembleX86((const u8 *)jitted_, jittedSize_);
+#endif
+			std::string buffer;
+			for (auto line : lines) {
+				buffer += line;
+				buffer += "\n";
+			}
+			return buffer;
+		}
+
+	default:
+		return "N/A";
+	}
+}
+
+
 VertexDecoderJitCache::VertexDecoderJitCache()
 #ifdef ARM64
  : fp(this)
@@ -1137,17 +1173,15 @@ VertexDecoderJitCache::VertexDecoderJitCache()
 	AllocCodeSpace(1024 * 64 * 4);
 
 	// Add some random code to "help" MSVC's buggy disassembler :(
-#if defined(_WIN32)
+#if defined(_WIN32) && (defined(_M_IX86) || defined(_M_X64))
 	using namespace Gen;
 	for (int i = 0; i < 100; i++) {
 		MOV(32, R(EAX), R(EBX));
 		RET();
 	}
-#else
-#ifdef ARM
+#elif defined(ARM)
 	BKPT(0);
 	BKPT(0);
-#endif
 #endif
 }
 

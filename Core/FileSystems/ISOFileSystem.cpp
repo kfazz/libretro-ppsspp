@@ -287,10 +287,13 @@ void ISOFileSystem::ReadDirectory(u32 startsector, u32 dirsize, TreeEntry *root,
 					if (!restrictTree.empty())
 						doRecurse = level < restrictTree.size() && restrictTree[level] == e->name;
 
-					if (doRecurse)
+					if (doRecurse) {
 						ReadDirectory(dir.firstDataSector(), dir.dataLength(), e, level + 1);
-					else
+					} else {
+						// The entry is not kept, must free it.
+						delete e;
 						continue;
+					}
 				}
 			}
 			root->children.push_back(e);
@@ -555,8 +558,10 @@ size_t ISOFileSystem::ReadFile(u32 handle, u8 *pointer, s64 size, int &usec)
 		if (e.isRawSector) {
 			positionOnIso = e.sectorStart * 2048ULL + e.seekPos;
 			fileSize = (s64)e.openSize;
+		} else if (e.file == nullptr) {
+			ERROR_LOG(FILESYS, "File no longer exists (loaded savestate with different ISO?)");
+			return 0;
 		} else {
-			_dbg_assert_msg_(FILESYS, e.file != 0, "Expecting non-raw fd to have a tree entry.");
 			positionOnIso = e.file->startingPosition + e.seekPos;
 			fileSize = e.file->size;
 		}
@@ -812,8 +817,7 @@ void ISOFileSystem::DoState(PointerWrap &p)
 			bool hasFile = of.file != NULL;
 			p.Do(hasFile);
 			if (hasFile) {
-				std::string path = "";
-				path = EntryFullPath(of.file);
+				std::string path = EntryFullPath(of.file);
 				p.Do(path);
 			}
 		}

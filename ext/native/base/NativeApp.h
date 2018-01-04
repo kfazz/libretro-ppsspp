@@ -14,6 +14,19 @@ struct TouchInput;
 struct KeyInput;
 struct AxisInput;
 
+class GraphicsContext;
+
+enum SystemPermission {
+	SYSTEM_PERMISSION_STORAGE,
+};
+
+enum PermissionStatus {
+	PERMISSION_STATUS_UNKNOWN,
+	PERMISSION_STATUS_DENIED,
+	PERMISSION_STATUS_PENDING,
+	PERMISSION_STATUS_GRANTED,
+};
+
 // The first function to get called, just write strings to the two pointers.
 // This might get called multiple times in some implementations, you must be able to handle that.
 void NativeGetAppInfo(std::string *app_dir_name, std::string *app_nice_name, bool *landscape, std::string *version);
@@ -33,11 +46,11 @@ bool NativeIsAtTopLevel();
 // The very first function to be called after NativeGetAppInfo. Even NativeMix is not called
 // before this, although it may be called at any point in time afterwards (on any thread!)
 // This functions must NOT call OpenGL. Main thread.
-void NativeInit(int argc, const char *argv[], const char *savegame_directory, const char *external_directory, const char *installID, bool fs=false);
+void NativeInit(int argc, const char *argv[], const char *savegame_dir, const char *external_dir, const char *cache_dir, bool fs=false);
 
 // Runs after NativeInit() at some point. May (and probably should) call OpenGL.
 // Should not initialize anything screen-size-dependent - do that in NativeResized.
-void NativeInitGraphics();
+void NativeInitGraphics(GraphicsContext *graphicsContext);
 
 // Signals that you need to destroy and recreate all buffered OpenGL resources,
 // like textures, vbo etc.
@@ -62,7 +75,7 @@ bool NativeAxis(const AxisInput &axis);
 
 // Called when it's time to render. If the device can keep up, this
 // will also be called sixty times per second. Main thread.
-void NativeRender();
+void NativeRender(GraphicsContext *graphicsContext);
 
 // This should render num_samples 44khz stereo samples.
 // Try not to make too many assumptions on the granularity
@@ -94,6 +107,8 @@ void NativeShutdown();
 void NativeRestoreState(bool firstTime);  // onCreate
 void NativeSaveState();  // onDestroy
 
+void NativePermissionStatus(SystemPermission permission, PermissionStatus status);
+
 // Calls back into Java / SDL
 // These APIs must be implemented by every port (for example app-android.cpp, PCMain.cpp).
 // You are free to call these.
@@ -118,6 +133,8 @@ void LaunchEmail(const char *email_address);
 bool System_InputBoxGetString(const char *title, const char *defaultValue, char *outValue, size_t outlength);
 bool System_InputBoxGetWString(const wchar_t *title, const std::wstring &defaultValue, std::wstring &outValue);
 void System_SendMessage(const char *command, const char *parameter);
+PermissionStatus System_GetPermissionStatus(SystemPermission permission);
+void System_AskForPermission(SystemPermission permission);
 
 // This will get muddy with multi-screen support :/ But this will always be the type of the main device.
 enum SystemDeviceType {
@@ -149,6 +166,8 @@ enum SystemProperty {
 	SYSPROP_AUDIO_FRAMES_PER_BUFFER,
 	SYSPROP_AUDIO_OPTIMAL_SAMPLE_RATE,
 	SYSPROP_AUDIO_OPTIMAL_FRAMES_PER_BUFFER,
+
+	SYSPROP_SUPPORTS_PERMISSIONS,
 };
 
 std::string System_GetProperty(SystemProperty prop);

@@ -116,6 +116,8 @@ public:
 
 	std::vector<std::string> GetSaveDataDirectories();
 
+	std::string GetTitle();
+	void SetTitle(const std::string &newTitle);
 
 	// Hold this when reading or writing from the GameInfo.
 	// Don't need to hold it when just passing around the pointer,
@@ -123,8 +125,6 @@ public:
 	// to it.
 	recursive_mutex lock;
 
-	std::string path;
-	std::string title;  // for easy access, also available in paramSFO.
 	std::string id;
 	std::string id_version;
 	int disc_total;
@@ -166,6 +166,9 @@ public:
 	bool pending;
 
 protected:
+	// Note: this can change while loading, use GetTitle().
+	std::string title;
+
 	FileLoader *fileLoader;
 	std::string filePath_;
 };

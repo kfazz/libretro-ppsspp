@@ -31,6 +31,26 @@ ARCH_FILES := \
   $(SRC)/GPU/Common/VertexDecoderX86.cpp
 endif
 
+ifeq ($(TARGET_ARCH_ABI),x86_64)
+ARCH_FILES := \
+  $(SRC)/Common/ABI.cpp \
+  $(SRC)/Common/x64Emitter.cpp \
+  $(SRC)/Common/CPUDetect.cpp \
+  $(SRC)/Common/Thunk.cpp \
+  $(SRC)/Core/MIPS/x86/CompALU.cpp \
+  $(SRC)/Core/MIPS/x86/CompBranch.cpp \
+  $(SRC)/Core/MIPS/x86/CompFPU.cpp \
+  $(SRC)/Core/MIPS/x86/CompLoadStore.cpp \
+  $(SRC)/Core/MIPS/x86/CompVFPU.cpp \
+  $(SRC)/Core/MIPS/x86/CompReplace.cpp \
+  $(SRC)/Core/MIPS/x86/Asm.cpp \
+  $(SRC)/Core/MIPS/x86/Jit.cpp \
+  $(SRC)/Core/MIPS/x86/JitSafeMem.cpp \
+  $(SRC)/Core/MIPS/x86/RegCache.cpp \
+  $(SRC)/Core/MIPS/x86/RegCacheFPU.cpp \
+  $(SRC)/GPU/Common/VertexDecoderX86.cpp
+endif
+
 ifeq ($(findstring armeabi-v7a,$(TARGET_ARCH_ABI)),armeabi-v7a)
 ARCH_FILES := \
   $(SRC)/GPU/Common/TextureDecoderNEON.cpp.neon \
@@ -99,8 +119,14 @@ ARCH_FILES := \
   ArmEmitterTest.cpp
 endif
 
+EGL_FILES := \
+  $(SRC)/Common/GL/GLInterface/EGL.cpp \
+  $(SRC)/Common/GL/GLInterface/EGLAndroid.cpp \
+  $(SRC)/Common/GL/GLInterface/GLInterface.cpp
+
 EXEC_AND_LIB_FILES := \
   $(ARCH_FILES) \
+  $(EGL_FILES) \
   TestRunner.cpp \
   $(SRC)/Core/MIPS/MIPS.cpp.arm \
   $(SRC)/Core/MIPS/MIPSAnalyst.cpp \
@@ -156,6 +182,8 @@ EXEC_AND_LIB_FILES := \
   $(SRC)/GPU/Common/FramebufferCommon.cpp \
   $(SRC)/GPU/Common/GPUDebugInterface.cpp \
   $(SRC)/GPU/Common/IndexGenerator.cpp.arm \
+  $(SRC)/GPU/Common/ShaderId.cpp.arm \
+  $(SRC)/GPU/Common/GPUStateUtils.cpp.arm \
   $(SRC)/GPU/Common/SoftwareTransformCommon.cpp.arm \
   $(SRC)/GPU/Common/VertexDecoderCommon.cpp.arm \
   $(SRC)/GPU/Common/TextureCacheCommon.cpp.arm \
@@ -197,6 +225,7 @@ EXEC_AND_LIB_FILES := \
   $(SRC)/Core/HW/MpegDemux.cpp.arm \
   $(SRC)/Core/HW/MediaEngine.cpp.arm \
   $(SRC)/Core/HW/SasAudio.cpp.arm \
+  $(SRC)/Core/HW/SasReverb.cpp.arm \
   $(SRC)/Core/HW/StereoResampler.cpp.arm \
   $(SRC)/Core/Core.cpp \
   $(SRC)/Core/Compatibility.cpp \
@@ -211,6 +240,7 @@ EXEC_AND_LIB_FILES := \
   $(SRC)/Core/FileLoaders/DiskCachingFileLoader.cpp \
   $(SRC)/Core/FileLoaders/HTTPFileLoader.cpp \
   $(SRC)/Core/FileLoaders/LocalFileLoader.cpp \
+  $(SRC)/Core/FileLoaders/RamCachingFileLoader.cpp \
   $(SRC)/Core/FileLoaders/RetryingFileLoader.cpp \
   $(SRC)/Core/MemMap.cpp \
   $(SRC)/Core/MemMapFunctions.cpp \
@@ -331,6 +361,8 @@ LOCAL_SRC_FILES := \
   $(SRC)/android/jni/native-audio-so.cpp \
   $(SRC)/UI/BackgroundAudio.cpp \
   $(SRC)/UI/DevScreens.cpp \
+  $(SRC)/UI/DisplayLayoutEditor.cpp \
+  $(SRC)/UI/DisplayLayoutScreen.cpp \
   $(SRC)/UI/EmuScreen.cpp \
   $(SRC)/UI/MainScreen.cpp \
   $(SRC)/UI/MiscScreens.cpp \
@@ -349,7 +381,9 @@ LOCAL_SRC_FILES := \
   $(SRC)/UI/TouchControlVisibilityScreen.cpp \
   $(SRC)/UI/CwCheatScreen.cpp \
   $(SRC)/UI/InstallZipScreen.cpp \
-  $(SRC)/UI/NativeApp.cpp
+  $(SRC)/UI/ProfilerDraw.cpp \
+  $(SRC)/UI/NativeApp.cpp \
+  $(SRC)/UI/ComboKeyMappingScreen.cpp
 
 ifneq ($(SKIPAPP),1)
   include $(BUILD_SHARED_LIBRARY)
@@ -387,22 +421,19 @@ ifeq ($(UNITTEST),1)
   LIBARMIPS_FILES := \
 	$(SRC)/ext/armips/Archs/ARM/Arm.cpp \
 	$(SRC)/ext/armips/Archs/ARM/ArmOpcodes.cpp \
+	$(SRC)/ext/armips/Archs/ARM/ArmParser.cpp \
 	$(SRC)/ext/armips/Archs/ARM/ArmRelocator.cpp \
 	$(SRC)/ext/armips/Archs/ARM/CArmInstruction.cpp \
 	$(SRC)/ext/armips/Archs/ARM/CThumbInstruction.cpp \
 	$(SRC)/ext/armips/Archs/ARM/Pool.cpp \
 	$(SRC)/ext/armips/Archs/ARM/ThumbOpcodes.cpp \
 	$(SRC)/ext/armips/Archs/MIPS/CMipsInstruction.cpp \
-	$(SRC)/ext/armips/Archs/MIPS/CMipsMacro.cpp \
 	$(SRC)/ext/armips/Archs/MIPS/Mips.cpp \
 	$(SRC)/ext/armips/Archs/MIPS/MipsElfFile.cpp \
 	$(SRC)/ext/armips/Archs/MIPS/MipsMacros.cpp \
 	$(SRC)/ext/armips/Archs/MIPS/MipsOpcodes.cpp \
-	$(SRC)/ext/armips/Archs/MIPS/MipsPSP.cpp \
+	$(SRC)/ext/armips/Archs/MIPS/MipsParser.cpp \
 	$(SRC)/ext/armips/Archs/MIPS/PsxRelocator.cpp \
-	$(SRC)/ext/armips/Archs/Z80/CZ80Instruction.cpp \
-	$(SRC)/ext/armips/Archs/Z80/z80.cpp \
-	$(SRC)/ext/armips/Archs/Z80/z80Opcodes.cpp \
 	$(SRC)/ext/armips/Archs/Architecture.cpp \
 	$(SRC)/ext/armips/Commands/CAssemblerCommand.cpp \
 	$(SRC)/ext/armips/Commands/CAssemblerLabel.cpp \
@@ -410,31 +441,41 @@ ifeq ($(UNITTEST),1)
 	$(SRC)/ext/armips/Commands/CDirectiveConditional.cpp \
 	$(SRC)/ext/armips/Commands/CDirectiveData.cpp \
 	$(SRC)/ext/armips/Commands/CDirectiveFile.cpp \
-	$(SRC)/ext/armips/Commands/CDirectiveFill.cpp \
 	$(SRC)/ext/armips/Commands/CDirectiveMessage.cpp \
+	$(SRC)/ext/armips/Commands/CommandSequence.cpp \
 	$(SRC)/ext/armips/Core/ELF/ElfFile.cpp \
 	$(SRC)/ext/armips/Core/ELF/ElfRelocator.cpp \
 	$(SRC)/ext/armips/Core/Assembler.cpp \
-	$(SRC)/ext/armips/Core/CMacro.cpp \
 	$(SRC)/ext/armips/Core/Common.cpp \
-	$(SRC)/ext/armips/Core/Directives.cpp \
+	$(SRC)/ext/armips/Core/Expression.cpp \
 	$(SRC)/ext/armips/Core/FileManager.cpp \
-	$(SRC)/ext/armips/Core/MathParser.cpp \
 	$(SRC)/ext/armips/Core/Misc.cpp \
 	$(SRC)/ext/armips/Core/SymbolData.cpp \
 	$(SRC)/ext/armips/Core/SymbolTable.cpp \
+	$(SRC)/ext/armips/Parser/DirectivesParser.cpp \
+	$(SRC)/ext/armips/Parser/ExpressionParser.cpp \
+	$(SRC)/ext/armips/Parser/Parser.cpp \
+	$(SRC)/ext/armips/Parser/Tokenizer.cpp \
 	$(SRC)/ext/armips/Util/ByteArray.cpp \
-	$(SRC)/ext/armips/Util/CommonClasses.cpp \
 	$(SRC)/ext/armips/Util/CRC.cpp \
 	$(SRC)/ext/armips/Util/EncodingTable.cpp \
 	$(SRC)/ext/armips/Util/FileClasses.cpp \
-	$(SRC)/ext/armips/Util/StringFormat.cpp \
 	$(SRC)/ext/armips/Util/Util.cpp
 
   ifeq ($(findstring arm64-v8a,$(TARGET_ARCH_ABI)),arm64-v8a)
     TESTARMEMITTER_FILE = $(SRC)/unittest/TestArm64Emitter.cpp
-  else
+  else ifeq ($(findstring armeabi-v7a,$(TARGET_ARCH_ABI)),armeabi-v7a)
     TESTARMEMITTER_FILE = $(SRC)/unittest/TestArmEmitter.cpp
+  else
+    TESTARMEMITTER_FILE = \
+      $(SRC)/Common/ArmEmitter.cpp \
+      $(SRC)/Common/Arm64Emitter.cpp \
+      $(SRC)/Core/MIPS/ARM/ArmRegCacheFPU.cpp \
+      $(SRC)/Core/Util/DisArm64.cpp \
+      $(SRC)/ext/disarm.cpp \
+      $(SRC)/unittest/TestArmEmitter.cpp \
+      $(SRC)/unittest/TestArm64Emitter.cpp \
+      $(SRC)/unittest/TestX64Emitter.cpp
   endif
 
   LOCAL_MODULE := ppsspp_unittest

@@ -236,8 +236,15 @@ ARM64Reg Arm64RegCache::FindBestToSpill(bool unusedOnly, bool *clobbered) {
 
 		// Awesome, a clobbered reg.  Let's use it.
 		if (MIPSAnalyst::IsRegisterClobbered(ar[reg].mipsReg, compilerPC_, UNUSED_LOOKAHEAD_OPS)) {
-			*clobbered = true;
-			return reg;
+			bool canClobber = true;
+			// HI is stored inside the LO reg.  They both have to clobber at the same time.
+			if (ar[reg].mipsReg == MIPS_REG_LO) {
+				canClobber = MIPSAnalyst::IsRegisterClobbered(MIPS_REG_HI, compilerPC_, UNUSED_LOOKAHEAD_OPS);
+			}
+			if (canClobber) {
+				*clobbered = true;
+				return reg;
+			}
 		}
 
 		// Not awesome.  A used reg.  Let's try to avoid spilling.
@@ -675,6 +682,10 @@ void Arm64RegCache::FlushAll() {
 }
 
 void Arm64RegCache::SetImm(MIPSGPReg r, u64 immVal) {
+	if (r == MIPS_REG_HI) {
+		ERROR_LOG_REPORT(JIT, "Cannot set HI imm in Arm64RegCache");
+		return;
+	}
 	if (r == MIPS_REG_ZERO && immVal != 0) {
 		ERROR_LOG_REPORT(JIT, "Trying to set immediate %08x to r0 at %08x", immVal, compilerPC_);
 		return;

@@ -24,6 +24,7 @@
 #include "GPU/Common/IndexGenerator.h"
 #include "GPU/Common/VertexDecoderCommon.h"
 #include "GPU/Common/DrawEngineCommon.h"
+#include "GPU/Common/GPUStateUtils.h"
 #include "GPU/GLES/FragmentShaderGenerator.h"
 #include "gfx/gl_common.h"
 #include "gfx/gl_lost_manager.h"
@@ -76,7 +77,6 @@ public:
 		drawsUntilNextFullHash = 0;
 		flags = 0;
 	}
-	~VertexArrayInfo();
 
 	enum Status {
 		VAI_NEW,
@@ -126,6 +126,7 @@ public:
 	void SetFragmentTestCache(FragmentTestCache *testCache) {
 		fragmentTestCache_ = testCache;
 	}
+	void RestoreVAO();
 	void InitDeviceObjects();
 	void DestroyDeviceObjects();
 	void GLLost() override;
@@ -187,18 +188,23 @@ public:
 		SubmitPrim(verts, inds, prim, vertexCount, vertType, bytesRead);
 	}
 
+	GLuint BindBuffer(const void *p, size_t sz);
+	GLuint BindBuffer(const void *p1, size_t sz1, const void *p2, size_t sz2);
+	GLuint BindElementBuffer(const void *p, size_t sz);
+	void DecimateBuffers();
+
 private:
 	void DecodeVerts();
 	void DecodeVertsStep();
 	void DoFlush();
 	void ApplyDrawState(int prim);
 	void ApplyDrawStateLate();
-	void ApplyBlendState();
-	void ApplyStencilReplaceAndLogicOp(ReplaceAlphaType replaceAlphaWithStencil);
 	bool ApplyShaderBlending();
-	inline void ResetShaderBlending();
-	GLuint AllocateBuffer();
+	void ResetShaderBlending();
+
+	GLuint AllocateBuffer(size_t sz);
 	void FreeBuffer(GLuint buf);
+	void FreeVertexArray(VertexArrayInfo *vai);
 
 	u32 ComputeMiniHash();
 	ReliableHashType ComputeHash();  // Reads deferred vertex data.
@@ -231,7 +237,18 @@ private:
 
 	// Vertex buffer objects
 	// Element buffer objects
+	struct BufferNameInfo {
+		BufferNameInfo() : sz(0), used(false), lastFrame(0) {}
+
+		size_t sz;
+		bool used;
+		int lastFrame;
+	};
 	std::vector<GLuint> bufferNameCache_;
+	std::unordered_map<GLuint, BufferNameInfo> bufferNameInfo_;
+	std::vector<GLuint> buffersThisFrame_;
+	size_t bufferNameCacheSize_;
+	GLuint sharedVao_;
 
 	// Other
 	ShaderManager *shaderManager_;
@@ -245,6 +262,7 @@ private:
 	int vertexCountInDrawCalls;
 
 	int decimationCounter_;
+	int bufferDecimationCounter_;
 	int decodeCounter_;
 	u32 dcid_;
 

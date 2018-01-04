@@ -1,17 +1,22 @@
 #ifdef _WIN32
 #include "stdafx.h"
 #endif
-#include "MIPSAsm.h"
 #include <cstdarg>
 #include <cstring>
-#include "util/text/utf8.h"
-#include "Core/MemMapHelpers.h"
-#include "Core/MIPS/JitCommon/NativeJit.h"
-#include "Core/Debugger/SymbolMap.h"
+#include <vector>
+
+#include "Common/CommonTypes.h"
 
 #if defined(_WIN32) || defined(ANDROID)
+// This has to be before basictypes to avoid a define conflict.
 #include "ext/armips/Core/Assembler.h"
 #endif
+
+#include "util/text/utf8.h"
+#include "Core/Debugger/SymbolMap.h"
+#include "Core/MemMapHelpers.h"
+#include "Core/MIPS/JitCommon/NativeJit.h"
+#include "Core/MIPS/MIPSAsm.h"
 
 namespace MIPSAsm
 {	
@@ -31,10 +36,10 @@ public:
 		address = 0;
 	}
 
-	virtual bool open(bool onlyCheck) { return true; };
-	virtual void close() { };
-	virtual bool isOpen() { return true; };
-	virtual bool write(void* data, size_t length)
+	bool open(bool onlyCheck) override{ return true; };
+	void close() override { };
+	bool isOpen() override { return true; };
+	bool write(void* data, size_t length) override
 	{
 		if (!Memory::IsValidAddress((u32)(address+length-1)))
 			return false;
@@ -48,16 +53,16 @@ public:
 		address += length;
 		return true;
 	}
-	virtual u64 getVirtualAddress() { return address; };
-	virtual u64 getPhysicalAddress() { return getVirtualAddress(); };
-	virtual bool seekVirtual(u64 virtualAddress)
+	u64 getVirtualAddress() override { return address; };
+	u64 getPhysicalAddress() override { return getVirtualAddress(); };
+	bool seekVirtual(u64 virtualAddress) override
 	{
 		if (!Memory::IsValidAddress(virtualAddress))
 			return false;
 		address = virtualAddress;
 		return true;
 	}
-	virtual bool seekPhysical(u64 physicalAddress) { return seekVirtual(physicalAddress); }
+	bool seekPhysical(u64 physicalAddress) override { return seekVirtual(physicalAddress); }
 private:
 	u64 address;
 };
@@ -79,7 +84,7 @@ bool MipsAssembleOpcode(const char* line, DebugInterface* cpu, u32 address)
 	args.memoryFile = &file;
 	args.errorsResult = &errors;
 	
-	symbolMap.GetLabels(args.labels);
+	g_symbolMap->GetLabels(args.labels);
 
 	errorText = L"";
 	if (!runArmips(args))

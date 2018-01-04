@@ -95,8 +95,10 @@ bool IsFocusMovementEnabled() {
 void MeasureBySpec(Size sz, float contentWidth, MeasureSpec spec, float *measured) {
 	*measured = sz;
 	if (sz == WRAP_CONTENT) {
-		if (spec.type == UNSPECIFIED || spec.type == AT_MOST)
+		if (spec.type == UNSPECIFIED)
 			*measured = contentWidth;
+		else if (spec.type == AT_MOST)
+			*measured = contentWidth < spec.size ? contentWidth : spec.size;
 		else if (spec.type == EXACTLY)
 			*measured = spec.size;
 	} else if (sz == FILL_PARENT)	{
@@ -149,6 +151,39 @@ void View::Measure(const UIContext &dc, MeasureSpec horiz, MeasureSpec vert) {
 void View::GetContentDimensions(const UIContext &dc, float &w, float &h) const {
 	w = 10.0f;
 	h = 10.0f;
+}
+
+void View::Query(float x, float y, std::vector<View *> &list) {
+	if (bounds_.Contains(x, y)) {
+		list.push_back(this);
+	}
+}
+
+std::string View::Describe() const {
+	return StringFromFormat("%0.1f,%0.1f %0.1fx%0.1f", bounds_.x, bounds_.y, bounds_.w, bounds_.h);
+}
+
+
+void View::PersistData(PersistStatus status, std::string anonId, PersistMap &storage) {
+	// Remember if this view was a focused view.
+	std::string tag = Tag();
+	if (tag.empty()) {
+		tag = anonId;
+	}
+
+	const std::string focusedKey = "ViewFocused::" + tag;
+	switch (status) {
+	case UI::PERSIST_SAVE:
+		if (HasFocus()) {
+			storage[focusedKey].resize(1);
+		}
+		break;
+	case UI::PERSIST_RESTORE:
+		if (storage.find(focusedKey) != storage.end()) {
+			SetFocus();
+		}
+		break;
+	}
 }
 
 Point View::GetFocusPosition(FocusDirection dir) {
@@ -623,9 +658,8 @@ void TextView::Draw(UIContext &dc) {
 		clip = false;
 	}
 	if (clip) {
-		Bounds clipRect = bounds_.Expand(10);  // TODO: Remove this hackery
 		dc.Flush();
-		dc.PushScissor(clipRect);
+		dc.PushScissor(bounds_);
 	}
 	// In case it's been made focusable.
 	if (HasFocus()) {
@@ -935,11 +969,17 @@ bool Slider::Key(const KeyInput &input) {
 }
 
 void Slider::Touch(const TouchInput &input) {
+	// Calling it afterwards, so dragging_ hasn't been set false yet when checking it above.
 	Clickable::Touch(input);
-	if (dragging_ || bounds_.Contains(input.x, input.y)) {
+	if (dragging_) {
 		float relativeX = (input.x - (bounds_.x + paddingLeft_)) / (bounds_.w - paddingLeft_ - paddingRight_);
 		*value_ = floorf(relativeX * (maxValue_ - minValue_) + minValue_ + 0.5f);
 		Clamp();
+		EventParams params;
+		params.v = this;
+		params.a = (uint32_t)(*value_);
+		params.f = (float)(*value_);
+		OnChange.Trigger(params);
 	}
 }
 
@@ -1010,10 +1050,16 @@ bool SliderFloat::Key(const KeyInput &input) {
 }
 
 void SliderFloat::Touch(const TouchInput &input) {
-	if (dragging_ || bounds_.Contains(input.x, input.y)) {
+	Clickable::Touch(input);
+	if (dragging_) {
 		float relativeX = (input.x - (bounds_.x + paddingLeft_)) / (bounds_.w - paddingLeft_ - paddingRight_);
 		*value_ = (relativeX * (maxValue_ - minValue_) + minValue_);
 		Clamp();
+		EventParams params;
+		params.v = this;
+		params.a = (uint32_t)(*value_);
+		params.f = (float)(*value_);
+		OnChange.Trigger(params);
 	}
 }
 

@@ -32,10 +32,8 @@
 #include "Core/MIPS/MIPS.h"
 
 #ifdef _WIN32
-#ifndef _XBOX
-#include "Windows/OpenGLBase.h"
-#include "Windows/D3D9Base.h"
-#endif
+#include "Windows/GPU/WindowsGLContext.h"
+#include "Windows/GPU/D3D9Context.h"
 #include "Windows/InputDevice.h"
 #endif
 
@@ -56,12 +54,17 @@ static std::set<Core_ShutdownFunc> shutdownFuncs;
 static bool windowHidden = false;
 static double lastActivity = 0.0;
 static double lastKeepAwake = 0.0;
+static GraphicsContext *graphicsContext;
 
 #if defined (_WIN32) && !defined (__LIBRETRO__)
 InputState input_state;
 #else
 extern InputState input_state;
 #endif
+
+void Core_SetGraphicsContext(GraphicsContext *ctx) {
+  graphicsContext = ctx;
+}
 
 void Core_NotifyWindowHidden(bool hidden) {
 	windowHidden = hidden;
@@ -165,26 +168,12 @@ void UpdateRunLoop() {
 	}
 
 	if (GetUIState() != UISTATE_EXIT) {
-		NativeRender();
+		NativeRender(graphicsContext);
 	}
 }
 
-#if defined(USING_WIN_UI)
-
-void GPU_SwapBuffers() {
-	switch (g_Config.iGPUBackend) {
-	case GPU_BACKEND_OPENGL:
-		GL_SwapBuffers();
-		break;
-	case GPU_BACKEND_DIRECT3D9:
-		D3D9_SwapBuffers();
-		break;
-	}
-}
-
-#endif
-
-void Core_RunLoop() {
+void Core_RunLoop(GraphicsContext *ctx) {
+	graphicsContext = ctx;
 	while ((GetUIState() != UISTATE_INGAME || !PSP_IsInited()) && GetUIState() != UISTATE_EXIT) {
 		time_update();
 #if defined(USING_WIN_UI)
@@ -198,7 +187,7 @@ void Core_RunLoop() {
 		if (sleepTime > 0)
 			Sleep(sleepTime);
 		if (!windowHidden) {
-			GPU_SwapBuffers();
+			ctx->SwapBuffers();
 		}
 #else
 		UpdateRunLoop();
@@ -210,7 +199,7 @@ void Core_RunLoop() {
 		UpdateRunLoop();
 #if defined(USING_WIN_UI)
 		if (!windowHidden && !Core_IsStepping()) {
-			GPU_SwapBuffers();
+			ctx->SwapBuffers();
 
 			// Keep the system awake for longer than normal for cutscenes and the like.
 			const double now = time_now_d();
@@ -248,7 +237,7 @@ static inline void CoreStateProcessed() {
 }
 
 // Some platforms, like Android, do not call this function but handle things on their own.
-void Core_Run()
+void Core_Run(GraphicsContext *ctx)
 {
 #if defined(_DEBUG)
 	host->UpdateDisassembly();
@@ -263,7 +252,7 @@ reswitch:
 			if (GetUIState() == UISTATE_EXIT) {
 				return;
 			}
-			Core_RunLoop();
+			Core_RunLoop(ctx);
 #if defined(USING_QT_UI) && !defined(MOBILE_DEVICE)
 			return;
 #else
@@ -275,7 +264,7 @@ reswitch:
 		{
 		case CORE_RUNNING:
 			// enter a fast runloop
-			Core_RunLoop();
+			Core_RunLoop(ctx);
 			break;
 
 		// We should never get here on Android.
@@ -333,9 +322,7 @@ reswitch:
 			return;
 		}
 	}
-
 }
-
 
 void Core_EnableStepping(bool step) {
 	if (step) {

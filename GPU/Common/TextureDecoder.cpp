@@ -476,16 +476,19 @@ CheckAlphaResult CheckAlphaABGR4444SSE2(const u32 *pixelData, int stride, int w,
 		__m128i hasAnyCursor = _mm_setzero_si128();
 
 		for (int i = 0; i < w8; ++i) {
+			// This moves XXXA to A000.
 			const __m128i a = _mm_slli_epi16(_mm_load_si128(&p[i]), 12);
 
+			// At least one bit in isZero, and therefore hasZeroCursor, will get set if there's a zero.
 			const __m128i isZero = _mm_cmpeq_epi16(a, zero);
 			hasZeroCursor = _mm_or_si128(hasZeroCursor, isZero);
 
-			// If a = F, isNotFull will be 0 -> hasAny will be 0.
-			// If a = 0, a & isNotFull will be 0 -> hasAny will be 0.
+			// If a = F, isFull will be 1 -> hasAny will be 0.
+			// If a = 0, a & !isFull will be 0 -> hasAny will be 0.
 			// In any other case, hasAny will have some bits set.
-			const __m128i isNotFull = _mm_cmplt_epi32(a, full);
-			hasAnyCursor = _mm_or_si128(hasAnyCursor, _mm_and_si128(a, isNotFull));
+			const __m128i isFull = _mm_cmpeq_epi32(a, full);
+			const __m128i hasAny = _mm_andnot_si128(isFull, a);
+			hasAnyCursor = _mm_or_si128(hasAnyCursor, hasAny);
 		}
 		p += stride8;
 
@@ -677,8 +680,6 @@ CheckAlphaResult CheckAlphaABGR1555Basic(const u32 *pixelData, int stride, int w
 #endif
 	}
 
-	u32 hitZeroAlpha = 0;
-
 	const u32 *p = pixelData;
 	const int w2 = (w + 1) / 2;
 	const int stride2 = (stride + 1) / 2;
@@ -755,7 +756,7 @@ CheckAlphaResult CheckAlphaRGBA5551Basic(const u32 *pixelData, int stride, int w
 			return CHECKALPHA_ZERO;
 		}
 
-		p += stride;
+		p += stride2;
 	}
 
 	return CHECKALPHA_FULL;

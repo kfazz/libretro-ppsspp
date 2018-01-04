@@ -23,6 +23,7 @@
 #include "Common/CommonTypes.h"
 #include "Core/Reporting.h"
 #include "GPU/ge_constants.h"
+#include "GPU/Common/ShaderCommon.h"
 #ifdef ARM
 #include "Common/ArmEmitter.h"
 #elif defined(ARM64)
@@ -374,7 +375,7 @@ public:
 		case DEC_U16_4: for (int i = 0; i < 4; i++) weights[i] = s[i] * (1.f / 32768.f); break;
 		default:
 			ERROR_LOG_REPORT_ONCE(fmtw0, G3D, "Reader: Unsupported W0 Format %d", decFmt_.w0fmt);
-			memset(weights, 0, sizeof(float) * 4);
+			memset(weights, 0, sizeof(float) * 8);
 			break;
 		}
 
@@ -465,6 +466,8 @@ public:
 	bool hasTexcoord() const { return tc != 0; }
 	int VertexSize() const { return size; }  // PSP format size
 
+	std::string GetString(DebugShaderStringType stringType);
+
 	void Step_WeightsU8() const;
 	void Step_WeightsU16() const;
 	void Step_WeightsU8ToFloat() const;
@@ -543,6 +546,7 @@ public:
 	mutable const u8 *ptr_;
 
 	JittedVertexDecoder jitted_;
+	int32_t jittedSize_;
 
 	// "Immutable" state, set at startup
 
@@ -602,7 +606,7 @@ public:
 	VertexDecoderJitCache();
 
 	// Returns a pointer to the code to run.
-	JittedVertexDecoder Compile(const VertexDecoder &dec);
+	JittedVertexDecoder Compile(const VertexDecoder &dec, int32_t *jittedSize);
 	void Clear();
 
 	void Jit_WeightsU8();

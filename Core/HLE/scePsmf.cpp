@@ -52,7 +52,6 @@ const int PSMF_PLAYER_WARMUP_FRAMES = 3;
 
 static const int VIDEO_FRAME_DURATION_TS = 3003;
 
-int psmfMaxAheadTimestamp = 40000;
 int audioSamples = 2048;  
 int audioSamplesBytes = audioSamples * 4;
 int videoPixelMode = GE_CMODE_32BIT_ABGR8888;
@@ -139,10 +138,6 @@ struct PsmfEntry {
 	int EPIndex;
 	int EPPicOffset;
 };
-
-static int getMaxAheadTimestamp(int packets) {
-	return std::max(40000, packets * 700);
-}
 
 // Some of our platforms don't play too nice with direct unaligned access.
 static u32 ReadUnalignedU32BE(const u8 *p) {
@@ -258,7 +253,6 @@ public:
 	int displayBuffer;
 	int displayBufferSize;
 	int playbackThreadPriority;
-	int psmfMaxAheadTimestamp;
 	int totalVideoStreams;
 	int totalAudioStreams;
 	int playerVersion;
@@ -456,7 +450,8 @@ void PsmfPlayer::DoState(PointerWrap &p) {
 	p.Do(displayBuffer);
 	p.Do(displayBufferSize);
 	p.Do(playbackThreadPriority);
-	p.Do(psmfMaxAheadTimestamp);
+	int oldMaxAheadTimestamp = 0;
+	p.Do(oldMaxAheadTimestamp);
 	if (s >= 4) {
 		p.Do(totalDurationTimestamp);
 	} else {
@@ -1033,7 +1028,6 @@ static int scePsmfPlayerCreate(u32 psmfPlayer, u32 dataPtr)
 	videoPixelMode = GE_CMODE_32BIT_ABGR8888;
 	videoLoopStatus = PSMF_PLAYER_CONFIG_NO_LOOP;
 
-	psmfplayer->psmfMaxAheadTimestamp = getMaxAheadTimestamp(581);
 	psmfplayer->status = PSMF_PLAYER_STATUS_INIT;
 	return hleDelayResult(0, "player create", 20000);
 }
@@ -1546,7 +1540,7 @@ static int scePsmfPlayerGetVideoData(u32 psmfPlayer, u32 videoDataAddr)
 	int bufw = videoData->frameWidth == 0 ? 512 : videoData->frameWidth & ~1;
 	// Always write the video frame, even after the video has ended.
 	int displaybufSize = psmfplayer->mediaengine->writeVideoImage(videoData->displaybuf, bufw, videoPixelMode);
-	gpu->InvalidateCache(videoData->displaybuf, displaybufSize, GPU_INVALIDATE_SAFE);
+	gpu->NotifyVideoUpload(videoData->displaybuf, displaybufSize, bufw, videoPixelMode);
 	__PsmfUpdatePts(psmfplayer, videoData);
 
 	_PsmfPlayerFillRingbuffer(psmfplayer);

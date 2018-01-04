@@ -16,6 +16,8 @@ UIContext::UIContext()
 UIContext::~UIContext() {
 	delete fontStyle_;
 	delete textDrawer_;
+	// Not releasing blend_, it's a preset. Should really make them AddRef, though..
+	depth_->Release();
 }
 
 void UIContext::Init(Thin3DContext *thin3d, Thin3DShaderSet *uishader, Thin3DShaderSet *uishadernotex, Thin3DTexture *uitexture, DrawBuffer *uidrawbuffer, DrawBuffer *uidrawbufferTop) {
@@ -97,7 +99,7 @@ Bounds UIContext::GetScissorBounds() {
 void UIContext::ActivateTopScissor() {
 	if (scissorStack_.size()) {
 		const Bounds &bounds = scissorStack_.back();
-		float scale = 1.0f / g_dpi_scale;
+		float scale = pixel_in_dps;
 		int x = scale * bounds.x;
 		int y = scale * bounds.y;
 		int w = scale * bounds.w;

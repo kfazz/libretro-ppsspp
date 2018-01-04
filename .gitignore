@@ -22,6 +22,7 @@
 controls.ini
 Debug
 Release
+Windows/.vs
 Windows/x64
 Windows/ipch
 Windows/bin-release
@@ -33,6 +34,9 @@ ext/_Output
 android/lint.xml
 PPSSPPWindows64.exe.manifest
 PPSSPPWindows.exe.manifest
+PPSSPPDebug64.exe.manifest
+PPSSPPDebug.exe.manifest
+assets/flash0
 
 # For Mac
 .DS_Store

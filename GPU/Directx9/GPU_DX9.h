@@ -37,6 +37,7 @@ class DIRECTX9_GPU : public GPUCommon {
 public:
 	DIRECTX9_GPU();
 	~DIRECTX9_GPU();
+	void CheckGPUFeatures();
 	void InitClear() override;
 	void PreExecuteOp(u32 op, u32 diff) override;
 	void ExecuteOp(u32 op, u32 diff) override;
@@ -47,6 +48,7 @@ public:
 	void BeginFrame() override;
 	void UpdateStats() override;
 	void InvalidateCache(u32 addr, int size, GPUInvalidationType type) override;
+	void NotifyVideoUpload(u32 addr, int size, int width, int format) override;
 	bool PerformMemoryCopy(u32 dest, u32 src, int size) override;
 	bool PerformMemorySet(u32 dest, u8 v, int size) override;
 	bool PerformMemoryDownload(u32 dest, int size) override;
@@ -77,6 +79,7 @@ public:
 	bool GetCurrentDepthbuffer(GPUDebugBuffer &buffer);
 	bool GetCurrentStencilbuffer(GPUDebugBuffer &buffer);
 	bool GetCurrentTexture(GPUDebugBuffer &buffer, int level);
+	bool GetCurrentClut(GPUDebugBuffer &buffer) override;
 	static bool GetDisplayFramebuffer(GPUDebugBuffer &buffer);
 	bool GetCurrentSimpleVertices(int count, std::vector<GPUDebugVertex> &vertices, std::vector<u16> &indices);
 
@@ -142,6 +145,10 @@ public:
 	void Execute_TgenMtxData(u32 op, u32 diff);
 	void Execute_BoneMtxNum(u32 op, u32 diff);
 	void Execute_BoneMtxData(u32 op, u32 diff);
+
+	// Using string because it's generic - makes no assumptions on the size of the shader IDs of this backend.
+	std::vector<std::string> DebugGetShaderIDs(DebugShaderType shader) override;
+	std::string DebugGetShaderString(std::string id, DebugShaderType shader, DebugShaderStringType stringType) override;
 
 protected:
 	void FastRunLoop(DisplayList &list) override;

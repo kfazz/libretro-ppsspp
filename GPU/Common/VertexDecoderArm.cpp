@@ -161,7 +161,7 @@ static const JitLookup jitLookup[] = {
 	{&VertexDecoder::Step_Color5551Morph, &VertexDecoderJitCache::Jit_Color5551Morph},
 };
 
-JittedVertexDecoder VertexDecoderJitCache::Compile(const VertexDecoder &dec) {
+JittedVertexDecoder VertexDecoderJitCache::Compile(const VertexDecoder &dec, int32_t *jittedSize) {
 	dec_ = &dec;
 	const u8 *start = AlignCode16();
 
@@ -227,7 +227,7 @@ JittedVertexDecoder VertexDecoderJitCache::Compile(const VertexDecoder &dec) {
 		MOVP2R(R4, bones);
 		MOVP2R(R5, boneMask);
 		VLD1(F_32, Q3, R5, 2, ALIGN_128);
-		for (int i = 0; i < 8; i++) {
+		for (int i = 0; i < dec.nweights; i++) {
 			VLD1(F_32, Q4, R3, 2);  // Load 128 bits even though we just want 96
 			VMUL(F_32, Q4, Q4, Q3);
 			ADD(R3, R3, 12);
@@ -309,6 +309,7 @@ JittedVertexDecoder VertexDecoderJitCache::Compile(const VertexDecoder &dec) {
 	INFO_LOG(HLE, "%s", temp);
 	*/
 
+	*jittedSize = GetCodePtr() - start;
 	return (JittedVertexDecoder)start;
 }
 

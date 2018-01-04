@@ -25,7 +25,7 @@
 #include "Compare.h"
 #include "StubHost.h"
 #ifdef _WIN32
-#include "Windows/OpenGLBase.h"
+#include "Windows/GPU/WindowsGLContext.h"
 #include "WindowsHeadlessHost.h"
 #include "WindowsHeadlessHostDx9.h"
 #endif
@@ -72,7 +72,7 @@ void D3D9_SwapBuffers() { }
 void GL_SwapBuffers() { }
 void GL_SwapInterval(int) { }
 void NativeUpdate(InputState &input_state) { }
-void NativeRender() { }
+void NativeRender(GraphicsContext *graphicsContext) { }
 void NativeResized() { }
 void NativeMessageReceived(const char *message, const char *value) {}
 
@@ -80,10 +80,10 @@ std::string System_GetProperty(SystemProperty prop) { return ""; }
 int System_GetPropertyInt(SystemProperty prop) { return -1; }
 void System_SendMessage(const char *command, const char *parameter) {}
 bool System_InputBoxGetWString(const wchar_t *title, const std::wstring &defaultvalue, std::wstring &outvalue) { return false; }
+void System_AskForPermission(SystemPermission permission) {}
+PermissionStatus System_GetPermissionStatus(SystemPermission permission) { return PERMISSION_STATUS_GRANTED; }
 
-#ifndef _WIN32
 InputState input_state;
-#endif
 
 int printUsage(const char *progname, const char *reason)
 {
@@ -297,15 +297,16 @@ int main(int argc, const char* argv[])
 	host = headlessHost;
 
 	std::string error_string;
-	bool glWorking = host->InitGraphics(&error_string);
+
+	GraphicsContext *graphicsContext;
+	bool glWorking = host->InitGraphics(&error_string, &graphicsContext);
 
 	LogManager::Init();
 	LogManager *logman = LogManager::GetInstance();
 	
 	PrintfLogger *printfLogger = new PrintfLogger();
 
-	for (int i = 0; i < LogTypes::NUMBER_OF_LOGS; i++)
-	{
+	for (int i = 0; i < LogTypes::NUMBER_OF_LOGS; i++) {
 		LogTypes::LOG_TYPE type = (LogTypes::LOG_TYPE)i;
 		logman->SetEnable(type, fullLog);
 		logman->SetLogLevel(type, LogTypes::LDEBUG);
@@ -315,6 +316,7 @@ int main(int argc, const char* argv[])
 	CoreParameter coreParameter;
 	coreParameter.cpuCore = useJit ? CPU_JIT : CPU_INTERPRETER;
 	coreParameter.gpuCore = glWorking ? gpuCore : GPU_NULL;
+	coreParameter.graphicsContext = graphicsContext;
 	coreParameter.enableSound = false;
 	coreParameter.mountIso = mountIso ? mountIso : "";
 	coreParameter.mountRoot = mountRoot ? mountRoot : "";

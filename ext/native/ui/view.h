@@ -9,6 +9,7 @@
 
 #include <string>
 #include <vector>
+#include <map>
 #include <cmath>
 #include <cstdio>
 #include <memory>
@@ -203,9 +204,15 @@ enum FocusFlags {
 	FF_GOTFOCUS = 2
 };
 
-class ViewGroup;
+enum PersistStatus {
+	PERSIST_SAVE,
+	PERSIST_RESTORE,
+};
 
-void Fill(UIContext &dc, const Bounds &bounds, const Drawable &drawable);
+typedef std::vector<int> PersistBuffer;
+typedef std::map<std::string, UI::PersistBuffer> PersistMap;
+
+class ViewGroup;
 
 struct MeasureSpec {
 	MeasureSpec(MeasureSpecType t, float s = 0.0f) : type(t), size(s) {}
@@ -292,6 +299,26 @@ public:
 	// Fake RTTI
 	bool Is(LayoutParamsType type) const { return type_ == type; }
 
+	template <typename T>
+	T *As() {
+		if (Is(T::StaticType())) {
+			return static_cast<T *>(this);
+		}
+		return nullptr;
+	}
+
+	template <typename T>
+	const T *As() const {
+		if (Is(T::StaticType())) {
+			return static_cast<const T *>(this);
+		}
+		return nullptr;
+	}
+
+	static LayoutParamsType StaticType() {
+		return LP_PLAIN;
+	}
+
 private:
 	LayoutParamsType type_;
 };
@@ -314,7 +341,12 @@ public:
 	virtual void Axis(const AxisInput &input) {}
 	virtual void Update(const InputState &input_state) {}
 
+	// If this view covers these coordinates, it should add itself and its children to the list.
+	virtual void Query(float x, float y, std::vector<View *> &list);
+	virtual std::string Describe() const;
+
 	virtual void FocusChanged(int focusFlags) {}
+	virtual void PersistData(PersistStatus status, std::string anonId, PersistMap &storage);
 
 	void Move(Bounds bounds) {
 		bounds_ = bounds;
@@ -356,7 +388,7 @@ public:
 	void SetEnabledPtr(bool *enabled) { enabledPtr_ = enabled; enabledMeansDisabled_ = false; }
 	void SetDisabledPtr(bool *disabled) { enabledPtr_ = disabled; enabledMeansDisabled_ = true;  }
 
-	void SetVisibility(Visibility visibility) { visibility_ = visibility; }
+	virtual void SetVisibility(Visibility visibility) { visibility_ = visibility; }
 	Visibility GetVisibility() const { return visibility_; }
 
 	const std::string &Tag() const { return tag_; }
@@ -465,6 +497,8 @@ public:
 	// OK to call this from the outside after having modified *value_
 	void Clamp();
 
+	Event OnChange;
+
 private:
 	int *value_;
 	bool showPercent_;
@@ -486,6 +520,9 @@ public:
 
 	// OK to call this from the outside after having modified *value_
 	void Clamp();
+
+	Event OnChange;
+
 private:
 	float *value_;
 	float minValue_;

@@ -41,6 +41,7 @@ LOCAL_SRC_FILES :=\
     file/fd_util.cpp \
     file/chunk_file.cpp \
     file/file_util.cpp \
+    file/free.cpp \
     file/path.cpp \
     file/ini_file.cpp \
     file/zip_read.cpp \
@@ -112,6 +113,10 @@ else ifeq ($(TARGET_ARCH_ABI),arm64-v8a)
 LOCAL_CFLAGS := $(LOCAL_CFLAGS) -D_ARCH_64 -DARM64
 else ifeq ($(TARGET_ARCH_ABI),x86)
 LOCAL_CFLAGS := $(LOCAL_CFLAGS) -D_M_IX86
+LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
+    math/fast/fast_matrix_sse.c
+else ifeq ($(TARGET_ARCH_ABI),x86_64)
+LOCAL_CFLAGS := $(LOCAL_CFLAGS) -D_M_X64
 LOCAL_SRC_FILES := $(LOCAL_SRC_FILES) \
     math/fast/fast_matrix_sse.c
 endif

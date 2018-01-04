@@ -31,7 +31,6 @@
 #include "Core/SaveState.h"
 #include "Core/Core.h"
 
-extern std::map<int, int> windowsTransTable;
 extern bool g_TakeScreenshot;
 
 namespace MainWindow {
@@ -81,7 +80,11 @@ namespace MainWindow {
 		// File submenus
 		SUBMENU_FILE_SAVESTATE_SLOT = 6,
 
+		// Emulation submenus
+		SUBMENU_DISPLAY_ROTATION = 4,
+
 		// Game Settings submenus
+		SUBMENU_DISPLAY_LAYOUT = 7,
 		SUBMENU_CUSTOM_SHADERS = 10,
 		SUBMENU_RENDERING_RESOLUTION = 11,
 		SUBMENU_WINDOW_SIZE = 12,
@@ -236,6 +239,11 @@ namespace MainWindow {
 		TranslateMenuItem(menu, ID_EMULATION_STOP, L"\tCtrl+W");
 		TranslateMenuItem(menu, ID_EMULATION_RESET, L"\tCtrl+B");
 		TranslateMenuItem(menu, ID_EMULATION_SWITCH_UMD, L"\tCtrl+U", "Switch UMD");
+		TranslateSubMenu(menu, "Display Rotation", MENU_EMULATION, SUBMENU_DISPLAY_ROTATION);
+		TranslateMenuItem(menu, ID_EMULATION_ROTATION_H);
+		TranslateMenuItem(menu, ID_EMULATION_ROTATION_V);
+		TranslateMenuItem(menu, ID_EMULATION_ROTATION_H_R);
+		TranslateMenuItem(menu, ID_EMULATION_ROTATION_V_R);
 
 		// Debug menu
 		TranslateMenuItem(menu, ID_DEBUG_LOADMAPFILE);
@@ -261,7 +269,9 @@ namespace MainWindow {
 		TranslateMenuItem(menu, ID_OPTIONS_IGNOREWINKEY);
 		TranslateMenuItem(menu, ID_OPTIONS_MORE_SETTINGS);
 		TranslateMenuItem(menu, ID_OPTIONS_CONTROLS);
-		TranslateMenuItem(menu, ID_OPTIONS_STRETCHDISPLAY);
+		TranslateMenuItem(menu, ID_OPTIONS_DISPLAY_LAYOUT);
+
+		// Skip display multipliers x1-x10
 		TranslateMenuItem(menu, ID_OPTIONS_FULLSCREEN, L"\tAlt+Return, F11");
 		TranslateMenuItem(menu, ID_OPTIONS_VSYNC);
 		TranslateSubMenu(menu, "Postprocessing Shader", MENU_OPTIONS, SUBMENU_CUSTOM_SHADERS);
@@ -271,9 +281,9 @@ namespace MainWindow {
 		TranslateSubMenu(menu, "Window Size", MENU_OPTIONS, SUBMENU_WINDOW_SIZE);
 		// Skip window size 1x-4x..
 		TranslateSubMenu(menu, "Backend", MENU_OPTIONS, SUBMENU_RENDERING_BACKEND);
-		TranslateMenuItem(menu, ID_OPTIONS_DIRECTX);
+		TranslateMenuItem(menu, ID_OPTIONS_DIRECT3D9);
 		TranslateMenuItem(menu, ID_OPTIONS_OPENGL);
-		TranslateSubMenu(menu, "Rendering Mode", MENU_OPTIONS, SUBMENU_RENDERING_MODE, L"\tF5");
+		TranslateSubMenu(menu, "Rendering Mode", MENU_OPTIONS, SUBMENU_RENDERING_MODE);
 		TranslateMenuItem(menu, ID_OPTIONS_NONBUFFEREDRENDERING);
 		TranslateMenuItem(menu, ID_OPTIONS_BUFFEREDRENDERING);
 		TranslateMenuItem(menu, ID_OPTIONS_READFBOTOMEMORYCPU);
@@ -298,7 +308,7 @@ namespace MainWindow {
 		TranslateMenuItem(menu, ID_TEXTURESCALING_BICUBIC);
 		TranslateMenuItem(menu, ID_TEXTURESCALING_HYBRID_BICUBIC);
 		TranslateMenuItem(menu, ID_TEXTURESCALING_DEPOSTERIZE);
-		TranslateMenuItem(menu, ID_OPTIONS_HARDWARETRANSFORM, L"\tF6");
+		TranslateMenuItem(menu, ID_OPTIONS_HARDWARETRANSFORM);
 		TranslateMenuItem(menu, ID_OPTIONS_VERTEXCACHE);
 		TranslateMenuItem(menu, ID_OPTIONS_SHOWFPS);
 		TranslateMenuItem(menu, ID_EMULATION_SOUND);
@@ -386,6 +396,10 @@ namespace MainWindow {
 		}
 	}
 
+	static void setScreenRotation(int rotation) {
+		g_Config.iInternalScreenRotation = rotation;
+	}
+
 	static void SaveStateActionFinished(bool result, void *userdata) {
 		PostMessage(MainWindow::GetHWND(), WM_USER_SAVESTATE_FINISH, 0, 0);
 	}
@@ -409,7 +423,7 @@ namespace MainWindow {
 		NativeMessageReceived("gpu clear cache", "");
 	}
 
-	static void setRenderingMode(int mode = -1) {
+	static void setRenderingMode(int mode) {
 		if (mode >= FB_NON_BUFFERED_MODE)
 			g_Config.iRenderingMode = mode;
 		else {
@@ -470,6 +484,10 @@ namespace MainWindow {
 		g_Config.bEnableCheats = cheats;
 	}
 
+	static void setDisplayOptions(int options) {
+		g_Config.iSmallDisplayZoomType = options;
+		NativeMessageReceived("gpu resized", "");
+	}
 
 	void MainWindowMenu_Process(HWND hWnd, WPARAM wParam) {
 		std::string fn;
@@ -534,6 +552,11 @@ namespace MainWindow {
 		case ID_EMULATION_SWITCH_UMD:
 			UmdSwitchAction();
 			break;
+
+		case ID_EMULATION_ROTATION_H:                 setScreenRotation(ROTATION_LOCKED_HORIZONTAL); break;
+		case ID_EMULATION_ROTATION_V:                 setScreenRotation(ROTATION_LOCKED_VERTICAL); break;
+		case ID_EMULATION_ROTATION_H_R:               setScreenRotation(ROTATION_LOCKED_HORIZONTAL180); break;
+		case ID_EMULATION_ROTATION_V_R:               setScreenRotation(ROTATION_LOCKED_VERTICAL180); break;
 
 		case ID_EMULATION_CHEATS:
 			g_Config.bEnableCheats = !g_Config.bEnableCheats;
@@ -666,14 +689,16 @@ namespace MainWindow {
 			NativeMessageReceived("gpu clear cache", "");
 			break;
 
-		case ID_OPTIONS_DIRECTX:
-			g_Config.iTempGPUBackend = GPU_BACKEND_DIRECT3D9;
+		case ID_OPTIONS_DIRECT3D9:
+			g_Config.iGPUBackend = GPU_BACKEND_DIRECT3D9;
+			// TODO: Remove once software renderer supports D3D9.
+			g_Config.bSoftwareRendering = false;
 			g_Config.bRestartRequired = true;
 			PostMessage(MainWindow::GetHWND(), WM_CLOSE, 0, 0);
 			break;
 
 		case ID_OPTIONS_OPENGL:
-			g_Config.iTempGPUBackend = GPU_BACKEND_OPENGL;
+			g_Config.iGPUBackend = GPU_BACKEND_OPENGL;
 			g_Config.bRestartRequired = true;
 			PostMessage(MainWindow::GetHWND(), WM_CLOSE, 0, 0);
 			break;
@@ -682,11 +707,6 @@ namespace MainWindow {
 		case ID_OPTIONS_BUFFEREDRENDERING:      setRenderingMode(FB_BUFFERED_MODE); break;
 		case ID_OPTIONS_READFBOTOMEMORYCPU:     setRenderingMode(FB_READFBOMEMORY_CPU); break;
 		case ID_OPTIONS_READFBOTOMEMORYGPU:     setRenderingMode(FB_READFBOMEMORY_GPU); break;
-
-			// Dummy option to let the buffered rendering hotkey cycle through all the options.
-		case ID_OPTIONS_BUFFEREDRENDERINGDUMMY:
-			setRenderingMode();
-			break;
 
 		case ID_DEBUG_SHOWDEBUGSTATISTICS:
 			g_Config.bShowDebugStats = !g_Config.bShowDebugStats;
@@ -698,10 +718,10 @@ namespace MainWindow {
 			osm.ShowOnOff(gr->T("Hardware Transform"), g_Config.bHardwareTransform);
 			break;
 
-		case ID_OPTIONS_STRETCHDISPLAY:
-			g_Config.bStretchToDisplay = !g_Config.bStretchToDisplay;
-			NativeMessageReceived("gpu resized", "");
+		case ID_OPTIONS_DISPLAY_LAYOUT:
+			NativeMessageReceived("display layout editor", "");
 			break;
+
 
 		case ID_OPTIONS_FRAMESKIP_0:    setFrameSkipping(FRAMESKIP_OFF); break;
 		case ID_OPTIONS_FRAMESKIP_1:    setFrameSkipping(FRAMESKIP_1); break;
@@ -731,7 +751,7 @@ namespace MainWindow {
 
 		case ID_DEBUG_LOADMAPFILE:
 			if (W32Util::BrowseForFileName(true, hWnd, L"Load .ppmap", 0, L"Maps\0*.ppmap\0All files\0*.*\0\0", L"ppmap", fn)) {
-				symbolMap.LoadSymbolMap(fn.c_str());
+				g_symbolMap->LoadSymbolMap(fn.c_str());
 
 				if (disasmWindow[0])
 					disasmWindow[0]->NotifyMapLoaded();
@@ -743,12 +763,12 @@ namespace MainWindow {
 
 		case ID_DEBUG_SAVEMAPFILE:
 			if (W32Util::BrowseForFileName(false, hWnd, L"Save .ppmap", 0, L"Maps\0*.ppmap\0All files\0*.*\0\0", L"ppmap", fn))
-				symbolMap.SaveSymbolMap(fn.c_str());
+				g_symbolMap->SaveSymbolMap(fn.c_str());
 			break;
 
 		case ID_DEBUG_LOADSYMFILE:
 			if (W32Util::BrowseForFileName(true, hWnd, L"Load .sym", 0, L"Symbols\0*.sym\0All files\0*.*\0\0", L"sym", fn)) {
-				symbolMap.LoadNocashSym(fn.c_str());
+				g_symbolMap->LoadNocashSym(fn.c_str());
 
 				if (disasmWindow[0])
 					disasmWindow[0]->NotifyMapLoaded();
@@ -760,11 +780,11 @@ namespace MainWindow {
 
 		case ID_DEBUG_SAVESYMFILE:
 			if (W32Util::BrowseForFileName(false, hWnd, L"Save .sym", 0, L"Symbols\0*.sym\0All files\0*.*\0\0", L"sym", fn))
-				symbolMap.SaveNocashSym(fn.c_str());
+				g_symbolMap->SaveNocashSym(fn.c_str());
 			break;
 
 		case ID_DEBUG_RESETSYMBOLTABLE:
-			symbolMap.Clear();
+			g_symbolMap->Clear();
 
 			for (int i = 0; i < numCPUs; i++)
 				if (disasmWindow[i])
@@ -810,7 +830,7 @@ namespace MainWindow {
 			} else if (info.type == FILETYPE_DIRECTORY) {
 				MessageBox(hWnd, L"Cannot extract directories.", L"Sorry", 0);
 			} else if (W32Util::BrowseForFileName(false, hWnd, L"Save file as...", 0, L"All files\0*.*\0\0", L"", fn)) {
-				FILE *fp = fopen(fn.c_str(), "wb");
+				FILE *fp = File::OpenCFile(fn, "wb");
 				u32 handle = pspFileSystem.OpenFile(filename, FILEACCESS_READ, "");
 				u8 buffer[4096];
 				while (pspFileSystem.ReadFile(handle, buffer, sizeof(buffer)) > 0) {
@@ -923,7 +943,6 @@ namespace MainWindow {
 		CHECKITEM(ID_DEBUG_IGNOREILLEGALREADS, g_Config.bIgnoreBadMemAccess);
 		CHECKITEM(ID_DEBUG_SHOWDEBUGSTATISTICS, g_Config.bShowDebugStats);
 		CHECKITEM(ID_OPTIONS_HARDWARETRANSFORM, g_Config.bHardwareTransform);
-		CHECKITEM(ID_OPTIONS_STRETCHDISPLAY, g_Config.bStretchToDisplay);
 		CHECKITEM(ID_DEBUG_RUNONLOAD, g_Config.bAutoRun);
 		CHECKITEM(ID_OPTIONS_VERTEXCACHE, g_Config.bVertexCache);
 		CHECKITEM(ID_OPTIONS_SHOWFPS, g_Config.iShowFPSCounter);
@@ -936,6 +955,22 @@ namespace MainWindow {
 		CHECKITEM(ID_TEXTURESCALING_DEPOSTERIZE, g_Config.bTexDeposterize);
 		CHECKITEM(ID_EMULATION_CHEATS, g_Config.bEnableCheats);
 		CHECKITEM(ID_OPTIONS_IGNOREWINKEY, g_Config.bIgnoreWindowsKey);
+
+		static const int displayrotationitems[] = {
+			ID_EMULATION_ROTATION_H,
+			ID_EMULATION_ROTATION_V,
+			ID_EMULATION_ROTATION_H_R,
+			ID_EMULATION_ROTATION_V_R
+		};
+		if (g_Config.iInternalScreenRotation < ROTATION_LOCKED_HORIZONTAL)
+			g_Config.iInternalScreenRotation = ROTATION_LOCKED_HORIZONTAL;
+
+		else if (g_Config.iInternalScreenRotation > ROTATION_LOCKED_VERTICAL180)
+			g_Config.iInternalScreenRotation = ROTATION_LOCKED_VERTICAL180;
+
+		for (int i = 0; i < ARRAY_SIZE(displayrotationitems); i++) {
+			CheckMenuItem(menu, displayrotationitems[i], MF_BYCOMMAND | ((i + 1) == g_Config.iInternalScreenRotation ? MF_CHECKED : MF_UNCHECKED));
+		}
 
 		// Disable Vertex Cache when HW T&L is disabled.
 		if (!g_Config.bHardwareTransform) {
@@ -1112,13 +1147,13 @@ namespace MainWindow {
 		}
 
 		if (g_Config.iGPUBackend == GPU_BACKEND_DIRECT3D9) {
-			EnableMenuItem(menu, ID_OPTIONS_DIRECTX, MF_GRAYED);
-			CheckMenuItem(menu, ID_OPTIONS_DIRECTX, MF_CHECKED);
+			EnableMenuItem(menu, ID_OPTIONS_DIRECT3D9, MF_GRAYED);
+			CheckMenuItem(menu, ID_OPTIONS_DIRECT3D9, MF_CHECKED);
 			EnableMenuItem(menu, ID_OPTIONS_OPENGL, MF_ENABLED);
 		} else {
 			EnableMenuItem(menu, ID_OPTIONS_OPENGL, MF_GRAYED);
 			CheckMenuItem(menu, ID_OPTIONS_OPENGL, MF_CHECKED);
-			EnableMenuItem(menu, ID_OPTIONS_DIRECTX, MF_ENABLED);
+			EnableMenuItem(menu, ID_OPTIONS_DIRECT3D9, MF_ENABLED);
 		}
 
 		UpdateDynamicMenuCheckmarks(menu);

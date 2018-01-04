@@ -29,6 +29,7 @@ enum {
 	FB_USAGE_DISPLAYED_FRAMEBUFFER = 1,
 	FB_USAGE_RENDERTARGET = 2,
 	FB_USAGE_TEXTURE = 4,
+	FB_USAGE_CLUT = 8,
 };
 
 enum {
@@ -46,12 +47,17 @@ enum {
 };
 
 struct FBO;
+namespace DX9 {
+	struct FBO_DX9;
+}
 
 struct VirtualFramebuffer {
 	int last_frame_used;
 	int last_frame_attached;
 	int last_frame_render;
 	int last_frame_displayed;
+	int last_frame_clut;
+	u32 clutUpdatedBytes;
 	bool memoryUpdated;
 	bool depthUpdated;
 
@@ -81,7 +87,10 @@ struct VirtualFramebuffer {
 	GEBufferFormat format;  // virtual, right now they are all RGBA8888
 	// TODO: Handle fbo and colorDepth better.
 	u8 colorDepth;
-	FBO *fbo;
+	union {
+		FBO *fbo;
+		DX9::FBO_DX9 *fbo_dx9;
+	};
 
 	u16 drawnWidth;
 	u16 drawnHeight;
@@ -151,6 +160,7 @@ public:
 	virtual void RebindFramebuffer() = 0;
 
 	bool NotifyFramebufferCopy(u32 src, u32 dest, int size, bool isMemset, u32 skipDrawReason);
+	void NotifyVideoUpload(u32 addr, int size, int width, GEBufferFormat fmt);
 	void UpdateFromMemory(u32 addr, int size, bool safe);
 	virtual bool NotifyStencilUpload(u32 addr, int size, bool skipZero = false) = 0;
 	// Returns true if it's sure this is a direct FBO->FBO transfer and it has already handle it.
@@ -160,9 +170,10 @@ public:
 	void NotifyBlockTransferAfter(u32 dstBasePtr, int dstStride, int dstX, int dstY, u32 srcBasePtr, int srcStride, int srcX, int srcY, int w, int h, int bpp, u32 skipDrawReason);
 
 	virtual void ReadFramebufferToMemory(VirtualFramebuffer *vfb, bool sync, int x, int y, int w, int h) = 0;
+	virtual void DownloadFramebufferForClut(u32 fb_address, u32 loadBytes) = 0;
 	virtual void MakePixelTexture(const u8 *srcPixels, GEBufferFormat srcPixelFormat, int srcStride, int width, int height) = 0;
 	virtual void DrawPixels(VirtualFramebuffer *vfb, int dstX, int dstY, const u8 *srcPixels, GEBufferFormat srcPixelFormat, int srcStride, int width, int height) = 0;
-	virtual void DrawFramebuffer(const u8 *srcPixels, GEBufferFormat srcPixelFormat, int srcStride, bool applyPostShader) = 0;
+	virtual void DrawFramebufferToOutput(const u8 *srcPixels, GEBufferFormat srcPixelFormat, int srcStride, bool applyPostShader) = 0;
 
 	size_t NumVFBs() const { return vfbs_.size(); }
 
@@ -214,13 +225,12 @@ protected:
 	void UpdateSize();
 
 	virtual void DisableState() = 0;
-	virtual void ClearBuffer() = 0;
-	virtual void ClearDepthBuffer() = 0;
+	virtual void ClearBuffer(bool keepState = false) = 0;
 	virtual void FlushBeforeCopy() = 0;
 	virtual void DecimateFBOs() = 0;
 
 	// Used by ReadFramebufferToMemory and later framebuffer block copies
-	virtual void BlitFramebuffer(VirtualFramebuffer *dst, int dstX, int dstY, VirtualFramebuffer *src, int srcX, int srcY, int w, int h, int bpp, bool flip = false) = 0;
+	virtual void BlitFramebuffer(VirtualFramebuffer *dst, int dstX, int dstY, VirtualFramebuffer *src, int srcX, int srcY, int w, int h, int bpp) = 0;
 
 	void EstimateDrawingSize(u32 fb_address, GEBufferFormat fb_format, int viewport_width, int viewport_height, int region_width, int region_height, int scissor_width, int scissor_height, int fb_stride, int &drawing_width, int &drawing_height);
 	u32 FramebufferByteSize(const VirtualFramebuffer *vfb) const;
@@ -236,11 +246,16 @@ protected:
 
 	bool ShouldDownloadFramebuffer(const VirtualFramebuffer *vfb) const;
 	void FindTransferFramebuffers(VirtualFramebuffer *&dstBuffer, VirtualFramebuffer *&srcBuffer, u32 dstBasePtr, int dstStride, int &dstX, int &dstY, u32 srcBasePtr, int srcStride, int &srcX, int &srcY, int &srcWidth, int &srcHeight, int &dstWidth, int &dstHeight, int bpp) const;
+	VirtualFramebuffer *FindDownloadTempBuffer(VirtualFramebuffer *vfb);
+	virtual bool CreateDownloadTempBuffer(VirtualFramebuffer *nvfb) = 0;
+	virtual void UpdateDownloadTempBuffer(VirtualFramebuffer *nvfb) = 0;
+	void OptimizeDownloadRange(VirtualFramebuffer *vfb, int &x, int &y, int &w, int &h);
 
 	void UpdateFramebufUsage(VirtualFramebuffer *vfb);
 
 	void SetColorUpdated(VirtualFramebuffer *dstBuffer, int skipDrawReason) {
 		dstBuffer->memoryUpdated = false;
+		dstBuffer->clutUpdatedBytes = 0;
 		dstBuffer->dirtyAfterDisplay = true;
 		dstBuffer->drawnWidth = dstBuffer->width;
 		dstBuffer->drawnHeight = dstBuffer->height;
@@ -265,11 +280,16 @@ protected:
 
 	bool useBufferedRendering_;
 	bool updateVRAM_;
+	bool usePostShader_;
+	bool postShaderAtOutputResolution_;
+	bool postShaderIsUpscalingFilter_;
 
 	std::vector<VirtualFramebuffer *> vfbs_;
+	std::vector<VirtualFramebuffer *> bvfbs_; // blitting framebuffers (for download)
 	std::set<std::pair<u32, u32>> knownFramebufferRAMCopies_;
 
 	bool hackForce04154000Download_;
+	bool gameUsesSequentialCopies_;
 
 	// Sampled in BeginFrame for safety.
 	float renderWidth_;
@@ -284,4 +304,4 @@ protected:
 	};
 };
 
-void CenterRect(float *x, float *y, float *w, float *h, float origW, float origH, float frameW, float frameH, int rotation);
+void CenterDisplayOutputRect(float *x, float *y, float *w, float *h, float origW, float origH, float frameW, float frameH, int rotation);

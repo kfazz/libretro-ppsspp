@@ -13,12 +13,24 @@
 #include <bps/navigator_invoke.h> // Receive invocation messages
 #include "BlackberryMain.h"
 #include "base/NKCodeFromBlackberry.h"
+#include "gfx_es2/gpu_features.h"
+#include "thin3d/thin3d.h"
 
-// Bad: PPSSPP includes from native
 #include "Core/System.h"
 #include "Core/Config.h"
 #include "Core/Core.h"
 #include "UI/MiscScreens.h"
+#include "Common/GraphicsContext.h"
+
+static GraphicsContext *graphicsContext;
+
+class GLDummyGraphicsContext : public DummyGraphicsContext {
+public:
+	Thin3DContext *CreateThin3DContext() override {
+		CheckGLExtensions();
+		return T3DCreateGLContext();
+	}
+};
 
 static bool g_quitRequested = false;
 
@@ -62,6 +74,9 @@ void System_SendMessage(const char *command, const char *parameter) {
 		g_quitRequested = true;
 	}
 }
+
+void System_AskForPermission(SystemPermission permission) {}
+PermissionStatus System_GetPermissionStatus(SystemPermission permission) { return PERMISSION_STATUS_GRANTED; }
 
 void SystemToast(const char *text) {
 	dialog_instance_t dialog = 0;
@@ -251,8 +266,9 @@ void BlackberryMain::startMain(int argc, char *argv[]) {
 	navigator_request_events(0);
 	dialog_request_events(0);
 	vibration_request_events(0);
-	NativeInit(argc, (const char **)argv, "/accounts/1000/shared/misc/", "app/native/assets/", "BADCOFFEE");
-	NativeInitGraphics();
+	NativeInit(argc, (const char **)argv, "/accounts/1000/shared/misc/", "app/native/assets/", nullptr);
+	graphicsContext = new GLDummyGraphicsContext();
+	NativeInitGraphics(graphicsContext);
 	audio = new BlackberryAudio();
 	runMain();
 }
@@ -346,6 +362,8 @@ void BlackberryMain::endMain() {
 	bps_shutdown();
 	NativeShutdownGraphics();
 	delete audio;
+	graphicsContext->Shutdown();
+	delete graphicsContext;
 	NativeShutdown();
 	killDisplays();
 	net::Shutdown();

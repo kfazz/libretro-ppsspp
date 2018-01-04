@@ -17,8 +17,8 @@
 
 #if defined(SDL)
 #include <SDL_keyboard.h>
-#elif defined(_WIN32) && !defined(_XBOX)
-#include <windows.h>
+#elif defined(USING_WIN_UI)
+#include "CommonWindows.h"
 #endif
 #include <set>
 
@@ -374,7 +374,7 @@ void SetDefaultKeyMap(DefaultMaps dmap, bool replace) {
 				azerty = true;
 			else if (q == 'q' && w == 'w' && y == 'z')
 				qwertz = true;
-#elif defined(_WIN32) && !defined(_XBOX) && !defined(__MINGW32__)
+#elif defined(USING_WIN_UI)
 			HKL localeId = GetKeyboardLayout(0);
 			// TODO: Is this list complete enough?
 			switch ((int)(intptr_t)localeId & 0xFFFF) {
@@ -606,6 +606,10 @@ const KeyMap_IntStrPair key_names[] = {
 	{NKCODE_EXT_MOUSEBUTTON_3, "MB3"},
 	{NKCODE_EXT_MOUSEWHEEL_UP, "MWheelU"},
 	{NKCODE_EXT_MOUSEWHEEL_DOWN, "MWheelD"},
+
+	{NKCODE_START_QUESTION, "¿"},		
+	{NKCODE_LEFTBRACE, "{"},
+	{NKCODE_RIGHTBRACE, "}"},
 };
 
 const KeyMap_IntStrPair axis_names[] = {
@@ -693,8 +697,7 @@ static std::string FindName(int key, const KeyMap_IntStrPair list[], size_t size
 	for (size_t i = 0; i < size; i++)
 		if (list[i].key == key)
 			return list[i].name;
-
-	return unknown_key_name;
+	return StringFromFormat("%02x?", key);
 }
 
 std::string GetKeyName(int keyCode) {
@@ -792,8 +795,6 @@ bool KeyToPspButton(int deviceId, int key, std::vector<int> *pspKeys) {
 
 // TODO: vector output
 bool KeyFromPspButton(int btn, std::vector<KeyDef> *keys) {
-	int search_start_layer = 0;
-
 	for (auto iter = g_controllerMap.begin(); iter != g_controllerMap.end(); ++iter) {
 		if (iter->first == btn) {
 			for (auto iter2 = iter->second.begin(); iter2 != iter->second.end(); ++iter2) {
@@ -801,7 +802,7 @@ bool KeyFromPspButton(int btn, std::vector<KeyDef> *keys) {
 			}
 		}
 	}
-	return false;
+	return keys->size() > 0;
 }
 
 bool AxisToPspButton(int deviceId, int axisId, int direction, std::vector<int> *pspKeys) {
@@ -810,8 +811,6 @@ bool AxisToPspButton(int deviceId, int axisId, int direction, std::vector<int> *
 }
 
 bool AxisFromPspButton(int btn, int *deviceId, int *axisId, int *direction) {
-	int search_start_layer = 0;
-
 	for (auto iter = g_controllerMap.begin(); iter != g_controllerMap.end(); ++iter) {
 		for (auto iter2 = iter->second.begin(); iter2 != iter->second.end(); ++iter2) {
 			if (iter->first == btn && iter2->keyCode >= AXIS_BIND_NKCODE_START) {

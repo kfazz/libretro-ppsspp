@@ -23,8 +23,7 @@
 #include "CommonWindows.h"
 #endif
 
-class ConsoleListener : public LogListener
-{
+class ConsoleListener : public LogListener {
 public:
 	ConsoleListener();
 	~ConsoleListener();
@@ -37,7 +36,7 @@ public:
 	void LetterSpace(int Width, int Height);
 	void BufferWidthHeight(int BufferWidth, int BufferHeight, int ScreenWidth, int ScreenHeight, bool BufferFirst);
 	void PixelSpace(int Left, int Top, int Width, int Height, bool);
-#if defined(_WIN32) && !defined(_XBOX)
+#if defined(USING_WIN_UI)
 	COORD GetCoordinates(int BytesRead, int BufferWidth);
 #endif
 	void Log(LogTypes::LOG_LEVELS, const char *Text);
@@ -46,8 +45,8 @@ public:
 	void Show(bool bShow);
 	bool Hidden() const { return bHidden; }
 private:
-#if defined(_WIN32) && !defined(_XBOX)
-	HWND GetHwnd(void);
+#if defined(USING_WIN_UI)
+	HWND hWnd;
 	HANDLE hConsole;
 
 	static unsigned int WINAPI RunThread(void *lpParam);

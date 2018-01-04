@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <cstdio>
 
+#include "base/stringutil.h"
 #include "file/file_util.h"
 #include "Common/FileUtil.h"
 
@@ -36,7 +37,7 @@
 
 FileLoader *ConstructFileLoader(const std::string &filename) {
 	if (filename.find("http://") == 0 || filename.find("https://") == 0)
-		return new CachingFileLoader(new RetryingFileLoader(new HTTPFileLoader(filename)));
+		return new CachingFileLoader(new DiskCachingFileLoader(new RetryingFileLoader(new HTTPFileLoader(filename))));
 	return new LocalFileLoader(filename);
 }
 
@@ -141,24 +142,16 @@ IdentifiedFileType Identify_File(FileLoader *fileLoader) {
 	else if (id == 'PBP\x00') {
 		// Do this PS1 eboot check FIRST before checking other eboot types.
 		// It seems like some are malformed and slip through the PSAR check below.
-		// TODO: Change PBPReader to read FileLoader objects?
-		std::string filename = fileLoader->Path();
-		PBPReader pbp(filename.c_str());
-		if (pbp.IsValid()) {
-			if (!pbp.IsELF()) {
-				size_t sfoSize;
-				u8 *sfoData = pbp.GetSubFile(PBP_PARAM_SFO, &sfoSize);
-				{
-					recursive_mutex _lock;
-					lock_guard lock(_lock);
-					ParamSFOData paramSFO;
-					paramSFO.ReadSFO(sfoData, sfoSize);
-					// PS1 Eboots are supposed to use "ME" as their PARAM SFO category.
-					// If they don't, and they're still malformed (e.g. PSISOIMG0000 isn't found), there's nothing we can do.
-					if (paramSFO.GetValueString("CATEGORY") == "ME")
-						return FILETYPE_PSP_PS1_PBP;
-				}
-				delete[] sfoData;
+		PBPReader pbp(fileLoader);
+		if (pbp.IsValid() && !pbp.IsELF()) {
+			std::vector<u8> sfoData;
+			if (pbp.GetSubFile(PBP_PARAM_SFO, &sfoData)) {
+				ParamSFOData paramSFO;
+				paramSFO.ReadSFO(sfoData);
+				// PS1 Eboots are supposed to use "ME" as their PARAM SFO category.
+				// If they don't, and they're still malformed (e.g. PSISOIMG0000 isn't found), there's nothing we can do.
+				if (paramSFO.GetValueString("CATEGORY") == "ME")
+					return FILETYPE_PSP_PS1_PBP;
 			}
 		}
 
@@ -172,11 +165,10 @@ IdentifiedFileType Identify_File(FileLoader *fileLoader) {
 
 		// Let's check if we got pointed to a PBP within such a directory.
 		// If so we just move up and return the directory itself as the game.
-		std::string path = File::GetDir(filename);
+		std::string path = File::GetDir(fileLoader->Path());
 		// If loading from memstick...
 		size_t pos = path.find("/PSP/GAME/");
 		if (pos != std::string::npos) {
-			filename = path;
 			return FILETYPE_PSP_PBP_DIRECTORY;
 		}
 		return FILETYPE_PSP_PBP;
@@ -200,19 +192,26 @@ IdentifiedFileType Identify_File(FileLoader *fileLoader) {
 	return FILETYPE_UNKNOWN;
 }
 
+FileLoader *ResolveFileLoaderTarget(FileLoader *fileLoader) {
+	IdentifiedFileType type = Identify_File(fileLoader);
+	if (type == FILETYPE_PSP_PBP_DIRECTORY && !endsWith(fileLoader->Path(), "/EBOOT.PBP")) {
+		std::string ebootFilename = fileLoader->Path() + "/EBOOT.PBP";
+
+		// Switch fileLoader to the actual EBOOT.
+		delete fileLoader;
+		fileLoader = ConstructFileLoader(ebootFilename);
+	}
+	return fileLoader;
+}
+
 bool LoadFile(FileLoader **fileLoaderPtr, std::string *error_string) {
 	FileLoader *&fileLoader = *fileLoaderPtr;
 	// Note that this can modify filename!
 	switch (Identify_File(fileLoader)) {
 	case FILETYPE_PSP_PBP_DIRECTORY:
 		{
-			std::string filename = fileLoader->Path();
-			std::string ebootFilename = filename + "/EBOOT.PBP";
-
-			// Switch fileLoader to the EBOOT.
-			delete fileLoader;
-			fileLoader = ConstructFileLoader(ebootFilename);
-
+			// TODO: Perhaps we should/can never get here now?
+			fileLoader = ResolveFileLoaderTarget(fileLoader);
 			if (fileLoader->Exists()) {
 				INFO_LOG(LOADER, "File is a PBP in a directory!");
 				IdentifiedFileType ebootType = Identify_File(fileLoader);
@@ -225,10 +224,14 @@ bool LoadFile(FileLoader **fileLoaderPtr, std::string *error_string) {
 					*error_string = "PS1 EBOOTs are not supported by PPSSPP.";
 					return false;
 				}
-				std::string path = filename;
+				std::string path = fileLoader->Path();
 				size_t pos = path.find("/PSP/GAME/");
-				if (pos != std::string::npos)
+				if (pos != std::string::npos) {
+					if (path.rfind("/EBOOT.PBP") != std::string::npos) {
+						path = path.substr(0, path.length() - strlen("/EBOOT.PBP"));
+					}
 					pspFileSystem.SetStartingDirectory("ms0:" + path.substr(pos));
+				}
 				return Load_PSP_ELF_PBP(fileLoader, error_string);
 			} else {
 				*error_string = "No EBOOT.PBP, misidentified game";

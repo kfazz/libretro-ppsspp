@@ -765,7 +765,7 @@ class AfterMatchingMipsCall : public Action {
 public:
 	AfterMatchingMipsCall() {}
 	static Action *Create() { return new AfterMatchingMipsCall(); }
-	void DoState(PointerWrap &p) {
+	void DoState(PointerWrap &p) override {
 		auto s = p.Section("AfterMatchingMipsCall", 1, 2);
 		if (!s)
 			return;
@@ -773,7 +773,7 @@ public:
 		p.Do(EventID);
 		//context = NULL;
 	}
-	void run(MipsCall &call);
+	void run(MipsCall &call) override;
 	void SetContextID(u32 ContextID, u32 eventId);
 	void SetContext(SceNetAdhocMatchingContext *Context, u32 eventId) { context = Context; EventID = eventId; }
 
@@ -795,6 +795,7 @@ extern SceNetAdhocPdpStat * pdp[255];
 extern SceNetAdhocPtpStat * ptp[255];
 extern std::map<int, AdhocctlHandler> adhocctlHandlers;
 
+extern uint16_t portOffset;
 extern uint32_t fakePoolSize;
 extern SceNetAdhocMatchingContext * contexts;
 extern int one;                 

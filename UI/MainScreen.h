@@ -33,6 +33,8 @@ public:
 
 	UI::Choice *HomebrewStoreButton() { return homebrewStoreButton_; }
 
+	void FocusGame(std::string gamePath);
+
 private:
 	void Refresh();
 	bool IsCurrentPathPinned();
@@ -56,6 +58,7 @@ private:
 	std::string lastLink_;
 	int flags_;
 	UI::Choice *homebrewStoreButton_;
+	std::string focusGamePath_;
 };
 
 class MainScreen : public UIScreenWithBackground {
@@ -93,9 +96,13 @@ private:
 	UI::EventReturn OnDownloadUpgrade(UI::EventParams &e);
 	UI::EventReturn OnDismissUpgrade(UI::EventParams &e);
 	UI::EventReturn OnHomebrewStore(UI::EventParams &e);
+	UI::EventReturn OnAllowStorage(UI::EventParams &e);
 
 	UI::LinearLayout *upgradeBar_;
 	UI::TabHolder *tabHolder_;
+
+	std::string restoreFocusGamePath_;
+	std::vector<GameBrowser *> gameBrowsers_;
 
 	std::string highlightedGamePath_;
 	std::string prevHighlightedGamePath_;

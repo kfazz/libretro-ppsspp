@@ -51,16 +51,11 @@ extern PFNGLMAPBUFFERPROC glMapBuffer;
 
 typedef void (EGLAPIENTRYP PFNGLDRAWTEXTURENVPROC) (GLuint texture, GLuint sampler, GLfloat x0, GLfloat y0, GLfloat x1, GLfloat y1, GLfloat z, GLfloat s0, GLfloat t0, GLfloat s1, GLfloat t1);
 extern PFNGLDRAWTEXTURENVPROC glDrawTextureNV;
-typedef void (EGLAPIENTRYP PFNGLCOPYIMAGESUBDATANVPROC) (GLuint srcName, GLenum
-	srcTarget, GLint srcLevel, GLint srcX, GLint srcY, GLint srcZ, GLuint dstName,
-	GLenum dstTarget, GLint dstLevel, GLint dstX, GLint dstY, GLint dstZ, GLsizei
-	width, GLsizei height, GLsizei depth);
-extern PFNGLCOPYIMAGESUBDATANVPROC glCopyImageSubDataNV;
 #ifndef ARM64
 typedef void (EGLAPIENTRYP PFNGLBLITFRAMEBUFFERNVPROC) (
-	GLint srcX0, GLint srcY0, GLint srcX1, GLuint srcY1,
-	GLint dstX0, GLint dstY0, GLint dstX1, GLuint dstY1,
-	GLint mask, GLenum filter);
+	GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1,
+	GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1,
+	GLbitfield mask, GLenum filter);
 #endif
 extern PFNGLBLITFRAMEBUFFERNVPROC glBlitFramebufferNV;
 

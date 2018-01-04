@@ -30,10 +30,11 @@
 
 class ShaderManager;
 class LinkedShader;
+class GraphicsContext;
 
 class GLES_GPU : public GPUCommon {
 public:
-	GLES_GPU();
+	GLES_GPU(GraphicsContext *gfxCtx);
 	~GLES_GPU();
 
 	// This gets called on startup and when we get back from settings.
@@ -51,6 +52,7 @@ public:
 	void BeginFrame() override;
 	void UpdateStats() override;
 	void InvalidateCache(u32 addr, int size, GPUInvalidationType type) override;
+	void NotifyVideoUpload(u32 addr, int size, int width, int format) override;
 	bool PerformMemoryCopy(u32 dest, u32 src, int size) override;
 	bool PerformMemorySet(u32 dest, u8 v, int size) override;
 	bool PerformMemoryDownload(u32 dest, int size) override;
@@ -82,6 +84,7 @@ public:
 	bool GetCurrentDepthbuffer(GPUDebugBuffer &buffer) override;
 	bool GetCurrentStencilbuffer(GPUDebugBuffer &buffer) override;
 	bool GetCurrentTexture(GPUDebugBuffer &buffer, int level) override;
+	bool GetCurrentClut(GPUDebugBuffer &buffer) override;
 	static bool GetDisplayFramebuffer(GPUDebugBuffer &buffer);
 	bool GetCurrentSimpleVertices(int count, std::vector<GPUDebugVertex> &vertices, std::vector<u16> &indices) override;
 
@@ -150,6 +153,10 @@ public:
 	void Execute_BoneMtxData(u32 op, u32 diff);
 	void Execute_BlockTransferStart(u32 op, u32 diff);
 
+	// Using string because it's generic - makes no assumptions on the size of the shader IDs of this backend.
+	std::vector<std::string> DebugGetShaderIDs(DebugShaderType shader) override;
+	std::string DebugGetShaderString(std::string id, DebugShaderType shader, DebugShaderStringType stringType) override;
+
 protected:
 	void FastRunLoop(DisplayList &list) override;
 	void ProcessEvent(GPUEvent ev) override;
@@ -161,7 +168,6 @@ private:
 		transformDraw_.Flush();
 	}
 	void DoBlockTransfer(u32 skipDrawReason);
-	void ApplyDrawState(int prim);
 	void CheckFlushOp(int cmd, u32 diff);
 	void BuildReportingInfo();
 	void InitClearInternal();
@@ -189,4 +195,7 @@ private:
 
 	std::string reportingPrimaryInfo_;
 	std::string reportingFullInfo_;
+
+	GraphicsContext *gfxCtx_;
+	std::string shaderCachePath_;
 };
