@@ -18,11 +18,13 @@
 #include "GPU/GPUState.h"
 #include "GPU/GPUInterface.h"
 #include "input/input_state.h"
-#include "ext/native/gfx_es2/fbo.h"
-#include "ext/native/gfx_es2/gl_state.h"
+#include "GPU/GLES/FBO.h"
+#include "GPU/GLES/GLStateCache.h"
+#include "gfx_es2/gpu_features.h"
 #include "ext/native/gfx/gl_lost_manager.h"
 #include "ext/native/thread/thread.h"
 #include "ext/native/thread/threadutil.h"
+#include "ext/native/base/NativeApp.h"
 
 #include <cstring>
 
@@ -328,7 +330,6 @@ static void initialize_gl(void)
       return;
    }
 #endif
-   glstate.Initialize();
    CheckGLExtensions();
 }
 
