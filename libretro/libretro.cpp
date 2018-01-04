@@ -18,11 +18,11 @@
 #include "GPU/GPUState.h"
 #include "GPU/GPUInterface.h"
 #include "input/input_state.h"
-#include "native/gfx_es2/fbo.h"
-#include "native/gfx_es2/gl_state.h"
-#include "native/gfx/gl_lost_manager.h"
-#include "native/thread/thread.h"
-#include "native/thread/threadutil.h"
+#include "ext/native/gfx_es2/fbo.h"
+#include "ext/native/gfx_es2/gl_state.h"
+#include "ext/native/gfx/gl_lost_manager.h"
+#include "ext/native/thread/thread.h"
+#include "ext/native/thread/threadutil.h"
 
 #include <cstring>
 

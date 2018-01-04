@@ -47,7 +47,7 @@ COREDIR			= $(CORE_DIR)/Core
 COMMONDIR		= $(CORE_DIR)/Common
 GPUCOMMONDIR	= $(CORE_DIR)/GPU/Common
 GPUDIR			= $(CORE_DIR)/GPU
-NATIVEDIR		= $(CORE_DIR)/native
+NATIVEDIR		= $(CORE_DIR)/ext/native
 EXTDIR			= $(CORE_DIR)/ext
 
 TARGET_NAME := ppsspp
