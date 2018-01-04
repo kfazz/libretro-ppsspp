@@ -25,6 +25,7 @@
 #include "ext/native/thread/thread.h"
 #include "ext/native/thread/threadutil.h"
 #include "ext/native/base/NativeApp.h"
+#include "Common/GraphicsContext.h"
 
 #include <cstring>
 
@@ -65,15 +66,16 @@ static bool first_ctx_reset;
 std::string System_GetProperty(SystemProperty prop) { return ""; }
 int System_GetPropertyInt(SystemProperty prop) { return -1; }
 void NativeUpdate(InputState &input_state) { }
-void NativeRender()
-{
+void NativeRenderInt(void);
+void NativeRender(GraphicsContext *graphicsContext) { NativeRenderInt(); }
+void NativeRenderInt() {
    fbo_override_backbuffer(libretro_framebuffer);
 
    glstate.depthWrite.set(GL_TRUE);
    glstate.colorMask.set(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
    glstate.Restore();
 
-   ReapplyGfxState();
+   gpu->ReapplyGfxState();
 
    // We just run the CPU until we get to vblank. This will quickly sync up pretty nicely.
    // The actual number of cycles doesn't matter so much here as we will break due to CORE_NEXTFRAME, most of the time hopefully...
@@ -93,7 +95,7 @@ void NativeRender()
       fbo_unbind();
 }
 void NativeResized() { }
-void NativeMessageReceived(const char *message, const char *value) {}
+void NativeMessageReceived(const char *message, const char *value) { }
 InputState input_state;
 
 extern "C"
@@ -113,7 +115,7 @@ public:
 
 	void SetDebugMode(bool mode) override {}
 
-	bool InitGraphics(std::string *error_message) override { return true; }
+	bool InitGraphics(std::string *error_message, GraphicsContext **ctx) override { return true; }
 	void ShutdownGraphics() override {}
 
 	void InitSound() override { };
@@ -1141,7 +1143,7 @@ void retro_run(void)
       log_cb(RETRO_LOG_INFO, "Function replacements: %d\n", g_Config.bFuncReplacements);
 #endif
 
-   NativeRender();
+   NativeRenderInt();
 
    video_cb(((gstate_c.skipDrawReason & SKIPDRAW_SKIPFRAME) == 0) ? NULL : RETRO_HW_FRAME_BUFFER_VALID, screen_width, screen_height, 0);
 }

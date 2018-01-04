@@ -109,6 +109,8 @@ SOURCES_CXX += $(GPUCOMMONDIR)/VertexDecoderCommon.cpp \
 				$(GPUCOMMONDIR)/SplineCommon.cpp \
 				$(GPUCOMMONDIR)/FramebufferCommon.cpp \
 				$(GPUCOMMONDIR)/GPUDebugInterface.cpp \
+				$(GPUCOMMONDIR)/GPUStateUtils.cpp \
+				$(GPUCOMMONDIR)/ShaderId.cpp \
 				$(GPUCOMMONDIR)/DepalettizeShaderCommon.cpp
 SOURCES_C   += $(NATIVEDIR)/ext/libzip/zip_source_function.c \
 				$(NATIVEDIR)/ext/libzip/zip_source_zip.c \
@@ -161,6 +163,7 @@ SOURCES_CXX += $(NATIVEDIR)/file/chunk_file.cpp \
 				$(GPUDIR)/Common/SoftwareTransformCommon.cpp \
 				$(NATIVEDIR)/file/fd_util.cpp \
 				$(NATIVEDIR)/file/file_util.cpp \
+				$(NATIVEDIR)/file/free.cpp \
 				$(NATIVEDIR)/file/ini_file.cpp \
 				$(GPUDIR)/GLES/VertexShaderGenerator.cpp \
 				$(GPUDIR)/GeDisasm.cpp \
@@ -223,6 +226,7 @@ SOURCES_CXX += $(NATIVEDIR)/file/chunk_file.cpp \
 				$(COREDIR)/Compatibility.cpp \
 				$(COREDIR)/FileLoaders/HTTPFileLoader.cpp \
 				$(COREDIR)/FileLoaders/CachingFileLoader.cpp \
+				$(COREDIR)/FileLoaders/RamCachingFileLoader.cpp \
 				$(COREDIR)/FileLoaders/DiskCachingFileLoader.cpp \
 				$(COREDIR)/FileLoaders/RetryingFileLoader.cpp \
 				$(COREDIR)/FileLoaders/LocalFileLoader.cpp \
@@ -325,6 +329,7 @@ SOURCES_CXX += $(NATIVEDIR)/file/chunk_file.cpp \
 				$(COREDIR)/HW/MpegDemux.cpp \
 				$(COREDIR)/HW/MemoryStick.cpp \
 				$(COREDIR)/HW/SasAudio.cpp \
+				$(COREDIR)/HW/SasReverb.cpp \
 				$(COREDIR)/Host.cpp \
 				$(COREDIR)/Loaders.cpp \
 				$(COREDIR)/MIPS/JitCommon/JitCommon.cpp \
