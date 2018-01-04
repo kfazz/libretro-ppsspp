@@ -28,11 +28,7 @@
 #include "Core/Reporting.h"
 #include "UI/OnScreenDisplay.h"
 
-#if defined(_WIN32) && !defined(__MINGW32__)
-#define _WIN32_NO_MINGW
-#endif
-
-#ifdef _WIN32_NO_MINGW
+#ifdef _WIN32
 #include "Common/CommonWindows.h"
 #include <sys/stat.h>
 #else
@@ -46,8 +42,6 @@
 #elif defined(__SYMBIAN32__)
 #include <mw/QSystemStorageInfo>
 QTM_USE_NAMESPACE
-#elif defined(_WIN32)
-#include "Common/CommonWindows.h"
 #else
 #include <sys/statvfs.h>
 #endif
@@ -168,7 +162,7 @@ std::string DirectoryFileHandle::GetLocalPath(std::string& basePath, std::string
 	if (localpath[0] == '/')
 		localpath.erase(0,1);
 	//Convert slashes
-#ifdef _WIN32_NO_MINGW
+#ifdef _WIN32
 	for (size_t i = 0; i < localpath.size(); i++) {
 		if (localpath[i] == '/')
 			localpath[i] = '\\';
@@ -202,7 +196,7 @@ bool DirectoryFileHandle::Open(std::string &basePath, std::string &fileName, Fil
 	}
 
 	//TODO: tests, should append seek to end of file? seeking in a file opened for append?
-#ifdef _WIN32_NO_MINGW
+#ifdef _WIN32
 	// Convert parameters to Windows permissions and access
 	DWORD desired = 0;
 	DWORD sharemode = 0;
@@ -247,10 +241,6 @@ bool DirectoryFileHandle::Open(std::string &basePath, std::string &fileName, Fil
 	if (access & FILEACCESS_CREATE) {
 		flags |= O_CREAT;
 	}
-  
-#ifdef _WIN32
-  flags |= O_BINARY;
-#endif
 
 	hFile = open(fullName.c_str(), flags, 0666);
 	bool success = hFile != -1;
@@ -266,7 +256,7 @@ bool DirectoryFileHandle::Open(std::string &basePath, std::string &fileName, Fil
 		DEBUG_LOG(FILESYS, "Case may have been incorrect, second try opening %s (%s)", fullNameC, fileName.c_str());
 
 		// And try again with the correct case this time
-#ifdef _WIN32_NO_MINGW
+#ifdef _WIN32
 		hFile = CreateFile(fullNameC, desired, sharemode, 0, openmode, 0, 0);
 		success = hFile != INVALID_HANDLE_VALUE;
 #else
@@ -309,7 +299,7 @@ size_t DirectoryFileHandle::Read(u8* pointer, s64 size)
 			size = needsTrunc_ - off;
 		}
 	}
-#ifdef _WIN32_NO_MINGW
+#ifdef _WIN32
 	::ReadFile(hFile, (LPVOID)pointer, (DWORD)size, (LPDWORD)&bytesRead, 0);
 #else
 	bytesRead = read(hFile, pointer, size);
@@ -322,7 +312,7 @@ size_t DirectoryFileHandle::Write(const u8* pointer, s64 size)
 	size_t bytesWritten = 0;
 	bool diskFull = false;
 
-#ifdef _WIN32_NO_MINGW
+#ifdef _WIN32
 	BOOL success = ::WriteFile(hFile, (LPVOID)pointer, (DWORD)size, (LPDWORD)&bytesWritten, 0);
 	if (success == FALSE) {
 		DWORD err = GetLastError();
@@ -366,7 +356,7 @@ size_t DirectoryFileHandle::Seek(s32 position, FileMove type)
 			position = needsTrunc_ + position;
 		}
 	}
-#ifdef _WIN32_NO_MINGW
+#ifdef _WIN32
 	DWORD moveMethod = 0;
 	switch (type) {
 	case FILEMOVE_BEGIN:    moveMethod = FILE_BEGIN;    break;
@@ -389,7 +379,7 @@ size_t DirectoryFileHandle::Seek(s32 position, FileMove type)
 void DirectoryFileHandle::Close()
 {
 	if (needsTrunc_ != -1) {
-#ifdef _WIN32_NO_MINGW
+#ifdef _WIN32
 		Seek((s32)needsTrunc_, FILEMOVE_BEGIN);
 		if (SetEndOfFile(hFile) == 0) {
 			ERROR_LOG_REPORT(FILESYS, "Failed to truncate file.");
@@ -400,7 +390,7 @@ void DirectoryFileHandle::Close()
 		}
 #endif
 	}
-#ifdef _WIN32_NO_MINGW
+#ifdef _WIN32
 	if (hFile != (HANDLE)-1)
 		CloseHandle(hFile);
 #else
@@ -504,7 +494,7 @@ int DirectoryFileSystem::RenameFile(const std::string &from, const std::string &
 	fullTo = GetLocalPath(fullTo);
 	const char * fullToC = fullTo.c_str();
 
-#ifdef _WIN32_NO_MINGW
+#ifdef _WIN32
 	bool retValue = (MoveFile(ConvertUTF8ToWString(fullFrom).c_str(), ConvertUTF8ToWString(fullToC).c_str()) == TRUE);
 #else
 	bool retValue = (0 == rename(fullFrom.c_str(), fullToC));
@@ -519,7 +509,7 @@ int DirectoryFileSystem::RenameFile(const std::string &from, const std::string &
 			return -1;  // or go on and attempt (for a better error code than just false?)
 		fullFrom = GetLocalPath(fullFrom);
 
-#ifdef _WIN32_NO_MINGW
+#ifdef _WIN32
 		retValue = (MoveFile(fullFrom.c_str(), fullToC) == TRUE);
 #else
 		retValue = (0 == rename(fullFrom.c_str(), fullToC));
@@ -533,7 +523,7 @@ int DirectoryFileSystem::RenameFile(const std::string &from, const std::string &
 
 bool DirectoryFileSystem::RemoveFile(const std::string &filename) {
 	std::string fullName = GetLocalPath(filename);
-#ifdef _WIN32_NO_MINGW
+#ifdef _WIN32
 	bool retValue = (::DeleteFileA(fullName.c_str()) == TRUE);
 #else
 	bool retValue = (0 == unlink(fullName.c_str()));
@@ -548,7 +538,7 @@ bool DirectoryFileSystem::RemoveFile(const std::string &filename) {
 			return false;  // or go on and attempt (for a better error code than just false?)
 		fullName = GetLocalPath(fullName);
 
-#ifdef _WIN32_NO_MINGW
+#ifdef _WIN32
 		retValue = (::DeleteFileA(fullName.c_str()) == TRUE);
 #else
 		retValue = (0 == unlink(fullName.c_str()));
@@ -565,7 +555,7 @@ u32 DirectoryFileSystem::OpenFile(std::string filename, FileAccess access, const
 	bool success = entry.hFile.Open(basePath, filename, access, err);
 
 	if (!success) {
-#ifdef _WIN32_NO_MINGW
+#ifdef _WIN32
 		ERROR_LOG(FILESYS, "DirectoryFileSystem::OpenFile: FAILED, %i - access = %i", GetLastError(), (int)access);
 #else
 		ERROR_LOG(FILESYS, "DirectoryFileSystem::OpenFile: FAILED, %i - access = %i", errno, (int)access);
@@ -573,7 +563,7 @@ u32 DirectoryFileSystem::OpenFile(std::string filename, FileAccess access, const
 		//wwwwaaaaahh!!
 		return err;
 	} else {
-#ifdef _WIN32_NO_MINGW
+#ifdef _WIN32
 		if (access & FILEACCESS_APPEND)
 			entry.hFile.Seek(0,FILEMOVE_END);
 #endif
@@ -670,7 +660,7 @@ PSPFileInfo DirectoryFileSystem::GetFileInfo(std::string filename) {
 	x.name = filename;
 
 	std::string fullName = GetLocalPath(filename);
-	if (! File::Exists(fullName)) {
+	if (!File::Exists(fullName)) {
 #if HOST_IS_CASE_SENSITIVE
 		if (! FixPathCase(basePath,filename, FPC_FILE_MUST_EXIST))
 			return x;
@@ -685,21 +675,26 @@ PSPFileInfo DirectoryFileSystem::GetFileInfo(std::string filename) {
 	x.type = File::IsDirectory(fullName) ? FILETYPE_DIRECTORY : FILETYPE_NORMAL;
 	x.exists = true;
 
-	if (x.type != FILETYPE_DIRECTORY)
-	{
-#ifdef _WIN32_NO_MINGW
-		struct _stat64i32 s;
-		_wstat64i32(ConvertUTF8ToWString(fullName).c_str(), &s);
-#else
-		struct stat s;
-		stat(fullName.c_str(), &s);
-#endif
+	if (x.type != FILETYPE_DIRECTORY) {
+		File::FileDetails details;
+		if (!File::GetFileDetails(fullName, &details)) {
+			ERROR_LOG(FILESYS, "DirectoryFileSystem::GetFileInfo: GetFileDetails failed: %s", fullName.c_str());
+			x.size = 0;
+			x.access = 0;
+			memset(&x.atime, 0, sizeof(x.atime));
+			memset(&x.ctime, 0, sizeof(x.ctime));
+			memset(&x.mtime, 0, sizeof(x.mtime));
+		} else {
+			x.size = details.size;
+			x.access = details.access;
+			time_t atime = details.atime;
+			time_t ctime = details.ctime;
+			time_t mtime = details.mtime;
 
-		x.size = File::GetSize(fullName);
-		x.access = s.st_mode & 0x1FF;
-		localtime_r((time_t*)&s.st_atime,&x.atime);
-		localtime_r((time_t*)&s.st_ctime,&x.ctime);
-		localtime_r((time_t*)&s.st_mtime,&x.mtime);
+			localtime_r((time_t*)&atime, &x.atime);
+			localtime_r((time_t*)&ctime, &x.ctime);
+			localtime_r((time_t*)&mtime, &x.mtime);
+		}
 	}
 
 	return x;
@@ -710,11 +705,10 @@ bool DirectoryFileSystem::GetHostPath(const std::string &inpath, std::string &ou
 	return true;
 }
 
-#ifdef _WIN32_NO_MINGW
+#ifdef _WIN32
 #define FILETIME_FROM_UNIX_EPOCH_US 11644473600000000ULL
 
-static void tmFromFiletime(tm &dest, FILETIME &src)
-{
+static void tmFromFiletime(tm &dest, FILETIME &src) {
 	u64 from_1601_us = (((u64) src.dwHighDateTime << 32ULL) + (u64) src.dwLowDateTime) / 10ULL;
 	u64 from_1970_us = from_1601_us - FILETIME_FROM_UNIX_EPOCH_US;
 
@@ -725,7 +719,7 @@ static void tmFromFiletime(tm &dest, FILETIME &src)
 
 std::vector<PSPFileInfo> DirectoryFileSystem::GetDirListing(std::string path) {
 	std::vector<PSPFileInfo> myVector;
-#ifdef _WIN32_NO_MINGW
+#ifdef _WIN32
 	WIN32_FIND_DATA findData;
 	HANDLE hFind;
 

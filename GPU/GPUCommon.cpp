@@ -1,6 +1,6 @@
 #include <algorithm>
-#include "native/base/mutex.h"
-#include "native/base/timeutil.h"
+#include "base/mutex.h"
+#include "base/timeutil.h"
 #include "Common/ColorConv.h"
 #include "GPU/GeDisasm.h"
 #include "GPU/GPU.h"
@@ -620,7 +620,6 @@ void GPUCommon::ReapplyGfxState() {
 }
 
 void GPUCommon::ReapplyGfxStateInternal() {
-	// ShaderManager_DirtyShader();
 	// The commands are embedded in the command memory so we can just reexecute the words. Convenient.
 	// To be safe we pass 0xFFFFFFFF as the diff.
 

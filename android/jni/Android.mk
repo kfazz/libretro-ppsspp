@@ -4,7 +4,7 @@ include $(CLEAR_VARS)
 
 #TARGET_PLATFORM := android-8
 
-NATIVE := ../../native
+NATIVE := ../../ext/native
 SRC := ../..
 
 include $(LOCAL_PATH)/Locals.mk
@@ -154,6 +154,7 @@ EXEC_AND_LIB_FILES := \
   $(SRC)/GPU/GeDisasm.cpp \
   $(SRC)/GPU/Common/DepalettizeShaderCommon.cpp \
   $(SRC)/GPU/Common/FramebufferCommon.cpp \
+  $(SRC)/GPU/Common/GPUDebugInterface.cpp \
   $(SRC)/GPU/Common/IndexGenerator.cpp.arm \
   $(SRC)/GPU/Common/SoftwareTransformCommon.cpp.arm \
   $(SRC)/GPU/Common/VertexDecoderCommon.cpp.arm \
@@ -169,6 +170,8 @@ EXEC_AND_LIB_FILES := \
   $(SRC)/GPU/GLES/Framebuffer.cpp \
   $(SRC)/GPU/GLES/DepalettizeShader.cpp \
   $(SRC)/GPU/GLES/GLES_GPU.cpp.arm \
+  $(SRC)/GPU/GLES/GLStateCache.cpp.arm \
+  $(SRC)/GPU/GLES/FBO.cpp \
   $(SRC)/GPU/GLES/StencilBuffer.cpp.arm \
   $(SRC)/GPU/GLES/TextureCache.cpp.arm \
   $(SRC)/GPU/GLES/TransformPipeline.cpp.arm \
@@ -196,6 +199,7 @@ EXEC_AND_LIB_FILES := \
   $(SRC)/Core/HW/SasAudio.cpp.arm \
   $(SRC)/Core/HW/StereoResampler.cpp.arm \
   $(SRC)/Core/Core.cpp \
+  $(SRC)/Core/Compatibility.cpp \
   $(SRC)/Core/Config.cpp \
   $(SRC)/Core/CoreTiming.cpp \
   $(SRC)/Core/CwCheat.cpp \
@@ -322,7 +326,9 @@ LOCAL_STATIC_LIBRARIES += ppsspp_core
 # These are the files just for ppsspp_jni
 LOCAL_MODULE := ppsspp_jni
 LOCAL_SRC_FILES := \
-  $(SRC)/native/android/app-android.cpp \
+  $(SRC)/android/jni/app-android.cpp \
+  $(SRC)/android/jni/native_audio.cpp \
+  $(SRC)/android/jni/native-audio-so.cpp \
   $(SRC)/UI/BackgroundAudio.cpp \
   $(SRC)/UI/DevScreens.cpp \
   $(SRC)/UI/EmuScreen.cpp \

@@ -89,12 +89,12 @@ struct GPUgstate {
 				texmtxnum,    // 0x40
 				texmtxdata,   // 0x41
 
-				viewportx1,           // 0x42
-				viewporty1,           // 0x43
-				viewportz1,           // 0x44
-				viewportx2,           // 0x45
-				viewporty2,           // 0x46
-				viewportz2,           // 0x47
+				viewportxscale,           // 0x42
+				viewportyscale,           // 0x43
+				viewportzscale,           // 0x44
+				viewportxcenter,           // 0x45
+				viewportycenter,           // 0x46
+				viewportzcenter,           // 0x47
 				texscaleu,            // 0x48
 				texscalev,            // 0x49
 				texoffsetu,           // 0x4A
@@ -375,16 +375,15 @@ struct GPUgstate {
 	int getRegionY2() const { return (region2 >> 10) & 0x3FF; }
 
 	// Note that the X1/Y1/Z1 here does not mean the upper-left corner, but half the dimensions. X2/Y2/Z2 are the center.
-	float getViewportX1() const { return getFloat24(viewportx1); }
-	float getViewportY1() const { return getFloat24(viewporty1); }
-	float getViewportZ1() const { return getFloat24(viewportz1); }
-	float getViewportX2() const { return getFloat24(viewportx2); }
-	float getViewportY2() const { return getFloat24(viewporty2); }
-	float getViewportZ2() const { return getFloat24(viewportz2); }
+	float getViewportXScale() const { return getFloat24(viewportxscale); }
+	float getViewportYScale() const { return getFloat24(viewportyscale); }
+	float getViewportZScale() const { return getFloat24(viewportzscale); }
+	float getViewportXCenter() const { return getFloat24(viewportxcenter); }
+	float getViewportYCenter() const { return getFloat24(viewportycenter); }
+	float getViewportZCenter() const { return getFloat24(viewportzcenter); }
 
 	// Fixed 16 point.
 	int getOffsetX16() const { return offsetx & 0xFFFF; }
-	// Fixed 16 point.
 	int getOffsetY16() const { return offsety & 0xFFFF; }
 	float getOffsetX() const { return (float)getOffsetX16() / 16.0f; }
 	float getOffsetY() const { return (float)getOffsetY16() / 16.0f; }
@@ -443,7 +442,41 @@ enum TextureChangeReason {
 	TEXCHANGE_PARAMSONLY = 0x02,
 };
 
+#define FLAG_BIT(x) (1 << x)
+
+// Some of these are OpenGL-specific even though this file is neutral, unfortunately.
+// Might want to move this mechanism into the backend later.
+enum {
+	GPU_SUPPORTS_DUALSOURCE_BLEND = FLAG_BIT(0),
+	GPU_SUPPORTS_GLSL_ES_300 = FLAG_BIT(1),
+	GPU_SUPPORTS_GLSL_330 = FLAG_BIT(2),
+	GPU_SUPPORTS_UNPACK_SUBIMAGE = FLAG_BIT(3),
+	GPU_SUPPORTS_BLEND_MINMAX = FLAG_BIT(4),
+	GPU_SUPPORTS_LOGIC_OP = FLAG_BIT(5),
+	GPU_SUPPORTS_ANY_FRAMEBUFFER_FETCH = FLAG_BIT(20),
+	GPU_ROUND_DEPTH_TO_16BIT = FLAG_BIT(23),  // Can be disabled either per game or if we use a real 16-bit depth buffer
+	GPU_SUPPORTS_TEXTURE_LOD_CONTROL = FLAG_BIT(24),
+	GPU_SUPPORTS_FBO = FLAG_BIT(25),
+	GPU_SUPPORTS_ARB_FRAMEBUFFER_BLIT = FLAG_BIT(26),
+	GPU_SUPPORTS_NV_FRAMEBUFFER_BLIT = FLAG_BIT(27),
+	GPU_SUPPORTS_OES_TEXTURE_NPOT = FLAG_BIT(28),
+	GPU_IS_MOBILE = FLAG_BIT(29),
+	GPU_PREFER_CPU_DOWNLOAD = FLAG_BIT(30),
+	GPU_PREFER_REVERSE_COLOR_ORDER = FLAG_BIT(31),
+};
+
+struct KnownVertexBounds {
+	u16 minU;
+	u16 minV;
+	u16 maxU;
+	u16 maxV;
+};
+
 struct GPUStateCache {
+	bool Supports(int flag) { return (featureFlags & flag) != 0; }
+
+	u32 featureFlags;
+
 	u32 vertexAddr;
 	u32 indexAddr;
 	u32 offsetAddr;
@@ -481,6 +514,8 @@ struct GPUStateCache {
 	float vpYOffset;
 	float vpWidthScale;
 	float vpHeightScale;
+
+	KnownVertexBounds vertBounds;
 
 	// TODO: These should be accessed from the current VFB object directly.
 	u32 curRTWidth;

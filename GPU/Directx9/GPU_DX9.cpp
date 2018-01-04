@@ -466,6 +466,17 @@ void DIRECTX9_GPU::UpdateCmdInfo() {
 		cmdInfo_[GE_CMD_VERTEXTYPE].flags |= FLAG_FLUSHBEFOREONCHANGE;
 		cmdInfo_[GE_CMD_VERTEXTYPE].func = &DIRECTX9_GPU::Execute_VertexType;
 	}
+
+	u32 features = 0;
+
+	// Set some flags that may be convenient in the future if we merge the backends more.
+	features |= GPU_SUPPORTS_BLEND_MINMAX;
+	features |= GPU_SUPPORTS_TEXTURE_LOD_CONTROL;
+
+	if (!PSP_CoreParameter().compat.flags().NoDepthRounding)
+		features |= GPU_ROUND_DEPTH_TO_16BIT;
+
+	gstate_c.featureFlags = features;
 }
 
 DIRECTX9_GPU::~DIRECTX9_GPU() {
@@ -507,6 +518,11 @@ void DIRECTX9_GPU::DumpNextFrame() {
 
 void DIRECTX9_GPU::BeginFrame() {
 	ScheduleEvent(GPU_EVENT_BEGIN_FRAME);
+}
+
+void DIRECTX9_GPU::ReapplyGfxStateInternal() {
+	DX9::dxstate.Restore();
+	GPUCommon::ReapplyGfxStateInternal();
 }
 
 void DIRECTX9_GPU::BeginFrameInternal() {
@@ -889,7 +905,7 @@ void DIRECTX9_GPU::Execute_ViewportType(u32 op, u32 diff) {
 	switch (op >> 24) {
 	case GE_CMD_VIEWPORTZ1:
 	case GE_CMD_VIEWPORTZ2:
-		shaderManager_->DirtyUniform(DIRTY_PROJMATRIX);
+		shaderManager_->DirtyUniform(DIRTY_PROJMATRIX | DIRTY_DEPTHRANGE);
 		break;
 	}
 }
@@ -2096,7 +2112,7 @@ bool DIRECTX9_GPU::GetCurrentTexture(GPUDebugBuffer &buffer, int level) {
 			D3DSURFACE_DESC desc;
 			D3DLOCKED_RECT locked;
 			tex->GetLevelDesc(level, &desc);
-			RECT rect = {0, 0, desc.Width, desc.Height};
+			RECT rect = {0, 0, (LONG)desc.Width, (LONG)desc.Height};
 			hr = tex->LockRect(level, &locked, &rect, D3DLOCK_READONLY);
 
 			// If it fails, this means it's a render-to-texture, so we have to get creative.

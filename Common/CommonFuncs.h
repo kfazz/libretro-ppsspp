@@ -95,8 +95,9 @@ inline u64 __rotr64(u64 x, unsigned int shift){
 #ifndef __LIBRETRO__
 	#define atoll _atoi64
 #endif
-	#define stat64 _stat64
-	#define fstat64 _fstat64
+//	#define stat64 _stat64
+//	#define fstat64 _fstat64
+
 	#define fileno _fileno
 #ifndef _XBOX
 	#if _M_IX86

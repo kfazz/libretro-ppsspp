@@ -23,7 +23,7 @@
 
 #include "d3d9.h"
 
-#include "GPU/Directx9/helper/fbo.h"
+#include "GPU/Directx9/helper/dx_fbo.h"
 // Keeps track of allocated FBOs.
 // Also provides facilities for drawing and later converting raw
 // pixel data.
@@ -71,7 +71,7 @@ public:
 
 	void BlitFramebufferDepth(VirtualFramebuffer *src, VirtualFramebuffer *dst);
 
-	void BindFramebufferColor(int stage, VirtualFramebuffer *framebuffer, bool skipCopy = false);
+	void BindFramebufferColor(int stage, VirtualFramebuffer *framebuffer, int flags);
 
 	virtual void ReadFramebufferToMemory(VirtualFramebuffer *vfb, bool sync, int x, int y, int w, int h) override;
 

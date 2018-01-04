@@ -16,11 +16,11 @@
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
 #include "base/logging.h"
-#include "gfx_es2/gl_state.h"
 #include "profiler/profiler.h"
 
 #include "Common/ChunkFile.h"
 
+#include "Core/Config.h"
 #include "Core/Debugger/Breakpoints.h"
 #include "Core/MemMapHelpers.h"
 #include "Core/Host.h"
@@ -31,7 +31,9 @@
 #include "GPU/GPUState.h"
 #include "GPU/ge_constants.h"
 #include "GPU/GeDisasm.h"
+#include "GPU/Common/FramebufferCommon.h"
 
+#include "GPU/GLES/GLStateCache.h"
 #include "GPU/GLES/ShaderManager.h"
 #include "GPU/GLES/GLES_GPU.h"
 #include "GPU/GLES/Framebuffer.h"
@@ -43,6 +45,10 @@
 #include "Core/HLE/sceKernelInterrupt.h"
 #include "Core/HLE/sceGe.h"
 
+#ifdef _WIN32
+#include "Windows/OpenGLBase.h"
+#endif
+
 enum {
 	FLAG_FLUSHBEFORE = 1,
 	FLAG_FLUSHBEFOREONCHANGE = 2,
@@ -52,6 +58,13 @@ enum {
 	FLAG_READS_PC = 16,
 	FLAG_WRITES_PC = 32,
 	FLAG_DIRTYONCHANGE = 64,
+};
+
+static const char *FramebufferFetchBlacklist[] = {
+	// Blacklist Tegra 3, doesn't work very well.
+	"NVIDIA Tegra 3",
+	"PowerVR Rogue G6430",
+	"PowerVR SGX 540",
 };
 
 struct CommandTableEntry {
@@ -77,8 +90,8 @@ static const CommandTableEntry commandTable[] = {
 	{GE_CMD_FOG2, FLAG_FLUSHBEFOREONCHANGE | FLAG_EXECUTEONCHANGE, DIRTY_FOGCOEF, &GLES_GPU::Execute_FogCoef},
 
 	// Should these maybe flush?
-	{GE_CMD_MINZ, FLAG_FLUSHBEFOREONCHANGE},
-	{GE_CMD_MAXZ, FLAG_FLUSHBEFOREONCHANGE},
+	{GE_CMD_MINZ, FLAG_FLUSHBEFOREONCHANGE, DIRTY_DEPTHRANGE},
+	{GE_CMD_MAXZ, FLAG_FLUSHBEFOREONCHANGE, DIRTY_DEPTHRANGE},
 
 	// Changes that dirty texture scaling.
 	{GE_CMD_TEXMAPMODE, FLAG_FLUSHBEFOREONCHANGE | FLAG_EXECUTEONCHANGE, DIRTY_UVSCALEOFFSET, &GLES_GPU::Execute_TexMapMode},
@@ -206,8 +219,8 @@ static const CommandTableEntry commandTable[] = {
 	{GE_CMD_VIEWPORTY1, FLAG_FLUSHBEFOREONCHANGE | FLAG_EXECUTEONCHANGE, 0, &GLES_GPU::Execute_ViewportType},
 	{GE_CMD_VIEWPORTX2, FLAG_FLUSHBEFOREONCHANGE | FLAG_EXECUTEONCHANGE, 0, &GLES_GPU::Execute_ViewportType},
 	{GE_CMD_VIEWPORTY2, FLAG_FLUSHBEFOREONCHANGE | FLAG_EXECUTEONCHANGE, 0, &GLES_GPU::Execute_ViewportType},
-	{GE_CMD_VIEWPORTZ1, FLAG_FLUSHBEFOREONCHANGE | FLAG_EXECUTEONCHANGE, 0, &GLES_GPU::Execute_ViewportType},
-	{GE_CMD_VIEWPORTZ2, FLAG_FLUSHBEFOREONCHANGE | FLAG_EXECUTEONCHANGE, 0, &GLES_GPU::Execute_ViewportType},
+	{GE_CMD_VIEWPORTZ1, FLAG_FLUSHBEFOREONCHANGE | FLAG_EXECUTEONCHANGE, DIRTY_DEPTHRANGE, &GLES_GPU::Execute_ViewportZType},
+	{GE_CMD_VIEWPORTZ2, FLAG_FLUSHBEFOREONCHANGE | FLAG_EXECUTEONCHANGE, DIRTY_DEPTHRANGE, &GLES_GPU::Execute_ViewportZType},
 
 	// Region
 	{GE_CMD_REGION1, FLAG_FLUSHBEFOREONCHANGE | FLAG_EXECUTEONCHANGE, 0, &GLES_GPU::Execute_Region},
@@ -396,6 +409,7 @@ GLES_GPU::CommandInfo GLES_GPU::cmdInfo_[256];
 GLES_GPU::GLES_GPU()
 : resized_(false) {
 	UpdateVsyncInterval(true);
+	CheckGPUFeatures();
 
 	shaderManager_ = new ShaderManager();
 	transformDraw_.SetShaderManager(shaderManager_);
@@ -460,7 +474,104 @@ GLES_GPU::~GLES_GPU() {
 	fragmentTestCache_.Clear();
 	delete shaderManager_;
 	shaderManager_ = nullptr;
-	glstate.SetVSyncInterval(0);
+
+#ifdef _WIN32
+	GL_SwapInterval(0);
+#endif
+}
+
+// Take the raw GL extension and versioning data and turn into feature flags.
+void GLES_GPU::CheckGPUFeatures() {
+	u32 features = 0;
+	if (gl_extensions.ARB_blend_func_extended /*|| gl_extensions.EXT_blend_func_extended*/) {
+		if (gl_extensions.gpuVendor == GPU_VENDOR_INTEL || !gl_extensions.VersionGEThan(3, 0, 0)) {
+			// Don't use this extension to off on sub 3.0 OpenGL versions as it does not seem reliable
+			// Also on Intel, see https://github.com/hrydgard/ppsspp/issues/4867
+		} else {
+			features |= GPU_SUPPORTS_DUALSOURCE_BLEND;
+		}
+	}
+
+	if (gl_extensions.IsGLES) {
+		if (gl_extensions.GLES3)
+			features |= GPU_SUPPORTS_GLSL_ES_300;
+	} else {
+		if (gl_extensions.VersionGEThan(3, 3, 0))
+			features |= GPU_SUPPORTS_GLSL_330;
+	}
+
+	// Framebuffer fetch appears to be buggy at least on Tegra 3 devices.  So we blacklist it.
+	// Tales of Destiny 2 has been reported to display green.
+	if (gl_extensions.EXT_shader_framebuffer_fetch || gl_extensions.NV_shader_framebuffer_fetch || gl_extensions.ARM_shader_framebuffer_fetch) {
+		features |= GPU_SUPPORTS_ANY_FRAMEBUFFER_FETCH;
+		for (size_t i = 0; i < ARRAY_SIZE(FramebufferFetchBlacklist); i++) {
+			if (strstr(gl_extensions.model, FramebufferFetchBlacklist[i]) != 0) {
+				features &= ~GPU_SUPPORTS_ANY_FRAMEBUFFER_FETCH;
+				break;
+			}
+		}
+	}
+	
+	if (gl_extensions.ARB_framebuffer_object || gl_extensions.EXT_framebuffer_object || gl_extensions.IsGLES) {
+		features |= GPU_SUPPORTS_FBO;
+	}
+	if (gl_extensions.ARB_framebuffer_object || gl_extensions.GLES3) {
+		features |= GPU_SUPPORTS_ARB_FRAMEBUFFER_BLIT;
+	}
+	if (gl_extensions.NV_framebuffer_blit) {
+		features |= GPU_SUPPORTS_NV_FRAMEBUFFER_BLIT;
+	}
+
+	bool useCPU = false;
+	if (!gl_extensions.IsGLES) {
+		// Urrgh, we don't even define FB_READFBOMEMORY_CPU on mobile
+#ifndef USING_GLES2
+		useCPU = g_Config.iRenderingMode == FB_READFBOMEMORY_CPU;
+#endif
+		// Some cards or drivers seem to always dither when downloading a framebuffer to 16-bit.
+		// This causes glitches in games that expect the exact values.
+		// It has not been experienced on NVIDIA cards, so those are left using the GPU (which is faster.)
+		if (g_Config.iRenderingMode == FB_BUFFERED_MODE) {
+			if (gl_extensions.gpuVendor != GPU_VENDOR_NVIDIA || gl_extensions.ver[0] < 3) {
+				useCPU = true;
+			}
+		}
+	} else {
+		useCPU = true;
+	}
+
+	if (useCPU)
+		features |= GPU_PREFER_CPU_DOWNLOAD;
+
+	if ((gl_extensions.gpuVendor == GPU_VENDOR_NVIDIA) || (gl_extensions.gpuVendor == GPU_VENDOR_AMD))
+		features |= GPU_PREFER_REVERSE_COLOR_ORDER;
+
+	if (gl_extensions.OES_texture_npot)
+		features |= GPU_SUPPORTS_OES_TEXTURE_NPOT;
+
+	if (gl_extensions.EXT_unpack_subimage || !gl_extensions.IsGLES)
+		features |= GPU_SUPPORTS_UNPACK_SUBIMAGE;
+
+	if (gl_extensions.EXT_blend_minmax || gl_extensions.GLES3)
+		features |= GPU_SUPPORTS_BLEND_MINMAX;
+
+	if (!gl_extensions.IsGLES)
+		features |= GPU_SUPPORTS_LOGIC_OP;
+
+	if (gl_extensions.GLES3 || !gl_extensions.IsGLES)
+		features |= GPU_SUPPORTS_TEXTURE_LOD_CONTROL;
+
+	// In the future, also disable this when we get a proper 16-bit depth buffer.
+	if (!PSP_CoreParameter().compat.flags().NoDepthRounding)
+		features |= GPU_ROUND_DEPTH_TO_16BIT;
+
+
+#ifdef MOBILE_DEVICE
+	// Arguably, we should turn off GPU_IS_MOBILE on like modern Tegras, etc.
+	features |= GPU_IS_MOBILE;
+#endif
+
+	gstate_c.featureFlags = features;
 }
 
 // Let's avoid passing nulls into snprintf().
@@ -558,7 +669,7 @@ inline void GLES_GPU::UpdateVsyncInterval(bool force) {
 		//	// See http://developer.download.nvidia.com/opengl/specs/WGL_EXT_swap_control_tear.txt
 		//	glstate.SetVSyncInterval(-desiredVSyncInterval);
 		//} else {
-			glstate.SetVSyncInterval(desiredVSyncInterval);
+			GL_SwapInterval(desiredVSyncInterval);
 		//}
 		lastVsync_ = desiredVSyncInterval;
 	}
@@ -587,8 +698,14 @@ void GLES_GPU::UpdateCmdInfo() {
 	}
 }
 
+void GLES_GPU::ReapplyGfxStateInternal() {
+	glstate.Restore();
+	GPUCommon::ReapplyGfxStateInternal();
+}
+
 void GLES_GPU::BeginFrameInternal() {
 	if (resized_) {
+		CheckGPUFeatures();
 		UpdateCmdInfo();
 		transformDraw_.Resized();
 	}
@@ -1012,6 +1129,12 @@ void GLES_GPU::Execute_FramebufType(u32 op, u32 diff) {
 void GLES_GPU::Execute_ViewportType(u32 op, u32 diff) {
 	gstate_c.framebufChanged = true;
 	gstate_c.textureChanged |= TEXCHANGE_PARAMSONLY;
+}
+
+void GLES_GPU::Execute_ViewportZType(u32 op, u32 diff) {
+	gstate_c.framebufChanged = true;
+	gstate_c.textureChanged |= TEXCHANGE_PARAMSONLY;
+	shaderManager_->DirtyUniform(DIRTY_DEPTHRANGE);
 }
 
 void GLES_GPU::Execute_TexScaleU(u32 op, u32 diff) {

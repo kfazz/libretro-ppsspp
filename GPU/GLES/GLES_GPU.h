@@ -20,9 +20,8 @@
 #include <list>
 #include <deque>
 
-#include "gfx_es2/fbo.h"
-
 #include "GPU/GPUCommon.h"
+#include "GPU/GLES/FBO.h"
 #include "GPU/GLES/Framebuffer.h"
 #include "GPU/GLES/TransformPipeline.h"
 #include "GPU/GLES/TextureCache.h"
@@ -36,12 +35,17 @@ class GLES_GPU : public GPUCommon {
 public:
 	GLES_GPU();
 	~GLES_GPU();
+
+	// This gets called on startup and when we get back from settings.
+	void CheckGPUFeatures();
+
 	void InitClear() override;
 	void Reinitialize() override;
 	void PreExecuteOp(u32 op, u32 diff) override;
 	void Execute_Generic(u32 op, u32 diff);
 	void ExecuteOp(u32 op, u32 diff) override;
 
+	void ReapplyGfxStateInternal() override;
 	void SetDisplayFramebuffer(u32 framebuf, u32 stride, GEBufferFormat format) override;
 	void CopyDisplayToOutput() override;
 	void BeginFrame() override;
@@ -72,14 +76,14 @@ public:
 		primaryInfo = reportingPrimaryInfo_;
 		fullInfo = reportingFullInfo_;
 	}
-	std::vector<FramebufferInfo> GetFramebufferList();
+	std::vector<FramebufferInfo> GetFramebufferList() override;
 
-	bool GetCurrentFramebuffer(GPUDebugBuffer &buffer);
-	bool GetCurrentDepthbuffer(GPUDebugBuffer &buffer);
-	bool GetCurrentStencilbuffer(GPUDebugBuffer &buffer);
-	bool GetCurrentTexture(GPUDebugBuffer &buffer, int level);
+	bool GetCurrentFramebuffer(GPUDebugBuffer &buffer) override;
+	bool GetCurrentDepthbuffer(GPUDebugBuffer &buffer) override;
+	bool GetCurrentStencilbuffer(GPUDebugBuffer &buffer) override;
+	bool GetCurrentTexture(GPUDebugBuffer &buffer, int level) override;
 	static bool GetDisplayFramebuffer(GPUDebugBuffer &buffer);
-	bool GetCurrentSimpleVertices(int count, std::vector<GPUDebugVertex> &vertices, std::vector<u16> &indices);
+	bool GetCurrentSimpleVertices(int count, std::vector<GPUDebugVertex> &vertices, std::vector<u16> &indices) override;
 
 	bool DescribeCodePtr(const u8 *ptr, std::string &name) override;
 
@@ -101,6 +105,7 @@ public:
 	void Execute_Scissor(u32 op, u32 diff);
 	void Execute_FramebufType(u32 op, u32 diff);
 	void Execute_ViewportType(u32 op, u32 diff);
+	void Execute_ViewportZType(u32 op, u32 diff);
 	void Execute_TexScaleU(u32 op, u32 diff);
 	void Execute_TexScaleV(u32 op, u32 diff);
 	void Execute_TexOffsetU(u32 op, u32 diff);
