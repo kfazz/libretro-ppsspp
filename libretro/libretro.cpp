@@ -447,7 +447,7 @@ static void check_variables(void)
 
    var.key = "ppsspp_set_rounding_mode";
    var.value = NULL;
-
+#if 0
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
    {
       if (!strcmp(var.value, "enabled"))
@@ -457,6 +457,7 @@ static void check_variables(void)
    }
    else
          g_Config.bSetRoundingMode = false;
+#endif
 
    var.key = "ppsspp_vertex_cache";
    var.value = NULL;
@@ -709,7 +710,7 @@ static void check_variables(void)
    else
       g_Config.bSeparateIOThread = false;
 
-
+#if 0
    var.key = "ppsspp_unsafe_func_replacements";
    var.value = NULL;
 
@@ -722,6 +723,7 @@ static void check_variables(void)
    }
    else
          g_Config.bUnsafeFuncReplacements = true;
+#endif
    
    var.key = "ppsspp_sound_speedhack";
    var.value = NULL;
