@@ -347,8 +347,6 @@ static void context_reset(void)
 
       //RecreateViews(); /* TODO ? */
 
-      gl_lost();
-
       initialize_gl();
 
       glstate.Restore();
