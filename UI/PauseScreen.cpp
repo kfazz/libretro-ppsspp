@@ -16,8 +16,10 @@
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
 #include "i18n/i18n.h"
+#include "gfx_es2/draw_buffer.h"
 #include "ui/view.h"
 #include "ui/viewgroup.h"
+#include "ui/ui_context.h"
 #include "ui/ui_screen.h"
 #include "thin3d/thin3d.h"
 
@@ -39,9 +41,6 @@
 #include "UI/CwCheatScreen.h"
 #include "UI/MainScreen.h"
 #include "UI/GameInfoCache.h"
-
-#include "gfx_es2/draw_buffer.h"
-#include "ui/ui_context.h"
 
 void AsyncImageFileView::GetContentDimensions(const UIContext &dc, float &w, float &h) const {
 	if (texture_) {
@@ -180,8 +179,8 @@ private:
 SaveSlotView::SaveSlotView(const std::string &gameFilename, int slot, UI::LayoutParams *layoutParams) : UI::LinearLayout(UI::ORIENT_HORIZONTAL, layoutParams), gamePath_(gameFilename), slot_(slot) {
 	using namespace UI;
 
-	screenshotFilename_ = SaveState::GenerateSaveSlotFilename(gamePath_, slot, "jpg");
-	PrioritizedWorkQueue *wq = g_gameInfoCache.WorkQueue();
+	screenshotFilename_ = SaveState::GenerateSaveSlotFilename(gamePath_, slot, SaveState::SCREENSHOT_EXTENSION);
+	PrioritizedWorkQueue *wq = g_gameInfoCache->WorkQueue();
 	Add(new Spacer(5));
 
 	AsyncImageFileView *fv = Add(new AsyncImageFileView(screenshotFilename_, IS_DEFAULT, wq, new UI::LayoutParams(82 * 2, 47 * 2)));
@@ -409,7 +408,7 @@ UI::EventReturn GamePauseScreen::OnSwitchUMD(UI::EventParams &e) {
 void GamePauseScreen::CallbackDeleteConfig(bool yes)
 {
 	if (yes) {
-		GameInfo *info = g_gameInfoCache.GetInfo(NULL, gamePath_, 0);
+		GameInfo *info = g_gameInfoCache->GetInfo(NULL, gamePath_, 0);
 		g_Config.unloadGameConfig();
 		g_Config.deleteGameConfig(info->id);
 		info->hasConfig = false;
@@ -423,7 +422,7 @@ UI::EventReturn GamePauseScreen::OnCreateConfig(UI::EventParams &e)
 	g_Config.createGameConfig(gameId);
 	g_Config.changeGameSpecific(gameId);
 	g_Config.saveGameConfig(gameId);
-	GameInfo *info = g_gameInfoCache.GetInfo(NULL, gamePath_, 0);
+	GameInfo *info = g_gameInfoCache->GetInfo(NULL, gamePath_, 0);
 	if (info) {
 		info->hasConfig = true;
 	}

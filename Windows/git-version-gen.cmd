@@ -37,7 +37,12 @@ if errorlevel 1 (
 	set GIT="%ProgramFiles(x86)%\Git\bin\git.exe"
 	call !GIT! describe > NUL 2> NUL
 	if errorlevel 1 (
+		echo !GIT!
 		set GIT="%ProgramFiles%\Git\bin\git.exe"
+		call !GIT! describe > NUL 2> NUL
+		if errorlevel 1 (
+			set GIT="%ProgramW6432%\Git\bin\git.exe"
+		)
 	)
 )
 

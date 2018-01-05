@@ -28,7 +28,7 @@ bool parseLBN(std::string filename, u32 *sectorStart, u32 *readSize);
 
 class ISOFileSystem : public IFileSystem {
 public:
-	ISOFileSystem(IHandleAllocator *_hAlloc, BlockDevice *_blockDevice, std::string _restrictPath = "");
+	ISOFileSystem(IHandleAllocator *_hAlloc, BlockDevice *_blockDevice);
 	~ISOFileSystem();
 
 	void DoState(PointerWrap &p) override;
@@ -56,7 +56,7 @@ public:
 
 private:
 	struct TreeEntry {
-		TreeEntry(){}
+		TreeEntry() : flags(0), valid(false) {}
 		~TreeEntry();
 
 		std::string name;
@@ -65,7 +65,12 @@ private:
 		s64 size;
 		bool isDirectory;
 
+		u32 startsector;
+		u32 dirsize;
+
 		TreeEntry *parent;
+
+		bool valid;
 		std::vector<TreeEntry *> children;
 	};
 
@@ -87,10 +92,7 @@ private:
 
 	TreeEntry entireISO;
 
-	// Don't use this in the emu, not savestated.
-	std::vector<std::string> restrictTree;
-
-	void ReadDirectory(u32 startsector, u32 dirsize, TreeEntry *root, size_t level);
+	void ReadDirectory(TreeEntry *root);
 	TreeEntry *GetFromPath(const std::string &path, bool catchError = true);
 	std::string EntryFullPath(TreeEntry *e);
 };

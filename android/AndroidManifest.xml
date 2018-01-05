@@ -2,8 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="org.ppsspp.ppsspp"
     android:installLocation="auto"
-    android:versionCode="1110"
-    android:versionName="1.1.1.0">
+    android:versionCode="1220"
+    android:versionName="1.2.2.0">
 
     <uses-sdk
         android:minSdkVersion="9"
@@ -47,6 +47,43 @@
                 <category android:name="android.intent.category.LAUNCHER" />
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
+            <intent-filter>
+				<action android:name="android.intent.action.VIEW" />
+				
+				<category android:name="android.intent.category.DEFAULT" />
+				<category android:name="android.intent.category.BROWSABLE" />
+				
+				<data
+					android:host="*"
+					android:mimeType="*/*"
+					android:pathPattern=".*\\.iso"
+					android:scheme="file" />
+				<data
+					android:host="*"
+					android:mimeType="*/*"
+					android:pathPattern=".*\\.cso"
+					android:scheme="file" />
+				<data
+					android:host="*"
+					android:mimeType="*/*"
+					android:pathPattern=".*\\.elf"
+					android:scheme="file" />
+				<data
+					android:host="*"
+					android:mimeType="*/*"
+					android:pathPattern=".*\\.ISO"
+					android:scheme="file" />
+				<data
+					android:host="*"
+					android:mimeType="*/*"
+					android:pathPattern=".*\\.CSO"
+					android:scheme="file" />
+				<data
+					android:host="*"
+					android:mimeType="*/*"
+					android:pathPattern=".*\\.ELF"
+					android:scheme="file" />
+			</intent-filter>
         </activity>
         <meta-data android:name="isGame" android:value="true" />
         <activity

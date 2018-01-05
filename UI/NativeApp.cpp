@@ -143,6 +143,7 @@ static recursive_mutex pendingMutex;
 static std::vector<PendingMessage> pendingMessages;
 static Thin3DContext *thin3d;
 static UIContext *uiContext;
+static std::vector<std::string> inputboxValue;
 
 #ifdef _WIN32
 WindowsAudioBackend *winAudioBackend;
@@ -346,11 +347,15 @@ void NativeInit(int argc, const char *argv[], const char *savegame_dir, const ch
 	g_Config.flash0Directory = File::GetExeDirectory() + "/flash0/";
 #endif
 
+	if (cache_dir && strlen(cache_dir)) {
+		DiskCachingFileLoaderCache::SetCacheDir(cache_dir);
+		g_Config.appCacheDirectory = cache_dir;
+	}
+
 #ifndef _WIN32
 	logger = new AndroidLogger();
 
 	LogManager::Init();
-	LogManager *logman = LogManager::GetInstance();
 
 	g_Config.AddSearchPath(user_data_path);
 	g_Config.AddSearchPath(g_Config.memStickDirectory + "PSP/SYSTEM/");
@@ -358,6 +363,7 @@ void NativeInit(int argc, const char *argv[], const char *savegame_dir, const ch
 	g_Config.Load();
 	g_Config.externalDirectory = external_dir;
 #endif
+	LogManager *logman = LogManager::GetInstance();
 
 #ifdef ANDROID
 	// On Android, create a PSP directory tree in the external_dir,
@@ -447,10 +453,12 @@ void NativeInit(int argc, const char *argv[], const char *savegame_dir, const ch
 		logman->AddListener(type, logger);
 #endif
 	}
-	// Special hack for G3D as it's very spammy. Need to make a flag for this.
-	if (!gfxLog)
-		logman->SetLogLevel(LogTypes::G3D, LogTypes::LERROR);
 #endif
+	// Special hack for G3D as it's very spammy. Need to make a flag for this.
+	if (!gfxLog) {
+		logman->SetLogLevel(LogTypes::G3D, LogTypes::LERROR);
+		logman->SetLogLevel(LogTypes::SCEGE, LogTypes::LERROR);
+	}
 	// Allow the lang directory to be overridden for testing purposes (e.g. Android, where it's hard to 
 	// test new languages without recompiling the entire app, which is a hassle).
 	const std::string langOverridePath = g_Config.memStickDirectory + "PSP/SYSTEM/lang/";
@@ -480,8 +488,6 @@ void NativeInit(int argc, const char *argv[], const char *savegame_dir, const ch
 	if (!boot_filename.empty() && stateToLoad != NULL)
 		SaveState::Load(stateToLoad);
 
-	g_gameInfoCache.Init();
-
 	screenManager = new ScreenManager();
 	if (skipLogo) {
 		screenManager->switchScreen(new EmuScreen(boot_filename));
@@ -503,11 +509,6 @@ void NativeInit(int argc, const char *argv[], const char *savegame_dir, const ch
 	SetGPUBackend((GPUBackend) g_Config.iGPUBackend);
 	if (GetGPUBackend() == GPUBackend::OPENGL) {
 		gl_lost_manager_init();
-	}
-
-	if (cache_dir && strlen(cache_dir)) {
-		DiskCachingFileLoaderCache::SetCacheDir(cache_dir);
-		g_Config.appCacheDirectory = cache_dir;
 	}
 }
 
@@ -595,6 +596,8 @@ void NativeInitGraphics(GraphicsContext *graphicsContext) {
 	winAudioBackend = CreateAudioBackend((AudioBackendType)g_Config.iAudioBackend);
 	winAudioBackend->Init(MainWindow::GetHWND(), &Win32Mix, 44100);
 #endif
+
+	g_gameInfoCache = new GameInfoCache();
 }
 
 void NativeShutdownGraphics() {
@@ -605,7 +608,8 @@ void NativeShutdownGraphics() {
 
 	screenManager->deviceLost();
 
-	g_gameInfoCache.Clear();
+	delete g_gameInfoCache;
+	g_gameInfoCache = nullptr;
 
 	uiTexture->Release();
 
@@ -736,6 +740,14 @@ void HandleGlobalMessage(const std::string &msg, const std::string &value) {
 	if (msg == "inputDeviceConnected") {
 		KeyMap::NotifyPadConnected(value);
 	}
+	if (msg == "inputbox_completed") {
+		SplitString(value, ':', inputboxValue);
+		if (inputboxValue[0] == "IP")
+			g_Config.proAdhocServer = inputboxValue[1];
+		if (inputboxValue[0] == "nickname")
+			g_Config.sNickName = inputboxValue[1];
+		inputboxValue.clear();
+	}
 }
 
 void NativeUpdate(InputState &input) {
@@ -754,14 +766,14 @@ void NativeUpdate(InputState &input) {
 	screenManager->update(input);
 }
 
-void NativeDeviceLost() {
-	g_gameInfoCache.Clear();
+void NativeDeviceRestore() {
+	if (g_gameInfoCache)
+		g_gameInfoCache->Clear();
 	screenManager->deviceLost();
 
 	if (GetGPUBackend() == GPUBackend::OPENGL) {
-		gl_lost();
+		gl_restore();
 	}
-	// Should dirty EVERYTHING
 }
 
 bool NativeIsAtTopLevel() {
@@ -923,8 +935,6 @@ void NativeShutdown() {
 	screenManager->shutdown();
 	delete screenManager;
 	screenManager = 0;
-
-	g_gameInfoCache.Shutdown();
 
 	delete host;
 	host = 0;

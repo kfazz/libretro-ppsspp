@@ -89,7 +89,7 @@ void EmuScreen::bootGame(const std::string &filename) {
 	}
 
 	//pre-emptive loading of game specific config if possible, to get all the settings
-	GameInfo *info = g_gameInfoCache.GetInfo(NULL, filename, 0);
+	GameInfo *info = g_gameInfoCache->GetInfo(NULL, filename, 0);
 	if (info && !info->id.empty()) {
 		g_Config.loadGameConfig(info->id);
 	}
@@ -139,7 +139,7 @@ void EmuScreen::bootComplete() {
 	host->BootDone();
 	host->UpdateDisassembly();
 
-	g_gameInfoCache.FlushBGs();
+	g_gameInfoCache->FlushBGs();
 
 	NOTICE_LOG(BOOT, "Loading %s...", PSP_CoreParameter().fileToStart.c_str());
 	autoLoad();
@@ -266,7 +266,7 @@ void EmuScreen::sendMessage(const char *message, const char *value) {
 			int curSlot = SaveState::GetCurrentSlot();
 			std::string fn;
 			if (SaveState::HasSaveInSlot(gamePath_, curSlot)) {
-				fn = SaveState::GenerateSaveSlotFilename(gamePath_, curSlot, "jpg");
+				fn = SaveState::GenerateSaveSlotFilename(gamePath_, curSlot, SaveState::SCREENSHOT_EXTENSION);
 			}
 
 			saveStatePreview_->SetFilename(fn);

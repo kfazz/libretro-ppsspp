@@ -19,6 +19,7 @@
 #include "base/NativeApp.h"
 #include "base/logging.h"
 #include "base/timeutil.h"
+#include "thread/prioritizedworkqueue.h"
 #include "thread/threadutil.h"
 #include "file/zip_read.h"
 #include "input/input_state.h"
@@ -31,10 +32,21 @@
 
 #include "Common/GraphicsContext.h"
 #include "Common/GL/GLInterfaceBase.h"
+#include "UI/GameInfoCache.h"
 
 #include "app-android.h"
 
 static JNIEnv *jniEnvUI;
+
+enum {
+	ANDROID_VERSION_GINGERBREAD = 9,
+	ANDROID_VERSION_ICS = 14,
+	ANDROID_VERSION_JELLYBEAN = 16,
+	ANDROID_VERSION_KITKAT = 19,
+	ANDROID_VERSION_LOLLIPOP = 21,
+	ANDROID_VERSION_MARSHMALLOW = 23,
+	ANDROID_VERSION_N = 24,
+};
 
 struct FrameCommand {
 	FrameCommand() {}
@@ -47,7 +59,7 @@ struct FrameCommand {
 class AndroidEGLGraphicsContext : public GraphicsContext {
 public:
 	AndroidEGLGraphicsContext() : wnd_(nullptr), gl(nullptr) {}
-	bool Init(ANativeWindow *wnd, int desiredBackbufferSizeX, int desiredBackbufferSizeY, int backbufferFormat);
+	bool Init(ANativeWindow *wnd, int desiredBackbufferSizeX, int desiredBackbufferSizeY, int backbufferFormat, int androidVersion);
 	void Shutdown() override;
 	void SwapBuffers() override;
 	void SwapInterval(int interval) override {}
@@ -62,7 +74,7 @@ private:
 	cInterfaceBase *gl;
 };
 
-bool AndroidEGLGraphicsContext::Init(ANativeWindow *wnd, int backbufferWidth, int backbufferHeight, int backbufferFormat) {
+bool AndroidEGLGraphicsContext::Init(ANativeWindow *wnd, int backbufferWidth, int backbufferHeight, int backbufferFormat, int androidVersion) {
 	wnd_ = wnd;
 	gl = HostGL_CreateGLInterface();
 	if (!gl) {
@@ -76,10 +88,16 @@ bool AndroidEGLGraphicsContext::Init(ANativeWindow *wnd, int backbufferWidth, in
 	gl->SetMode(MODE_DETECT_ES);
 
 	bool use565 = false;
-	switch (backbufferFormat) {
-	case 4:  // PixelFormat.RGB_565
-		use565 = true;
-		break;
+
+	// This workaround seems only be needed on some really old devices.
+	if (androidVersion < ANDROID_VERSION_ICS) {
+		switch (backbufferFormat) {
+		case 4:  // PixelFormat.RGB_565
+			use565 = true;
+			break;
+		default:
+			break;
+		}
 	}
 
 	if (!gl->Create(wnd, false, use565)) {
@@ -102,6 +120,21 @@ void AndroidEGLGraphicsContext::Shutdown() {
 void AndroidEGLGraphicsContext::SwapBuffers() {
 	gl->Swap();
 }
+
+// Doesn't do much. Just to fit in.
+class AndroidJavaEGLGraphicsContext : public GraphicsContext {
+public:
+	AndroidJavaEGLGraphicsContext() {}
+	bool Init(ANativeWindow *wnd, int desiredBackbufferSizeX, int desiredBackbufferSizeY, int backbufferFormat, int androidVersion) { return true; }
+	void Shutdown() override {}
+	void SwapBuffers() override {}
+	void SwapInterval(int interval) override {}
+	void Resize() {}
+	Thin3DContext *CreateThin3DContext() {
+		CheckGLExtensions();
+		return T3DCreateGLContext();
+	}
+};
 
 
 static recursive_mutex frameCommandLock;
@@ -147,10 +180,14 @@ InputState input_state;
 
 static bool renderer_inited = false;
 static bool first_lost = true;
+static bool javaGL = true;
+
 static std::string library_path;
 static std::map<SystemPermission, PermissionStatus> permissions;
 
-AndroidEGLGraphicsContext *graphicsContext;
+GraphicsContext *graphicsContext;
+
+static void ProcessFrameCommands(JNIEnv *env);
 
 void PushCommand(std::string cmd, std::string param) {
 	lock_guard guard(frameCommandLock);
@@ -277,9 +314,9 @@ extern "C" jstring Java_org_ppsspp_ppsspp_NativeApp_queryConfig
 extern "C" void Java_org_ppsspp_ppsspp_NativeApp_init
   (JNIEnv *env, jclass, jstring jmodel, jint jdeviceType, jstring jlangRegion, jstring japkpath,
 		jstring jdataDir, jstring jexternalDir, jstring jlibraryDir, jstring jcacheDir, jstring jshortcutParam,
-		jint jAndroidVersion) {
+		jint jAndroidVersion, jboolean jjavaGL) {
 	jniEnvUI = env;
-
+	javaGL = jjavaGL;
 	setCurrentThreadName("androidInit");
 
 	ILOG("NativeApp.init() -- begin");
@@ -384,8 +421,110 @@ extern "C" void Java_org_ppsspp_ppsspp_NativeApp_shutdown(JNIEnv *, jclass) {
 	ILOG("NativeApp.shutdown() -- end");
 }
 
-extern "C" void Java_org_ppsspp_ppsspp_NativeRenderer_displayShutdown(JNIEnv *env, jobject obj) {
+// JavaEGL
+extern "C" void Java_org_ppsspp_ppsspp_NativeRenderer_displayInit(JNIEnv * env, jobject obj) {
+	ILOG("NativeApp.displayInit()");
+	if (javaGL && !graphicsContext) {
+		graphicsContext = new AndroidJavaEGLGraphicsContext();
+	}
+
+	if (!renderer_inited) {
+		NativeInitGraphics(graphicsContext);
+		renderer_inited = true;
+	} else {
+		NativeDeviceRestore();  // ???
+		ILOG("displayInit: NativeDeviceRestore completed.");
+	}
+}
+
+// JavaEGL
+extern "C" void Java_org_ppsspp_ppsspp_NativeRenderer_displayResize(JNIEnv *, jobject clazz, jint w, jint h, jint dpi, jfloat refreshRate) {
+	ILOG("NativeApp.displayResize(%i x %i, dpi=%i, refresh=%0.2f)", w, h, dpi, refreshRate);
+
+	/*
+	g_dpi = dpi;
+	g_dpi_scale = 240.0f / (float)g_dpi;
+
+	pixel_xres = w;
+	pixel_yres = h;
+	dp_xres = pixel_xres * g_dpi_scale;
+	dp_yres = pixel_yres * g_dpi_scale;
+	dp_xscale = (float)dp_xres / pixel_xres;
+	dp_yscale = (float)dp_yres / pixel_yres;
+	*/
+	// display_hz = refreshRate;
+
+	pixel_xres = w;
+	pixel_yres = h;
+	// backbuffer_format = format;
+
+	g_dpi = (int)display_dpi;
+	g_dpi_scale = 240.0f / (float)g_dpi;
+
+	dp_xres = display_xres * g_dpi_scale;
+	dp_yres = display_yres * g_dpi_scale;
+
+	// Touch scaling is from display pixels to dp pixels.
+	dp_xscale = (float)dp_xres / (float)display_xres;
+	dp_yscale = (float)dp_yres / (float)display_yres;
+
+	pixel_in_dps = (float)pixel_xres / dp_xres;
+
+	NativeResized();
+}
+
+// JavaEGL
+extern "C" void Java_org_ppsspp_ppsspp_NativeRenderer_displayRender(JNIEnv *env, jobject obj) {
+	static bool hasSetThreadName = false;
+	if (!hasSetThreadName) {
+		hasSetThreadName = true;
+		setCurrentThreadName("AndroidRender");
+	}
+
 	if (renderer_inited) {
+		// TODO: Look into if these locks are a perf loss
+		{
+			lock_guard guard(input_state.lock);
+
+			input_state.pad_lstick_x = left_joystick_x_async;
+			input_state.pad_lstick_y = left_joystick_y_async;
+			input_state.pad_rstick_x = right_joystick_x_async;
+			input_state.pad_rstick_y = right_joystick_y_async;
+
+			UpdateInputState(&input_state);
+		}
+		NativeUpdate(input_state);
+
+		{
+			lock_guard guard(input_state.lock);
+			EndInputState(&input_state);
+		}
+
+		NativeRender(graphicsContext);
+		time_update();
+	} else {
+		ELOG("BAD: Ended up in nativeRender even though app has quit.%s", "");
+		// Shouldn't really get here. Let's draw magenta.
+		glDepthMask(GL_TRUE);
+		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+		glClearColor(1.0, 0.0, 1.0f, 1.0f);
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+	}
+
+	lock_guard guard(frameCommandLock);
+	if (!nativeActivity) {
+		while (!frameCommands.empty())
+			frameCommands.pop();
+		return;
+	}
+
+	ProcessFrameCommands(env);
+}
+
+extern "C" void Java_org_ppsspp_ppsspp_NativeRenderer_displayShutdown(JNIEnv *env, jobject obj) {
+	ILOG("NativeApp.displayShutdown()");
+	if (renderer_inited) {
+		NativeShutdownGraphics();
 		renderer_inited = false;
 		NativeMessageReceived("recreateviews", "");
 	}
@@ -409,6 +548,7 @@ PermissionStatus System_GetPermissionStatus(SystemPermission permission) {
 
 extern "C" jboolean JNICALL Java_org_ppsspp_ppsspp_NativeApp_touch
 	(JNIEnv *, jclass, float x, float y, int code, int pointerId) {
+
 	float scaledX = x * dp_xscale;
 	float scaledY = y * dp_yscale;
 
@@ -661,6 +801,23 @@ extern "C" jint JNICALL Java_org_ppsspp_ppsspp_NativeApp_getDesiredBackbufferHei
 	return desiredBackbufferSizeY;
 }
 
+static void ProcessFrameCommands(JNIEnv *env) {
+	lock_guard guard(frameCommandLock);
+	while (!frameCommands.empty()) {
+		FrameCommand frameCmd;
+		frameCmd = frameCommands.front();
+		frameCommands.pop();
+
+		WLOG("frameCommand! '%s' '%s'", frameCmd.command.c_str(), frameCmd.params.c_str());
+
+		jstring cmd = env->NewStringUTF(frameCmd.command.c_str());
+		jstring param = env->NewStringUTF(frameCmd.params.c_str());
+		env->CallVoidMethod(nativeActivity, postCommand, cmd, param);
+		env->DeleteLocalRef(cmd);
+		env->DeleteLocalRef(param);
+	}
+}
+
 extern "C" bool JNICALL Java_org_ppsspp_ppsspp_NativeActivity_runEGLRenderLoop(JNIEnv *env, jobject obj, jobject _surf) {
 	ANativeWindow *wnd = ANativeWindow_fromSurface(env, _surf);
 
@@ -672,7 +829,7 @@ extern "C" bool JNICALL Java_org_ppsspp_ppsspp_NativeActivity_runEGLRenderLoop(J
 	}
 
 	AndroidEGLGraphicsContext *graphicsContext = new AndroidEGLGraphicsContext();
-	if (!graphicsContext->Init(wnd, desiredBackbufferSizeX, desiredBackbufferSizeY, backbuffer_format)) {
+	if (!graphicsContext->Init(wnd, desiredBackbufferSizeX, desiredBackbufferSizeY, backbuffer_format, androidVersion)) {
 		ELOG("Failed to initialize graphics context.");
 		delete graphicsContext;
 		return false;
@@ -716,25 +873,11 @@ extern "C" bool JNICALL Java_org_ppsspp_ppsspp_NativeActivity_runEGLRenderLoop(J
 
 		graphicsContext->SwapBuffers();
 
-		lock_guard guard(frameCommandLock);
-		while (!frameCommands.empty()) {
-			FrameCommand frameCmd;
-			frameCmd = frameCommands.front();
-			frameCommands.pop();
-
-			WLOG("frameCommand! '%s' '%s'", frameCmd.command.c_str(), frameCmd.params.c_str());
-
-			jstring cmd = env->NewStringUTF(frameCmd.command.c_str());
-			jstring param = env->NewStringUTF(frameCmd.params.c_str());
-			env->CallVoidMethod(nativeActivity, postCommand, cmd, param);
-			env->DeleteLocalRef(cmd);
-			env->DeleteLocalRef(param);
-		}
+		ProcessFrameCommands(env);
 	}
 
-	// Restore lost device objects. TODO: This feels like the wrong place for this.
-	NativeDeviceLost();
-	ILOG("NativeDeviceLost completed.");
+	ILOG("After render loop.");
+	g_gameInfoCache->WorkQueue()->Flush();
 
 	NativeShutdownGraphics();
 	renderer_inited = false;
@@ -742,6 +885,6 @@ extern "C" bool JNICALL Java_org_ppsspp_ppsspp_NativeActivity_runEGLRenderLoop(J
 	graphicsContext->Shutdown();
 
 	renderLoopRunning = false;
-	WLOG("Render loop exited;");
+	WLOG("Render loop function exited.");
 	return true;
 }

@@ -23,35 +23,54 @@ void PrioritizedWorkQueue::Stop() {
 }
 
 void PrioritizedWorkQueue::Flush() {
-	if (queue_.empty())
-		return;
 	lock_guard guard(mutex_);
+	int flush_count = 0;
 	for (auto iter = queue_.begin(); iter != queue_.end(); ++iter) {
 		delete *iter;
+		flush_count++;
 	}
 	queue_.clear();
+	ILOG("Flushed %d un-executed tasks", flush_count);
 }
 
-void PrioritizedWorkQueue::WaitUntilDone() {
-	if (queue_.empty())
-		return;
-	// This could be made more elegant..
-	while (true) {
-		bool empty;
-		{
-			lock_guard guard(mutex_);
-			empty = queue_.empty();
-		}
-		if (empty) {
-			break;
-		}
-		sleep_ms(10);
+bool PrioritizedWorkQueue::WaitUntilDone(bool all) {
+	// We'll lock drain this entire time, so make sure you follow that lock ordering.
+	lock_guard guard(drainMutex_);
+	if (AllItemsDone()) {
+		return true;
 	}
+
+	while (!AllItemsDone()) {
+		drain_.wait(drainMutex_);
+		if (!all) {
+			// Return whether empty or not, something just drained.
+			return AllItemsDone();
+		}
+	}
+
+	return true;
 }
 
+void PrioritizedWorkQueue::NotifyDrain() {
+	lock_guard guard(drainMutex_);
+	drain_.notify_one();
+}
+
+bool PrioritizedWorkQueue::AllItemsDone() {
+	lock_guard guard(mutex_);
+	return queue_.empty() && !working_;
+}
 
 // The worker should simply call this in a loop. Will block when appropriate.
 PrioritizedWorkQueueItem *PrioritizedWorkQueue::Pop() {
+	{
+		lock_guard guard(mutex_);
+		working_ = false;  // The thread only calls Pop if it's done.
+	}
+
+	// Important: make sure mutex_ is not locked while draining.
+	NotifyDrain();
+
 	lock_guard guard(mutex_);
 	if (done_) {
 		return 0;
@@ -77,6 +96,7 @@ PrioritizedWorkQueueItem *PrioritizedWorkQueue::Pop() {
 	if (best != queue_.end()) {
 		PrioritizedWorkQueueItem *poppedItem = *best;
 		queue_.erase(best);
+		working_ = true;  // This will be worked on.
 		return poppedItem;
 	} else {
 		// Not really sure how this can happen, but let's be safe.

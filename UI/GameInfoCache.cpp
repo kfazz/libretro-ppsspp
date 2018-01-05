@@ -45,7 +45,7 @@
 #define unique_ptr auto_ptr
 #endif
 
-GameInfoCache g_gameInfoCache;
+GameInfoCache *g_gameInfoCache;
 
 GameInfo::~GameInfo() {
 	delete iconTexture;
@@ -298,6 +298,16 @@ std::string GameInfo::GetTitle() {
 	return title;
 }
 
+bool GameInfo::IsPending() {
+	lock_guard guard(lock);
+	return pending;
+}
+
+bool GameInfo::IsWorking() {
+	lock_guard guard(lock);
+	return working;
+}
+
 void GameInfo::SetTitle(const std::string &newTitle) {
 	lock_guard guard(lock);
 	title = newTitle;
@@ -355,6 +365,7 @@ public:
 		std::string filename = gamePath_;
 		{
 			lock_guard lock(info_->lock);
+			info_->working = true;
 			info_->fileType = Identify_File(info_->GetFileLoader());
 		}
 
@@ -513,7 +524,7 @@ handleELF:
 				BlockDevice *bd = constructBlockDevice(info_->GetFileLoader());
 				if (!bd)
 					return;  // nothing to do here..
-				ISOFileSystem umd(&handles, bd, "/PSP_GAME");
+				ISOFileSystem umd(&handles, bd);
 
 				// Alright, let's fetch the PARAM.SFO.
 				std::string paramSFOcontents;
@@ -581,8 +592,13 @@ handleELF:
 			info_->saveDataSize = info_->GetSaveDataSizeInBytes();
 			info_->installDataSize = info_->GetInstallDataSizeInBytes();
 		}
-		info_->pending = false;
+
 		info_->DisposeFileLoader();
+
+		lock_guard lock(info_->lock);
+		info_->pending = false;
+		info_->working = false;
+		// ILOG("Completed writing info for %s", info_->GetTitle().c_str());
 	}
 
 	virtual float priority() {
@@ -595,9 +611,13 @@ private:
 	DISALLOW_COPY_AND_ASSIGN(GameInfoWorkItem);
 };
 
+GameInfoCache::GameInfoCache() : gameInfoWQ_(nullptr) {
+	Init();
+}
 
 GameInfoCache::~GameInfoCache() {
 	Clear();
+	Shutdown();
 }
 
 void GameInfoCache::Init() {
@@ -614,38 +634,42 @@ void GameInfoCache::Shutdown() {
 }
 
 void GameInfoCache::Clear() {
-	if (gameInfoWQ_)
+	if (gameInfoWQ_) {
 		gameInfoWQ_->Flush();
+		gameInfoWQ_->WaitUntilDone();
+	}
 	for (auto iter = info_.begin(); iter != info_.end(); iter++) {
-		lock_guard lock(iter->second->lock);
-		if (!iter->second->pic0TextureData.empty()) {
-			iter->second->pic0TextureData.clear();
-			iter->second->pic0DataLoaded = false;
-		}
-		if (iter->second->pic0Texture) {
-			delete iter->second->pic0Texture;
-			iter->second->pic0Texture = 0;
-		}
-		if (!iter->second->pic1TextureData.empty()) {
-			iter->second->pic1TextureData.clear();
-			iter->second->pic1DataLoaded = false;
-		}
-		if (iter->second->pic1Texture) {
-			delete iter->second->pic1Texture;
-			iter->second->pic1Texture = 0;
-		}
-		if (!iter->second->iconTextureData.empty()) {
-			iter->second->iconTextureData.clear();
-			iter->second->iconDataLoaded = false;
-		}
-		if (iter->second->iconTexture) {
-			delete iter->second->iconTexture;
-			iter->second->iconTexture = 0;
-		}
+		{
+			lock_guard lock(iter->second->lock);
+			if (!iter->second->pic0TextureData.empty()) {
+				iter->second->pic0TextureData.clear();
+				iter->second->pic0DataLoaded = false;
+			}
+			if (iter->second->pic0Texture) {
+				delete iter->second->pic0Texture;
+				iter->second->pic0Texture = 0;
+			}
+			if (!iter->second->pic1TextureData.empty()) {
+				iter->second->pic1TextureData.clear();
+				iter->second->pic1DataLoaded = false;
+			}
+			if (iter->second->pic1Texture) {
+				delete iter->second->pic1Texture;
+				iter->second->pic1Texture = 0;
+			}
+			if (!iter->second->iconTextureData.empty()) {
+				iter->second->iconTextureData.clear();
+				iter->second->iconDataLoaded = false;
+			}
+			if (iter->second->iconTexture) {
+				delete iter->second->iconTexture;
+				iter->second->iconTexture = 0;
+			}
 
-		if (!iter->second->sndFileData.empty()) {
-			iter->second->sndFileData.clear();
-			iter->second->sndDataLoaded = false;
+			if (!iter->second->sndFileData.empty()) {
+				iter->second->sndFileData.clear();
+				iter->second->sndDataLoaded = false;
+			}
 		}
 		delete iter->second;
 	}
@@ -693,6 +717,18 @@ void GameInfoCache::PurgeType(IdentifiedFileType fileType) {
 	}
 }
 
+void GameInfoCache::WaitUntilDone(GameInfo *info) {
+	while (info->IsPending()) {
+		if (gameInfoWQ_->WaitUntilDone(false)) {
+			// A true return means everything finished, so bail out.
+			// This way even if something gets stuck, we won't hang.
+			break;
+		}
+
+		// Otherwise, wait again if it's not done...
+	}
+}
+
 
 // Runs on the main thread.
 GameInfo *GameInfoCache::GetInfo(Thin3DContext *thin3d, const std::string &gamePath, int wantFlags) {
@@ -726,15 +762,22 @@ again:
 	if (!info) {
 		info = new GameInfo();
 	}
+
+	if (info->IsWorking()) {
+		// Uh oh, it's currently in process.  It could mark pending = false with the wrong wantFlags.
+		// Let's wait it out, then queue.
+		WaitUntilDone(info);
+	}
+
 	{
 		lock_guard lock(info->lock);
 		info->wantFlags |= wantFlags;
+		info->pending = true;
 	}
 
 	GameInfoWorkItem *item = new GameInfoWorkItem(gamePath, info);
 	gameInfoWQ_->Add(item);
 
-	info->pending = true;
 	info_[gamePath] = info;
 	return info;
 }

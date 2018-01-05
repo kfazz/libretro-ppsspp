@@ -92,6 +92,7 @@ bool IsAlphaTestTriviallyTrue() {
 		return (gstate_c.vertexFullAlpha && (gstate_c.textureFullAlpha || !gstate.isTextureAlphaUsed())) || (
 			(!gstate.isStencilTestEnabled() &&
 				!gstate.isDepthTestEnabled() &&
+				(!gstate.isLogicOpEnabled() || gstate.getLogicOp() == GE_LOGIC_COPY) &&
 				gstate.getAlphaTestRef() == 0 &&
 				gstate.isAlphaBlendEnabled() &&
 				gstate.getBlendFuncA() == GE_SRCBLEND_SRCALPHA &&
@@ -181,7 +182,7 @@ ReplaceAlphaType ReplaceAlphaWithStencil(ReplaceBlendType replaceBlend) {
 		if (nonAlphaSrcFactors[gstate.getBlendFuncA()] && nonAlphaDestFactors[gstate.getBlendFuncB()]) {
 			return REPLACE_ALPHA_YES;
 		} else {
-			if (gstate_c.featureFlags & GPU_SUPPORTS_DUALSOURCE_BLEND) {
+			if (gstate_c.Supports(GPU_SUPPORTS_DUALSOURCE_BLEND)) {
 				return REPLACE_ALPHA_DUALSOURCE;
 			} else {
 				return REPLACE_ALPHA_NO;
@@ -937,6 +938,7 @@ void ConvertBlendState(GenericBlendState &blendState, bool allowShaderBlend) {
 	blendState.applyShaderBlending = false;
 	blendState.dirtyShaderBlend = false;
 	blendState.useBlendColor = false;
+	blendState.replaceAlphaWithStencil = REPLACE_ALPHA_NO;
 
 	ReplaceBlendType replaceBlend = ReplaceBlendWithShader(allowShaderBlend, gstate.FrameBufFormat());
 	ReplaceAlphaType replaceAlphaWithStencil = ReplaceAlphaWithStencil(replaceBlend);
@@ -1039,7 +1041,7 @@ void ConvertBlendState(GenericBlendState &blendState, bool allowShaderBlend) {
 		}
 	}
 
-	if (replaceAlphaWithStencil == REPLACE_ALPHA_DUALSOURCE && gstate_c.Supports(GPU_SUPPORTS_DUALSOURCE_BLEND)) {
+	if (replaceAlphaWithStencil == REPLACE_ALPHA_DUALSOURCE) {
 		glBlendFuncA = toDualSource(glBlendFuncA);
 		glBlendFuncB = toDualSource(glBlendFuncB);
 	}

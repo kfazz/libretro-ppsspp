@@ -1376,29 +1376,6 @@ static Module *__KernelLoadELFFromPtr(const u8 *ptr, u32 loadAddress, bool fromT
 	return module;
 }
 
-static bool __KernelLoadPBP(FileLoader *fileLoader, std::string *error_string)
-{
-	PBPReader pbp(fileLoader);
-	if (!pbp.IsValid()) {
-		ERROR_LOG(LOADER, "%s is not a valid homebrew PSP1.0 PBP", fileLoader->Path().c_str());
-		*error_string = "Not a valid homebrew PBP";
-		return false;
-	}
-
-	std::vector<u8> elfData;
-	if (!pbp.GetSubFile(PBP_EXECUTABLE_PSP, &elfData)) {
-		return false;
-	}
-	u32 magic;
-	u32 error;
-	Module *module = __KernelLoadELFFromPtr(&elfData[0], PSP_GetDefaultLoadAddress(), false, error_string, &magic, error);
-	if (!module) {
-		return false;
-	}
-	mipsr4k.pc = module->nm.entry_addr;
-	return true;
-}
-
 static Module *__KernelLoadModule(u8 *fileptr, SceKernelLMOption *options, std::string *error_string)
 {
 	Module *module = 0;

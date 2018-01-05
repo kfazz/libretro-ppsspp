@@ -15,13 +15,14 @@
 // Official git repository and contact information can be found at
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
+#include <algorithm>
 #include <vector>
 
+#include "base/mutex.h"
 #include "base/timeutil.h"
 #include "base/NativeApp.h"
 #include "i18n/i18n.h"
 
-#include "Common/StdMutex.h"
 #include "Common/FileUtil.h"
 #include "Common/ChunkFile.h"
 
@@ -201,7 +202,7 @@ namespace SaveState
 
 	static bool needsProcess = false;
 	static std::vector<Operation> pending;
-	static std::recursive_mutex mutex;
+	static recursive_mutex mutex;
 	static bool hasLoadedState = false;
 
 	// TODO: Should this be configurable?
@@ -245,7 +246,7 @@ namespace SaveState
 
 	void Enqueue(SaveState::Operation op)
 	{
-		std::lock_guard<std::recursive_mutex> guard(mutex);
+		lock_guard guard(mutex);
 		pending.push_back(op);
 
 		// Don't actually run it until next frame.
@@ -284,8 +285,6 @@ namespace SaveState
 		return !rewindStates.Empty();
 	}
 
-	static const char *STATE_EXTENSION = "ppst";
-	static const char *SCREENSHOT_EXTENSION = "jpg";
 	// Slot utilities
 
 	std::string AppendSlotTitle(const std::string &filename, const std::string &title) {
@@ -376,7 +375,7 @@ namespace SaveState
 	void NextSlot()
 	{
 		I18NCategory *sy = GetI18NCategory("System");
-		g_Config.iCurrentStateSlot = (g_Config.iCurrentStateSlot + 1) % SaveState::SAVESTATESLOTS;
+		g_Config.iCurrentStateSlot = (g_Config.iCurrentStateSlot + 1) % NUM_SLOTS;
 		std::string msg = StringFromFormat("%s: %d", sy->T("Savestate Slot"), g_Config.iCurrentStateSlot + 1);
 		osm.Show(msg);
 		NativeMessageReceived("slotchanged", "");
@@ -453,7 +452,7 @@ namespace SaveState
 	int GetNewestSlot(const std::string &gameFilename) {
 		int newestSlot = -1;
 		tm newestDate = {0};
-		for (int i = 0; i < SAVESTATESLOTS; i++) {
+		for (int i = 0; i < NUM_SLOTS; i++) {
 			std::string fn = GenerateSaveSlotFilename(gameFilename, i, STATE_EXTENSION);
 			if (File::Exists(fn)) {
 				tm time;
@@ -483,7 +482,7 @@ namespace SaveState
 
 	std::vector<Operation> Flush()
 	{
-		std::lock_guard<std::recursive_mutex> guard(mutex);
+		lock_guard guard(mutex);
 		std::vector<Operation> copy = pending;
 		pending.clear();
 
@@ -669,7 +668,7 @@ namespace SaveState
 		// Make sure there's a directory for save slots
 		pspFileSystem.MkDir("ms0:/PSP/PPSSPP_STATE");
 
-		std::lock_guard<std::recursive_mutex> guard(mutex);
+		lock_guard guard(mutex);
 		rewindStates.Clear();
 
 		hasLoadedState = false;
