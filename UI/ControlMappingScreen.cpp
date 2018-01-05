@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <deque>
 
+#include "base/mutex.h"
 #include "base/colorutil.h"
 #include "base/logging.h"
 #include "i18n/i18n.h"
@@ -116,7 +117,7 @@ void ControlMapper::Refresh() {
 		root->Add(c)->OnClick.Handle(this, &ControlMapper::OnReplaceAll);
 	}
 
-	Choice *p = root->Add(new Choice(" + ", new LayoutParams(FILL_PARENT, itemH)));
+	Choice *p = root->Add(new Choice(" + ", new LayoutParams(WRAP_CONTENT, itemH)));
 	p->OnClick.Handle(this, &ControlMapper::OnAdd);
 
 	LinearLayout *rightColumn = root->Add(new LinearLayout(ORIENT_VERTICAL, new LinearLayoutParams(FILL_PARENT, WRAP_CONTENT, 1.0f)));
@@ -138,7 +139,7 @@ void ControlMapper::Refresh() {
 		c->SetTag(tagbuf);
 		c->OnClick.Handle(this, &ControlMapper::OnReplace);
 
-		Choice *d = row->Add(new Choice(" X ", new LayoutParams(FILL_PARENT, itemH)));
+		Choice *d = row->Add(new Choice(" X ", new LayoutParams(WRAP_CONTENT, itemH)));
 		d->SetTag(tagbuf);
 		d->OnClick.Handle(this, &ControlMapper::OnDelete);
 	}
@@ -316,26 +317,32 @@ bool KeyMappingNewKeyDialog::key(const KeyInput &key) {
 	return true;
 }
 
-bool KeyMappingNewKeyDialog::axis(const AxisInput &axis) {
-	if (mapped_)
-		return false;
-	switch (axis.axisId) {
-	// Ignore the accelerometer for mapping for now.
+static bool IgnoreAxisForMapping(int axis) {
+	switch (axis) {
+		// Ignore the accelerometer for mapping for now.
 	case JOYSTICK_AXIS_ACCELEROMETER_X:
 	case JOYSTICK_AXIS_ACCELEROMETER_Y:
 	case JOYSTICK_AXIS_ACCELEROMETER_Z:
-		return false;
+		return true;
 
-	// Also ignore some weird axis events we get on Ouya.
+		// Also ignore some weird axis events we get on Ouya.
 	case JOYSTICK_AXIS_OUYA_UNKNOWN1:
 	case JOYSTICK_AXIS_OUYA_UNKNOWN2:
 	case JOYSTICK_AXIS_OUYA_UNKNOWN3:
 	case JOYSTICK_AXIS_OUYA_UNKNOWN4:
-		return false;
+		return true;
 
 	default:
-		;
+		return false;
 	}
+}
+
+
+bool KeyMappingNewKeyDialog::axis(const AxisInput &axis) {
+	if (mapped_)
+		return false;
+	if (IgnoreAxisForMapping(axis.axisId))
+		return false;
 
 	if (axis.value > AXIS_BIND_THRESHOLD) {
 		mapped_ = true;
@@ -365,7 +372,8 @@ public:
 			maxCount_(500) {}
 	void Draw(UIContext &dc) override;
 	void Update(const InputState &input_state) override;
-	void Axis(const AxisInput &input) override{
+	void Axis(const AxisInput &input) override {
+		// TODO: Check input.deviceId?
 		if (input.axisId == xAxis_) {
 			curX_ = input.value;
 		} else if (input.axisId == yAxis_) {
@@ -430,14 +438,19 @@ bool AnalogTestScreen::key(const KeyInput &key) {
 		screenManager()->finishDialog(this, DR_BACK);
 		return true;
 	}
+
+	lock_guard guard(eventLock_);
+
 	char buf[512];
 	snprintf(buf, sizeof(buf), "Keycode: %d Device ID: %d [%s%s%s%s]", key.keyCode, key.deviceId,
 		(key.flags & KEY_IS_REPEAT) ? "REP" : "",
 		(key.flags & KEY_UP) ? "UP" : "",
 		(key.flags & KEY_DOWN) ? "DOWN" : "",
 		(key.flags & KEY_CHAR) ? "CHAR" : "");
-	lastLastKeyEvent_->SetText(lastKeyEvent_->GetText());
-	lastKeyEvent_->SetText(buf);
+	if (lastLastKeyEvent_ && lastKeyEvent_) {
+		lastLastKeyEvent_->SetText(lastKeyEvent_->GetText());
+		lastKeyEvent_->SetText(buf);
+	}
 	return retval;
 }
 
@@ -447,11 +460,20 @@ bool AnalogTestScreen::axis(const AxisInput &axis) {
 	// into arrow keys, since seeing keyboard arrow key events appear when using
 	// a controller would be confusing for the user.
 	char buf[512];
+
+	lock_guard guard(eventLock_);
+
+	if (IgnoreAxisForMapping(axis.axisId))
+		return false;
+
 	if (axis.value > AXIS_BIND_THRESHOLD || axis.value < -AXIS_BIND_THRESHOLD) {
 		snprintf(buf, sizeof(buf), "Axis: %d (value %1.3f) Device ID: %d",
 			axis.axisId, axis.value, axis.deviceId);
-		lastLastKeyEvent_->SetText(lastKeyEvent_->GetText());
-		lastKeyEvent_->SetText(buf);
+		// Null-check just in case they weren't created yet.
+		if (lastLastKeyEvent_ && lastKeyEvent_) {
+			lastLastKeyEvent_->SetText(lastKeyEvent_->GetText());
+			lastKeyEvent_->SetText(buf);
+		}
 		return true;
 	}
 	return false;
@@ -459,6 +481,8 @@ bool AnalogTestScreen::axis(const AxisInput &axis) {
 
 void AnalogTestScreen::CreateViews() {
 	using namespace UI;
+
+	lock_guard guard(eventLock_);
 
 	I18NCategory *di = GetI18NCategory("Dialog");
 

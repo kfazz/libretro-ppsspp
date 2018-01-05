@@ -33,27 +33,67 @@ inline int Xpose(int v) {
 #define M_PI_2     1.57079632679489661923
 #endif
 
+// Some games depend on exact values, but sinf() and cosf() aren't always precise.
+// Stepping down to [0, 2pi) helps, but we also check common exact-result values.
+
 inline float vfpu_sin(float angle) {
 	angle -= floorf(angle * 0.25f) * 4.f;
+	if (angle == 0.0f || angle == 2.0f) {
+		return 0.0f;
+	} else if (angle == 1.0f) {
+		return 1.0f;
+	} else if (angle == 3.0f) {
+		return -1.0f;
+	}
 	angle *= (float)M_PI_2;
 	return sinf(angle);
 }
 
 inline float vfpu_cos(float angle) {
 	angle -= floorf(angle * 0.25f) * 4.f;
+	if (angle == 1.0f || angle == 3.0f) {
+		return 0.0f;
+	} else if (angle == 0.0f) {
+		return 1.0f;
+	} else if (angle == 2.0f) {
+		return -1.0f;
+	}
 	angle *= (float)M_PI_2;
 	return cosf(angle);
 }
 
+inline float vfpu_asin(float angle) {
+	return asinf(angle) / M_PI_2;
+}
+
 inline void vfpu_sincos(float angle, float &sine, float &cosine) {
 	angle -= floorf(angle * 0.25f) * 4.f;
-	angle *= (float)M_PI_2;
-#if defined(__linux__) && !defined(ANDROID)
-	sincosf(angle, &sine, &cosine);
+	if (angle == 0.0f) {
+		sine = 0.0f;
+		cosine = 1.0f;
+	} else if (angle == 1.0f) {
+		sine = 1.0f;
+		cosine = 0.0f;
+	} else if (angle == 2.0f) {
+		sine = 0.0f;
+		cosine = -1.0f;
+	} else if (angle == 3.0f) {
+		sine = -1.0f;
+		cosine = 0.0f;
+	} else {
+		angle *= (float)M_PI_2;
+#if defined(__linux__)
+		sincosf(angle, &sine, &cosine);
 #else
-	sine = sinf(angle);
-	cosine = cosf(angle);
+		sine = sinf(angle);
+		cosine = cosf(angle);
 #endif
+	}
+}
+
+inline float vfpu_clamp(float v, float min, float max) {
+	// Note: NAN is preserved, and -0.0 becomes +0.0 if min=+0.0.
+	return v >= max ? max : (v <= min ? min : v);
 }
 
 #define VFPU_FLOAT16_EXP_MAX    0x1f
@@ -127,7 +167,15 @@ int GetNumVectorElements(VectorSize sz);
 int GetMatrixSide(MatrixSize sz);
 const char *GetVectorNotation(int reg, VectorSize size);
 const char *GetMatrixNotation(int reg, MatrixSize size);
-
+inline bool IsMatrixTransposed(int matrixReg) {
+	return (matrixReg >> 5) & 1;
+}
+inline bool IsVectorColumn(int vectorReg) {
+	return !((vectorReg >> 5) & 1);
+}
+inline int TransposeMatrixReg(int matrixReg) {
+	return matrixReg ^ 0x20;
+}
 int GetVectorOverlap(int reg1, VectorSize size1, int reg2, VectorSize size2);
 
 float Float16ToFloat32(unsigned short l);

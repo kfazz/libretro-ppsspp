@@ -16,6 +16,7 @@
 #include "Arm64Emitter.h"
 #include "MathUtil.h"
 #include "CommonTypes.h"
+#include "CPUDetect.h"
 
 namespace Arm64Gen
 {
@@ -265,14 +266,14 @@ static int EncodeSize(int size) {
 	}
 }
 
-void ARM64XEmitter::SetCodePtr(u8* ptr)
+void ARM64XEmitter::SetCodePointer(u8* ptr)
 {
 	m_code = ptr;
 	m_startcode = m_code;
 	m_lastCacheFlushEnd = ptr;
 }
 
-const u8* ARM64XEmitter::GetCodePtr() const
+const u8* ARM64XEmitter::GetCodePointer() const
 {
 	return m_code;
 }
@@ -315,14 +316,43 @@ void ARM64XEmitter::FlushIcacheSection(u8* start, u8* end)
 #if defined(IOS)
 	// Header file says this is equivalent to: sys_icache_invalidate(start, end - start);
 	sys_cache_control(kCacheFunctionPrepareForExecution, start, end - start);
-#else
-#if defined(__clang__) && !defined(_M_IX86) && !defined(_M_X64)
-	__clear_cache(start, end);
-#else
-#if !defined(_M_IX86) && !defined(_M_X64)
-	__builtin___clear_cache(start, end);
-#endif
-#endif
+#elif !defined(_M_IX86) && !defined(_M_X64)
+	// Code from Dolphin, contributed by the Mono project.
+
+	// Don't rely on GCC's __clear_cache implementation, as it caches
+	// icache/dcache cache line sizes, that can vary between cores on
+	// big.LITTLE architectures.
+	size_t isize, dsize;
+
+	if (cpu_info.sQuirks.bExynos8890DifferingCachelineSizes) {
+		// Enforce the minimum cache line size to be completely safe on these CPUs.
+		isize = 64;
+		dsize = 64;
+	} else {
+		u64 ctr_el0;
+		static size_t icache_line_size = 0xffff, dcache_line_size = 0xffff;
+		__asm__ volatile("mrs %0, ctr_el0" : "=r"(ctr_el0));
+		isize = 4 << ((ctr_el0 >> 0) & 0xf);
+		dsize = 4 << ((ctr_el0 >> 16) & 0xf);
+
+		// use the global minimum cache line size
+		icache_line_size = isize = icache_line_size < isize ? icache_line_size : isize;
+		dcache_line_size = dsize = dcache_line_size < dsize ? dcache_line_size : dsize;
+	}
+
+	u64 addr = (u64)start & ~(u64)(dsize - 1);
+	for (; addr < (u64)end; addr += dsize)
+		// use "civac" instead of "cvau", as this is the suggested workaround for
+		// Cortex-A53 errata 819472, 826319, 827319 and 824069.
+		__asm__ volatile("dc civac, %0" : : "r"(addr) : "memory");
+	__asm__ volatile("dsb ish" : : : "memory");
+
+	addr = (u64)start & ~(u64)(isize - 1);
+	for (; addr < (u64)end; addr += isize)
+		__asm__ volatile("ic ivau, %0" : : "r"(addr) : "memory");
+
+	__asm__ volatile("dsb ish" : : : "memory");
+	__asm__ volatile("isb" : : : "memory");
 #endif
 }
 
@@ -1914,7 +1944,7 @@ void ARM64XEmitter::MOVI2R(ARM64Reg Rd, u64 imm, bool optimize)
 		}
 	}
 
-	u64 aligned_pc = (u64)GetCodePtr() & ~0xFFF;
+	u64 aligned_pc = (u64)GetCodePointer() & ~0xFFF;
 	s64 aligned_offset = (s64)imm - (s64)aligned_pc;
 	if (upload_part.Count() > 1 && abs64(aligned_offset) < 0xFFFFFFFFLL)
 	{
@@ -1929,7 +1959,7 @@ void ARM64XEmitter::MOVI2R(ARM64Reg Rd, u64 imm, bool optimize)
 		else
 		{
 			// If the address is within 1MB of PC we can load it in a single instruction still
-			s64 offset = (s64)imm - (s64)GetCodePtr();
+			s64 offset = (s64)imm - (s64)GetCodePointer();
 			if (offset >= -0xFFFFF && offset <= 0xFFFFF)
 			{
 				ADR(Rd, (s32)offset);
@@ -2100,7 +2130,7 @@ void ARM64FloatEmitter::EmitLoadStoreImmediate(u8 size, u32 opc, IndexType type,
 
 	if (type == INDEX_UNSIGNED)
 	{
-		_assert_msg_(DYNA_REC, !(imm & ((size - 1) >> 3)), "%s(INDEX_UNSIGNED) immediate offset must be aligned to size! (%d) (%p)", __FUNCTION__, imm, m_emit->GetCodePtr());
+		_assert_msg_(DYNA_REC, !(imm & ((size - 1) >> 3)), "%s(INDEX_UNSIGNED) immediate offset must be aligned to size! (%d) (%p)", __FUNCTION__, imm, m_emit->GetCodePointer());
 		_assert_msg_(DYNA_REC, imm >= 0, "%s(INDEX_UNSIGNED) immediate offset must be positive!", __FUNCTION__);
 		if (size == 16)
 			imm >>= 1;

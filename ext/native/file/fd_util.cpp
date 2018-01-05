@@ -4,11 +4,16 @@
 #include <math.h>
 #include <stdio.h>
 #ifndef _WIN32
-#include <unistd.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/types.h>
 #include <sys/select.h>
+#include <unistd.h>
 #else
 #include <io.h>
 #include <winsock2.h>
+#include <ws2tcpip.h>
 #endif
 #include <fcntl.h>
 
@@ -75,7 +80,7 @@ ssize_t Write(int fd, const std::string &str) {
   return WriteLine(fd, str.c_str(), str.size());
 }
 
-bool WaitUntilReady(int fd, double timeout) {
+bool WaitUntilReady(int fd, double timeout, bool for_write) {
   struct timeval tv;
   tv.tv_sec = floor(timeout);
   tv.tv_usec = (timeout - floor(timeout)) * 1000000.0;
@@ -84,7 +89,12 @@ bool WaitUntilReady(int fd, double timeout) {
   FD_ZERO(&fds);
   FD_SET(fd, &fds);
   // First argument to select is the highest socket in the set + 1.
-  int rval = select(fd + 1, &fds, NULL, NULL, &tv);
+  int rval;
+  if (for_write) {
+	  rval = select(fd + 1, NULL, &fds, NULL, &tv);
+  } else {
+	  rval = select(fd + 1, &fds, NULL, NULL, &tv);
+  }
   if (rval < 0) {
     // Error calling select.
     return false;
@@ -115,8 +125,24 @@ void SetNonBlocking(int sock, bool non_blocking) {
 		ELOG("Error setting socket nonblocking status");
 	}
 #else
-  WLOG("NonBlocking mode not supported on Win32");
+	u_long val = non_blocking ? 1 : 0;
+	if (ioctlsocket(sock, FIONBIO, &val) != 0) {
+		ELOG("Error setting socket nonblocking status");
+	}
 #endif
+}
+
+std::string GetLocalIP(int sock) {
+	struct sockaddr_in server_addr;
+	memset(&server_addr, 0, sizeof(server_addr));
+	socklen_t len = sizeof(server_addr);
+	if (getsockname(sock, (struct sockaddr *)&server_addr, &len) == 0) {
+		char *result = inet_ntoa(*(in_addr *)&server_addr.sin_addr);
+		if (result) {
+			return result;
+		}
+	}
+	return "";
 }
 
 }  // fd_util

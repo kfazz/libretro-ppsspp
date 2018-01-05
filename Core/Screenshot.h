@@ -17,6 +17,8 @@
 
 #pragma once
 
+struct GPUDebugBuffer;
+
 enum ScreenshotFormat {
 	SCREENSHOT_PNG,
 	SCREENSHOT_JPG,
@@ -30,4 +32,6 @@ enum ScreenshotType {
 	SCREENSHOT_RENDER,
 };
 
-bool TakeGameScreenshot(const char *filename, ScreenshotFormat fmt, ScreenshotType type);
+const u8 *ConvertBufferTo888RGB(const GPUDebugBuffer &buf, u8 *&temp, u32 &w, u32 &h);
+
+bool TakeGameScreenshot(const char *filename, ScreenshotFormat fmt, ScreenshotType type, int *width = nullptr, int *height = nullptr, int maxRes = -1);

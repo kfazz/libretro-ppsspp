@@ -38,8 +38,16 @@ recursive_mutex DiskCachingFileLoader::cachesMutex_;
 
 // Takes ownership of backend.
 DiskCachingFileLoader::DiskCachingFileLoader(FileLoader *backend)
-	: filesize_(0), filepos_(0), backend_(backend), cache_(nullptr) {
-	filesize_ = backend->FileSize();
+	: prepared_(false), filesize_(0), filepos_(0), backend_(backend), cache_(nullptr) {
+}
+
+void DiskCachingFileLoader::Prepare() {
+	if (prepared_) {
+		return;
+	}
+	prepared_ = true;
+
+	filesize_ = backend_->FileSize();
 	if (filesize_ > 0) {
 		InitCache();
 	}
@@ -54,14 +62,22 @@ DiskCachingFileLoader::~DiskCachingFileLoader() {
 }
 
 bool DiskCachingFileLoader::Exists() {
+	Prepare();
 	return backend_->Exists();
 }
 
+bool DiskCachingFileLoader::ExistsFast() {
+	// It may require a slow operation to check - if we have data, let's say yes.
+	// This helps initial load, since we check each recent file for existence.
+	return true;
+}
+
 bool DiskCachingFileLoader::IsDirectory() {
-	return backend_->IsDirectory() ? 1 : 0;
+	return backend_->IsDirectory();
 }
 
 s64 DiskCachingFileLoader::FileSize() {
+	Prepare();
 	return filesize_;
 }
 
@@ -73,19 +89,31 @@ void DiskCachingFileLoader::Seek(s64 absolutePos) {
 	filepos_ = absolutePos;
 }
 
-size_t DiskCachingFileLoader::ReadAt(s64 absolutePos, size_t bytes, void *data) {
+size_t DiskCachingFileLoader::ReadAt(s64 absolutePos, size_t bytes, void *data, Flags flags) {
+	Prepare();
 	size_t readSize;
 
-	if (cache_ && cache_->IsValid()) {
+	if (absolutePos >= filesize_) {
+		bytes = 0;
+	} else if (absolutePos + (s64)bytes >= filesize_) {
+		bytes = filesize_ - absolutePos;
+	}
+
+	if (cache_ && cache_->IsValid() && (flags & Flags::HINT_UNCACHED) == 0) {
 		readSize = cache_->ReadFromCache(absolutePos, bytes, data);
 		// While in case the cache size is too small for the entire read.
 		while (readSize < bytes) {
-			readSize += cache_->SaveIntoCache(backend_, absolutePos + readSize, bytes - readSize, (u8 *)data + readSize);
+			readSize += cache_->SaveIntoCache(backend_, absolutePos + readSize, bytes - readSize, (u8 *)data + readSize, flags);
 			// If there are already-cached blocks afterward, we have to read them.
-			readSize += cache_->ReadFromCache(absolutePos + readSize, bytes - readSize, (u8 *)data + readSize);
+			size_t bytesFromCache = cache_->ReadFromCache(absolutePos + readSize, bytes - readSize, (u8 *)data + readSize);
+			readSize += bytesFromCache;
+			if (bytesFromCache == 0) {
+				// We can't read any more.
+				break;
+			}
 		}
 	} else {
-		readSize = backend_->ReadAt(absolutePos, bytes, data);
+		readSize = backend_->ReadAt(absolutePos, bytes, data, flags);
 	}
 
 	filepos_ = absolutePos + readSize;
@@ -228,12 +256,12 @@ size_t DiskCachingFileLoaderCache::ReadFromCache(s64 pos, size_t bytes, void *da
 	return readSize;
 }
 
-size_t DiskCachingFileLoaderCache::SaveIntoCache(FileLoader *backend, s64 pos, size_t bytes, void *data) {
+size_t DiskCachingFileLoaderCache::SaveIntoCache(FileLoader *backend, s64 pos, size_t bytes, void *data, FileLoader::Flags flags) {
 	lock_guard guard(lock_);
 
 	if (!f_) {
 		// Just to keep things working.
-		return backend->ReadAt(pos, bytes, data);
+		return backend->ReadAt(pos, bytes, data, flags);
 	}
 
 	s64 cacheStartPos = pos / blockSize_;
@@ -262,7 +290,7 @@ size_t DiskCachingFileLoaderCache::SaveIntoCache(FileLoader *backend, s64 pos, s
 		auto &info = index_[cacheStartPos];
 
 		u8 *buf = new u8[blockSize_];
-		size_t readBytes = backend->ReadAt(cacheStartPos * (u64)blockSize_, blockSize_, buf);
+		size_t readBytes = backend->ReadAt(cacheStartPos * (u64)blockSize_, blockSize_, buf, flags);
 
 		// Check if it was written while we were busy.  Might happen if we thread.
 		if (info.block == INVALID_BLOCK && readBytes != 0) {
@@ -278,7 +306,7 @@ size_t DiskCachingFileLoaderCache::SaveIntoCache(FileLoader *backend, s64 pos, s
 		delete [] buf;
 	} else {
 		u8 *wholeRead = new u8[blocksToRead * blockSize_];
-		size_t readBytes = backend->ReadAt(cacheStartPos * (u64)blockSize_, blocksToRead * blockSize_, wholeRead);
+		size_t readBytes = backend->ReadAt(cacheStartPos * (u64)blockSize_, blocksToRead * blockSize_, wholeRead, flags);
 
 		for (size_t i = 0; i < blocksToRead; ++i) {
 			auto &info = index_[cacheStartPos + i];
@@ -705,6 +733,19 @@ void DiskCachingFileLoaderCache::CloseFileHandle() {
 	}
 	f_ = nullptr;
 	fd_ = 0;
+}
+
+bool DiskCachingFileLoaderCache::HasData() const {
+	if (!f_) {
+		return false;
+	}
+
+	for (size_t i = 0; i < blockIndexLookup_.size(); ++i) {
+		if (blockIndexLookup_[i] != INVALID_INDEX) {
+			return true;
+		}
+	}
+	return false;
 }
 
 u64 DiskCachingFileLoaderCache::FreeDiskSpace() {

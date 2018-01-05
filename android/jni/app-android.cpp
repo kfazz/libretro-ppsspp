@@ -4,6 +4,9 @@
 // It calls a set of methods defined in NativeApp.h. These should be implemented
 // by your game or app.
 
+
+#include <assert.h>
+#include <sstream>
 #include <jni.h>
 #include <android/log.h>
 #include <android/native_window_jni.h>
@@ -30,8 +33,13 @@
 #include "gfx/gl_common.h"
 #include "gfx_es2/gpu_features.h"
 
+#include "thin3d/thin3d.h"
+#include "Core/Config.cpp"
+#include "Common/CPUDetect.h"
 #include "Common/GraphicsContext.h"
 #include "Common/GL/GLInterfaceBase.h"
+#include "Common/Vulkan/VulkanLoader.h"
+#include "Common/Vulkan/VulkanContext.h"
 #include "UI/GameInfoCache.h"
 
 #include "app-android.h"
@@ -56,15 +64,20 @@ struct FrameCommand {
 	std::string params;
 };
 
-class AndroidEGLGraphicsContext : public GraphicsContext {
+class AndroidGraphicsContext : public GraphicsContext {
+public:
+	virtual bool Init(ANativeWindow *wnd, int desiredBackbufferSizeX, int desiredBackbufferSizeY, int backbufferFormat, int androidVersion) = 0;
+};
+
+class AndroidEGLGraphicsContext : public AndroidGraphicsContext {
 public:
 	AndroidEGLGraphicsContext() : wnd_(nullptr), gl(nullptr) {}
-	bool Init(ANativeWindow *wnd, int desiredBackbufferSizeX, int desiredBackbufferSizeY, int backbufferFormat, int androidVersion);
+	bool Init(ANativeWindow *wnd, int desiredBackbufferSizeX, int desiredBackbufferSizeY, int backbufferFormat, int androidVersion) override;
 	void Shutdown() override;
 	void SwapBuffers() override;
 	void SwapInterval(int interval) override {}
-	void Resize() {}
-	Thin3DContext *CreateThin3DContext() {
+	void Resize() override {}
+	Thin3DContext *CreateThin3DContext() override {
 		CheckGLExtensions();
 		return T3DCreateGLContext();
 	}
@@ -129,13 +142,163 @@ public:
 	void Shutdown() override {}
 	void SwapBuffers() override {}
 	void SwapInterval(int interval) override {}
-	void Resize() {}
-	Thin3DContext *CreateThin3DContext() {
+	void Resize() override {}
+	Thin3DContext *CreateThin3DContext() override {
 		CheckGLExtensions();
 		return T3DCreateGLContext();
 	}
 };
 
+
+static const bool g_validate_ = true;
+static VulkanContext *g_Vulkan;
+
+class AndroidVulkanContext : public AndroidGraphicsContext {
+public:
+	AndroidVulkanContext() {}
+	bool Init(ANativeWindow *wnd, int desiredBackbufferSizeX, int desiredBackbufferSizeY, int backbufferFormat, int androidVersion) override;
+	void Shutdown() override;
+	void SwapInterval(int interval) override;
+	void SwapBuffers() override;
+	void Resize() override;
+
+	void *GetAPIContext() override { return g_Vulkan; }
+
+	Thin3DContext *CreateThin3DContext() override {
+		return T3DCreateVulkanContext(g_Vulkan);
+	}
+};
+
+struct VulkanLogOptions {
+	bool breakOnWarning;
+	bool breakOnError;
+	bool msgBoxOnError;
+};
+static VulkanLogOptions g_LogOptions;
+
+const char *ObjTypeToString(VkDebugReportObjectTypeEXT type) {
+	switch (type) {
+	case VK_DEBUG_REPORT_OBJECT_TYPE_INSTANCE_EXT: return "Instance";
+	case VK_DEBUG_REPORT_OBJECT_TYPE_PHYSICAL_DEVICE_EXT: return "PhysicalDevice";
+	case VK_DEBUG_REPORT_OBJECT_TYPE_DEVICE_EXT: return "Device";
+	case VK_DEBUG_REPORT_OBJECT_TYPE_QUEUE_EXT: return "Queue";
+	case VK_DEBUG_REPORT_OBJECT_TYPE_COMMAND_BUFFER_EXT: return "CommandBuffer";
+	case VK_DEBUG_REPORT_OBJECT_TYPE_DEVICE_MEMORY_EXT: return "DeviceMemory";
+	case VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_EXT: return "Buffer";
+	case VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_VIEW_EXT: return "BufferView";
+	case VK_DEBUG_REPORT_OBJECT_TYPE_IMAGE_EXT: return "Image";
+	case VK_DEBUG_REPORT_OBJECT_TYPE_IMAGE_VIEW_EXT: return "ImageView";
+	case VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT: return "ShaderModule";
+	case VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_EXT: return "Pipeline";
+	case VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_LAYOUT_EXT: return "PipelineLayout";
+	case VK_DEBUG_REPORT_OBJECT_TYPE_SAMPLER_EXT: return "Sampler";
+	case VK_DEBUG_REPORT_OBJECT_TYPE_DESCRIPTOR_SET_EXT: return "DescriptorSet";
+	case VK_DEBUG_REPORT_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT_EXT: return "DescriptorSetLayout";
+	case VK_DEBUG_REPORT_OBJECT_TYPE_DESCRIPTOR_POOL_EXT: return "DescriptorPool";
+	case VK_DEBUG_REPORT_OBJECT_TYPE_FENCE_EXT: return "Fence";
+	case VK_DEBUG_REPORT_OBJECT_TYPE_SEMAPHORE_EXT: return "Semaphore";
+	case VK_DEBUG_REPORT_OBJECT_TYPE_EVENT_EXT: return "Event";
+	case VK_DEBUG_REPORT_OBJECT_TYPE_QUERY_POOL_EXT: return "QueryPool";
+	case VK_DEBUG_REPORT_OBJECT_TYPE_FRAMEBUFFER_EXT: return "Framebuffer";
+	case VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT: return "RenderPass";
+	case VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_CACHE_EXT: return "PipelineCache";
+	case VK_DEBUG_REPORT_OBJECT_TYPE_SURFACE_KHR_EXT: return "SurfaceKHR";
+	case VK_DEBUG_REPORT_OBJECT_TYPE_SWAPCHAIN_KHR_EXT: return "SwapChainKHR";
+	case VK_DEBUG_REPORT_OBJECT_TYPE_COMMAND_POOL_EXT: return "CommandPool";
+	default: return "Unknown";
+	}
+}
+
+static VKAPI_ATTR VkBool32 VKAPI_CALL Vulkan_Dbg(VkDebugReportFlagsEXT msgFlags, VkDebugReportObjectTypeEXT objType, uint64_t srcObject, size_t location, int32_t msgCode, const char* pLayerPrefix, const char* pMsg, void *pUserData) {
+	const VulkanLogOptions *options = (const VulkanLogOptions *)pUserData;
+	int loglevel = ANDROID_LOG_INFO;
+	if (msgFlags & VK_DEBUG_REPORT_ERROR_BIT_EXT) {
+		loglevel = ANDROID_LOG_ERROR;
+	} else if (msgFlags & VK_DEBUG_REPORT_WARNING_BIT_EXT) {
+		loglevel = ANDROID_LOG_WARN;
+	} else if (msgFlags & VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT) {
+		loglevel = ANDROID_LOG_WARN;
+	} else if (msgFlags & VK_DEBUG_REPORT_INFORMATION_BIT_EXT) {
+		loglevel = ANDROID_LOG_WARN;
+	} else if (msgFlags & VK_DEBUG_REPORT_DEBUG_BIT_EXT) {
+		loglevel = ANDROID_LOG_WARN;
+	}
+	
+	__android_log_print(loglevel, APP_NAME, "[%s] %s Code %d : %s", pLayerPrefix, ObjTypeToString(objType), msgCode, pMsg);
+
+	// false indicates that layer should not bail-out of an
+	// API call that had validation failures. This may mean that the
+	// app dies inside the driver due to invalid parameter(s).
+	// That's what would happen without validation layers, so we'll
+	// keep that behavior here.
+	return false;
+}
+
+bool AndroidVulkanContext::Init(ANativeWindow *wnd, int desiredBackbufferSizeX, int desiredBackbufferSizeY, int backbufferFormat, int androidVersion) {
+	if (g_Vulkan) {
+		return false;
+	}
+
+	init_glslang();
+
+	g_LogOptions.breakOnError = true;
+	g_LogOptions.breakOnWarning = true;
+	g_LogOptions.msgBoxOnError = false;
+
+	ILOG("Creating vulkan context");
+	Version gitVer(PPSSPP_GIT_VERSION);
+	g_Vulkan = new VulkanContext("PPSSPP", gitVer.ToInteger(), VULKAN_FLAG_PRESENT_MAILBOX | VULKAN_FLAG_PRESENT_FIFO_RELAXED);
+	if (!g_Vulkan->GetInstance()) {
+		ELOG("Failed to create vulkan context");
+		return false;
+	}
+
+	ILOG("Creating vulkan device");
+	if (g_Vulkan->CreateDevice(0) != VK_SUCCESS) {
+		return false;
+	}
+	int width = desiredBackbufferSizeX;
+	int height = desiredBackbufferSizeY;
+	if (!width || !height) {
+		width = pixel_xres;
+		height = pixel_yres;
+	}
+	ILOG("InitSurfaceAndroid: width=%d height=%d", width, height);
+	g_Vulkan->InitSurfaceAndroid(wnd, width, height);
+	if (g_validate_) {
+		int bits = VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT | VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT;
+		g_Vulkan->InitDebugMsgCallback(&Vulkan_Dbg, bits, &g_LogOptions);
+	}
+	g_Vulkan->InitObjects(true);
+
+	return true;
+}
+
+void AndroidVulkanContext::Shutdown() {
+	g_Vulkan->WaitUntilQueueIdle();
+	g_Vulkan->DestroyObjects();
+	g_Vulkan->DestroyDebugMsgCallback();
+	g_Vulkan->DestroyDevice();
+	delete g_Vulkan;
+	g_Vulkan = nullptr;
+
+	finalize_glslang();
+}
+
+void AndroidVulkanContext::SwapBuffers() {
+}
+
+void AndroidVulkanContext::Resize() {
+	g_Vulkan->WaitUntilQueueIdle();
+	g_Vulkan->DestroyObjects();
+
+	// backbufferResize updated these values.  TODO: Notify another way?
+	g_Vulkan->ReinitSurfaceAndroid(pixel_xres, pixel_yres);
+	g_Vulkan->InitObjects(g_Vulkan);
+}
+
+void AndroidVulkanContext::SwapInterval(int interval) {
+}
 
 static recursive_mutex frameCommandLock;
 static std::queue<FrameCommand> frameCommands;
@@ -180,6 +343,7 @@ InputState input_state;
 
 static bool renderer_inited = false;
 static bool first_lost = true;
+// See NativeQueryConfig("androidJavaGL") to change this value.
 static bool javaGL = true;
 
 static std::string library_path;
@@ -314,9 +478,8 @@ extern "C" jstring Java_org_ppsspp_ppsspp_NativeApp_queryConfig
 extern "C" void Java_org_ppsspp_ppsspp_NativeApp_init
   (JNIEnv *env, jclass, jstring jmodel, jint jdeviceType, jstring jlangRegion, jstring japkpath,
 		jstring jdataDir, jstring jexternalDir, jstring jlibraryDir, jstring jcacheDir, jstring jshortcutParam,
-		jint jAndroidVersion, jboolean jjavaGL) {
+		jint jAndroidVersion, jstring jboard) {
 	jniEnvUI = env;
-	javaGL = jjavaGL;
 	setCurrentThreadName("androidInit");
 
 	ILOG("NativeApp.init() -- begin");
@@ -348,6 +511,7 @@ extern "C" void Java_org_ppsspp_ppsspp_NativeApp_init
 	library_path = GetJavaString(env, jlibraryDir) + "/";
 	std::string shortcut_param = GetJavaString(env, jshortcutParam);
 	std::string cacheDir = GetJavaString(env, jcacheDir);
+	std::string buildBoard = GetJavaString(env, jboard);
 
 	ILOG("NativeApp.init(): External storage path: %s", externalDir.c_str());
 	ILOG("NativeApp.init(): Launch shortcut parameter: %s", shortcut_param.c_str());
@@ -358,6 +522,12 @@ extern "C" void Java_org_ppsspp_ppsspp_NativeApp_init
 	bool landscape;
 
 	net::Init();
+
+	// Unfortunately, on the Samsung Galaxy S7, this isn't in /proc/cpuinfo.
+	// We also can't read it from __system_property_get.
+	if (buildBoard == "universal8890") {
+		cpu_info.sQuirks.bExynos8890DifferingCachelineSizes = true;
+	}
 
 	NativeGetAppInfo(&app_name, &app_nice_name, &landscape, &version);
 
@@ -373,6 +543,9 @@ extern "C" void Java_org_ppsspp_ppsspp_NativeApp_init
 		const char *argv[3] = {app_name.c_str(), shortcut_param.c_str(), 0};
 		NativeInit(2, argv, user_data_path.c_str(), externalDir.c_str(), cacheDir.c_str());
 	}
+
+	// Now that we've loaded config, set javaGL.
+	javaGL = NativeQueryConfig("androidJavaGL") == "true";
 
 	ILOG("NativeApp.init() -- end");
 }
@@ -524,6 +697,7 @@ extern "C" void Java_org_ppsspp_ppsspp_NativeRenderer_displayRender(JNIEnv *env,
 extern "C" void Java_org_ppsspp_ppsspp_NativeRenderer_displayShutdown(JNIEnv *env, jobject obj) {
 	ILOG("NativeApp.displayShutdown()");
 	if (renderer_inited) {
+		NativeDeviceLost();
 		NativeShutdownGraphics();
 		renderer_inited = false;
 		NativeMessageReceived("recreateviews", "");
@@ -827,8 +1001,16 @@ extern "C" bool JNICALL Java_org_ppsspp_ppsspp_NativeActivity_runEGLRenderLoop(J
 		ELOG("Error: Surface is null.");
 		return false;
 	}
+	
+	bool vulkan = g_Config.iGPUBackend == GPU_BACKEND_VULKAN;
 
-	AndroidEGLGraphicsContext *graphicsContext = new AndroidEGLGraphicsContext();
+	AndroidGraphicsContext *graphicsContext;
+	if (vulkan) {
+		graphicsContext = new AndroidVulkanContext();
+	} else {
+		graphicsContext = new AndroidEGLGraphicsContext();
+	}
+
 	if (!graphicsContext->Init(wnd, desiredBackbufferSizeX, desiredBackbufferSizeY, backbuffer_format, androidVersion)) {
 		ELOG("Failed to initialize graphics context.");
 		delete graphicsContext;
@@ -883,8 +1065,32 @@ extern "C" bool JNICALL Java_org_ppsspp_ppsspp_NativeActivity_runEGLRenderLoop(J
 	renderer_inited = false;
 
 	graphicsContext->Shutdown();
-
+	delete graphicsContext;
 	renderLoopRunning = false;
 	WLOG("Render loop function exited.");
 	return true;
+}
+
+extern "C" jstring Java_org_ppsspp_ppsspp_ShortcutActivity_queryGameName(JNIEnv *env, jclass, jstring jpath) {
+	std::string path = GetJavaString(env, jpath);
+	std::string result = "";
+
+	GameInfoCache *cache = new GameInfoCache();
+	GameInfo *info = cache->GetInfo(nullptr, path, 0);
+	// Wait until it's done: this is synchronous, unfortunately.
+	if (info) {
+		cache->WaitUntilDone(info);
+		if (info->fileType != FILETYPE_UNKNOWN) {
+			result = info->GetTitle();
+
+			// Pretty arbitrary, but the home screen will often truncate titles.
+			// Let's remove "The " from names since it's common in English titles.
+			if (result.length() > strlen("The ") && startsWithNoCase(result, "The ")) {
+				result = result.substr(strlen("The "));
+			}
+		}
+	}
+	delete cache;
+
+	return env->NewStringUTF(result.c_str());
 }

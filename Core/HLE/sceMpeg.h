@@ -42,6 +42,9 @@ static const int PSMF_STREAM_SIZE_OFFSET = 0xC;
 static const int PSMF_FIRST_TIMESTAMP_OFFSET = 0x54;
 static const int PSMF_LAST_TIMESTAMP_OFFSET = 0x5A;
 
+static const int PSMF_VIDEO_STREAM_ID = 0xE0;
+static const int PSMF_AUDIO_STREAM_ID = 0xBD;
+
 struct SceMpegAu {
 	s64_le pts;  // presentation time stamp
 	s64_le dts;  // decode time stamp
@@ -56,8 +59,9 @@ struct SceMpegAu {
 struct SceMpegRingBuffer {
 	// PSP info
 	s32_le packets;
+	// Misused: this is used as total read, but should be read offset (within ring.)
 	s32_le packetsRead;
-	s32_le packetsWritten;
+	s32_le packetsWritePos;
 	s32_le packetsAvail; // pspsdk: unk2, noxa: iUnk0
 	s32_le packetSize; // 2048
 	u32_le data; // address, ring buffer

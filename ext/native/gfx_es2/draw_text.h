@@ -29,6 +29,12 @@ struct TextStringEntry {
 	int lastUsedFrame;
 };
 
+struct TextMeasureEntry {
+	int width;
+	int height;
+	int lastUsedFrame;
+};
+
 // Not yet functional
 enum {
 	FONTSTYLE_BOLD = 1,
@@ -49,6 +55,8 @@ public:
 
 	void SetFontScale(float xscale, float yscale);
 	void MeasureString(const char *str, float *w, float *h);
+	void MeasureString(const char *str, size_t len, float *w, float *h);
+	void MeasureStringRect(const char *str, size_t len, const Bounds &bounds, float *w, float *h, int align = ALIGN_TOPLEFT);
 	void DrawString(DrawBuffer &target, const char *str, float x, float y, uint32_t color, int align = ALIGN_TOPLEFT);
 	void DrawStringRect(DrawBuffer &target, const char *str, const Bounds &bounds, uint32_t color, int align);
 	// Use for housekeeping like throwing out old strings.
@@ -56,6 +64,8 @@ public:
 
 private:
 	Thin3DContext *thin3d_;
+
+	void WrapString(std::string &out, const char *str, float maxWidth);
 
 	int frameCount_;
 	float fontScaleX_;
@@ -71,4 +81,5 @@ private:
 	uint32_t fontHash_;
 	// The key is the CityHash of the string xor the fontHash_.
 	std::map<uint32_t, TextStringEntry *> cache_;
+	std::map<uint32_t, TextMeasureEntry *> sizeCache_;
 };

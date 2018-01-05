@@ -35,15 +35,13 @@
 #include "GPU/Directx9/FramebufferDX9.h"
 #include "GPU/Directx9/ShaderManagerDX9.h"
 #include "GPU/Directx9/TextureCacheDX9.h"
-#include "GPU/Directx9/TransformPipelineDX9.h"
+#include "GPU/Directx9/DrawEngineDX9.h"
 
 #include <algorithm>
 
 #ifdef _M_SSE
 #include <xmmintrin.h>
 #endif
-
-void ShowScreenResolution();
 
 namespace DX9 {
 	static void ConvertFromRGBA8888(u8 *dst, u8 *src, u32 dstStride, u32 srcStride, u32 width, u32 height, GEBufferFormat format);
@@ -304,7 +302,7 @@ namespace DX9 {
 		}
 	}
 
-	void FramebufferManagerDX9::ResizeFramebufFBO(VirtualFramebuffer *vfb, u16 w, u16 h, bool force) {
+	void FramebufferManagerDX9::ResizeFramebufFBO(VirtualFramebuffer *vfb, u16 w, u16 h, bool force, bool skipCopy) {
 		VirtualFramebuffer old = *vfb;
 
 		if (force) {
@@ -364,7 +362,7 @@ namespace DX9 {
 			if (vfb->fbo) {
 				fbo_bind_as_render_target(vfb->fbo_dx9);
 				ClearBuffer();
-				if (!g_Config.bDisableSlowFramebufEffects) {
+				if (!skipCopy && !g_Config.bDisableSlowFramebufEffects) {
 					BlitFramebuffer(vfb, 0, 0, &old, 0, 0, std::min(vfb->bufferWidth, vfb->width), std::min(vfb->height, vfb->bufferHeight), 0);
 				}
 			}
@@ -403,6 +401,8 @@ namespace DX9 {
 	void FramebufferManagerDX9::NotifyRenderFramebufferSwitched(VirtualFramebuffer *prevVfb, VirtualFramebuffer *vfb, bool isClearingDepth) {
 		if (ShouldDownloadFramebuffer(vfb) && !vfb->memoryUpdated) {
 			ReadFramebufferToMemory(vfb, true, 0, 0, vfb->width, vfb->height);
+		} else {
+			DownloadFramebufferOnSwitch(prevVfb);
 		}
 		textureCache_->ForgetLastTexture();
 
@@ -630,7 +630,11 @@ namespace DX9 {
 			return nullptr;
 		}
 
-		u64 key = ((u64)desc.Format << 32) | (desc.Width << 16) | desc.Height;
+		return GetOffscreenSurface(desc.Format, desc.Width, desc.Height);
+	}
+
+	LPDIRECT3DSURFACE9 FramebufferManagerDX9::GetOffscreenSurface(D3DFORMAT fmt, u32 w, u32 h) {
+		u64 key = ((u64)fmt << 32) | (w << 16) | h;
 		auto it = offscreenSurfaces_.find(key);
 		if (it != offscreenSurfaces_.end()) {
 			it->second.last_frame_used = gpuStats.numFlips;
@@ -639,9 +643,9 @@ namespace DX9 {
 
 		textureCache_->ForgetLastTexture();
 		LPDIRECT3DSURFACE9 offscreen = nullptr;
-		hr = pD3Ddevice->CreateOffscreenPlainSurface(desc.Width, desc.Height, desc.Format, D3DPOOL_SYSTEMMEM, &offscreen, NULL);
+		HRESULT hr = pD3Ddevice->CreateOffscreenPlainSurface(w, h, fmt, D3DPOOL_SYSTEMMEM, &offscreen, NULL);
 		if (FAILED(hr) || !offscreen) {
-			ERROR_LOG_REPORT(G3D, "Unable to create offscreen surface %dx%d @%d", desc.Width, desc.Height, desc.Format);
+			ERROR_LOG_REPORT(G3D, "Unable to create offscreen surface %dx%d @%d", w, h, fmt);
 			return nullptr;
 		}
 		const OffscreenSurface info = {offscreen, gpuStats.numFlips};
@@ -706,6 +710,8 @@ namespace DX9 {
 	}
 
 	void FramebufferManagerDX9::CopyDisplayToOutput() {
+		DownloadFramebufferOnSwitch(currentRenderVfb_);
+
 		fbo_unbind();
 		currentRenderVfb_ = 0;
 
@@ -1142,7 +1148,7 @@ namespace DX9 {
 
 	void FramebufferManagerDX9::EndFrame() {
 		if (resized_) {
-			DestroyAllFBOs();
+			DestroyAllFBOs(false);
 			// Actually, auto mode should be more granular...
 			// Round up to a zoom factor for the render size.
 			int zoom = g_Config.iInternalResolution;
@@ -1175,7 +1181,7 @@ namespace DX9 {
 	}
 
 	void FramebufferManagerDX9::DeviceLost() {
-		DestroyAllFBOs();
+		DestroyAllFBOs(false);
 		resized_ = false;
 	}
 
@@ -1258,7 +1264,7 @@ namespace DX9 {
 		}
 	}
 
-	void FramebufferManagerDX9::DestroyAllFBOs() {
+	void FramebufferManagerDX9::DestroyAllFBOs(bool forceDelete) {
 		fbo_unbind();
 		currentRenderVfb_ = 0;
 		displayFramebuf_ = 0;
@@ -1305,7 +1311,7 @@ namespace DX9 {
 		resized_ = true;
 	}
 
-	bool FramebufferManagerDX9::GetCurrentFramebuffer(GPUDebugBuffer &buffer) {
+	bool FramebufferManagerDX9::GetCurrentFramebuffer(GPUDebugBuffer &buffer, int maxRes) {
 		u32 fb_address = gstate.getFrameBufRawAddress();
 		int fb_stride = gstate.FrameBufStride();
 
@@ -1320,12 +1326,31 @@ namespace DX9 {
 			return true;
 		}
 
-		LPDIRECT3DSURFACE9 renderTarget = vfb->fbo ? fbo_get_color_for_read(vfb->fbo_dx9) : nullptr;
+		LPDIRECT3DSURFACE9 renderTarget = vfb->fbo_dx9 ? fbo_get_color_for_read(vfb->fbo_dx9) : nullptr;
 		bool success = false;
 		if (renderTarget) {
+			FBO_DX9 *tempFBO = nullptr;
+			int w = vfb->renderWidth, h = vfb->renderHeight;
+
+			if (maxRes > 0 && vfb->renderWidth > vfb->width * maxRes) {
+				// Let's resize.  We must stretch to a render target first.
+				w = vfb->width * maxRes;
+				h = vfb->height * maxRes;
+
+				tempFBO = fbo_create(w, h, 1, false);
+				RECT srcRect = {0, 0,  vfb->renderWidth, vfb->renderHeight};
+				D3DTEXTUREFILTERTYPE filt = g_Config.iBufFilter == SCALE_LINEAR ? D3DTEXF_LINEAR : D3DTEXF_POINT;
+				if (SUCCEEDED(fbo_blit_color(vfb->fbo_dx9, &srcRect, tempFBO, nullptr, filt))) {
+					renderTarget = fbo_get_color_for_read(tempFBO);
+				}
+			}
+
 			LPDIRECT3DSURFACE9 offscreen = GetOffscreenSurface(renderTarget, vfb);
 			if (offscreen) {
-				success = GetRenderTargetFramebuffer(renderTarget, offscreen, vfb->renderWidth, vfb->renderHeight, buffer);
+				success = GetRenderTargetFramebuffer(renderTarget, offscreen, w, h, buffer);
+			}
+			if (tempFBO) {
+				fbo_destroy(tempFBO);
 			}
 		}
 

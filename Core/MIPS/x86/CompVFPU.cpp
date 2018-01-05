@@ -101,8 +101,7 @@ void Jit::ApplyPrefixST(u8 *vregs, u32 prefix, VectorSize sz) {
 	for (int i = 0; i < n; i++)
 		origV[i] = vregs[i];
 
-	for (int i = 0; i < n; i++)
-	{
+	for (int i = 0; i < n; i++) {
 		int regnum = (prefix >> (i*2)) & 3;
 		int abs    = (prefix >> (8+i)) & 1;
 		int negate = (prefix >> (16+i)) & 1;
@@ -1802,8 +1801,8 @@ void Jit::Comp_Vf2i(MIPSOpcode op) {
 	const double *mult = &mulTableVf2i[imm];
 
 	int setMXCSR = -1;
-	switch ((op >> 21) & 0x1f)
-	{
+	int rmode = (op >> 21) & 0x1f;
+	switch (rmode) {
 	case 17:
 		break; //z - truncate. Easy to support.
 	case 16:
@@ -2142,7 +2141,7 @@ void CosOnly(SinCosArg angle) {
 }
 
 void ASinScaled(SinCosArg angle) {
-	sincostemp[0] = asinf(angle) / M_PI_2;
+	sincostemp[0] = vfpu_asin(angle);
 }
 
 void SinCosNegSin(SinCosArg angle) {
@@ -2717,8 +2716,10 @@ void Jit::Comp_Vmmul(MIPSOpcode op) {
 
 	MatrixOverlapType soverlap = GetMatrixOverlap(_VS, _VD, sz);
 	MatrixOverlapType toverlap = GetMatrixOverlap(_VT, _VD, sz);
+	// If these overlap, we won't be able to map T as singles.
+	MatrixOverlapType stoverlap = GetMatrixOverlap(_VS, _VT, sz);
 
-	if (jo.enableVFPUSIMD && !soverlap && !toverlap) {
+	if (jo.enableVFPUSIMD && !soverlap && !toverlap && !stoverlap) {
 		u8 scols[4], dcols[4], tregs[16];
 
 		int vs = _VS;
@@ -3412,6 +3413,14 @@ void Jit::CompVrotShuffle(u8 *dregs, int imm, int n, bool negSin) {
 // Very heavily used by FF:CC
 void Jit::Comp_VRot(MIPSOpcode op) {
 	CONDITIONAL_DISABLE;
+	if (js.HasUnknownPrefix()) {
+		DISABLE;
+	}
+	if (!js.HasNoPrefix()) {
+		// Prefixes work strangely for this, see IRCompVFPU.
+		WARN_LOG_REPORT(JIT, "vrot instruction using prefixes at %08x", GetCompilerPC());
+		DISABLE;
+	}
 
 	int vd = _VD;
 	int vs = _VS;
@@ -3470,6 +3479,10 @@ void Jit::Comp_VRot(MIPSOpcode op) {
 }
 
 void Jit::Comp_ColorConv(MIPSOpcode op) {
+	CONDITIONAL_DISABLE;
+	if (js.HasUnknownPrefix())
+		DISABLE;
+
 	int vd = _VD;
 	int vs = _VS;
 
@@ -3487,6 +3500,7 @@ void Jit::Comp_ColorConv(MIPSOpcode op) {
 
 	u8 sregs[4];
 	u8 dregs[1];
+	// WARNING: Prefixes.
 	GetVectorRegs(sregs, sz, vs);
 	GetVectorRegs(dregs, V_Pair, vd);
 

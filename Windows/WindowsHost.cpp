@@ -34,15 +34,18 @@
 #include "input/keycodes.h"
 #include "util/text/utf8.h"
 
+#include "Common/StringUtils.h"
 #include "Core/Core.h"
 #include "Core/Config.h"
 #include "Core/CoreParameter.h"
 #include "Core/System.h"
+#include "Core/Debugger/SymbolMap.h"
 #include "Windows/EmuThread.h"
 #include "Windows/DSoundStream.h"
 #include "Windows/WindowsHost.h"
 #include "Windows/MainWindow.h"
 #include "Windows/GPU/WindowsGLContext.h"
+#include "Windows/GPU/WindowsVulkanContext.h"
 #include "Windows/GPU/D3D9Context.h"
 
 #include "Windows/Debugger/DebuggerShared.h"
@@ -53,10 +56,8 @@
 #include "Windows/XinputDevice.h"
 #include "Windows/KeyboardDevice.h"
 
-#include "Core/Debugger/SymbolMap.h"
-
-#include "Common/StringUtils.h"
 #include "Windows/main.h"
+#include "UI/OnScreenDisplay.h"
 
 static const int numCPUs = 1;
 
@@ -68,7 +69,9 @@ static BOOL PostDialogMessage(Dialog *dialog, UINT message, WPARAM wParam = 0, L
 }
 
 WindowsHost::WindowsHost(HINSTANCE hInstance, HWND mainWindow, HWND displayWindow)
-	: gfx_(nullptr), hInstance_(hInstance), mainWindow_(mainWindow), displayWindow_(displayWindow)
+	: gfx_(nullptr), hInstance_(hInstance),
+		mainWindow_(mainWindow),
+		displayWindow_(displayWindow)
 {
 	mouseDeltaX = 0;
 	mouseDeltaY = 0;
@@ -109,6 +112,9 @@ bool WindowsHost::InitGraphics(std::string *error_message, GraphicsContext **ctx
 		break;
 	case GPU_BACKEND_DIRECT3D9:
 		graphicsContext = new D3D9Context();
+		break;
+	case GPU_BACKEND_VULKAN:
+		graphicsContext = new WindowsVulkanContext();
 		break;
 	default:
 		return false;
@@ -341,4 +347,8 @@ void WindowsHost::GoFullscreen(bool viewFullscreen) {
 
 void WindowsHost::ToggleDebugConsoleVisibility() {
 	MainWindow::ToggleDebugConsoleVisibility();
+}
+
+void WindowsHost::NotifyUserMessage(const std::string &message, float duration, u32 color, const char *id) {
+	osm.Show(message, duration, color, -1, true, id);
 }

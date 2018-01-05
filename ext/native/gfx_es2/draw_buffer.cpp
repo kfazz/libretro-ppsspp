@@ -5,6 +5,7 @@
 
 #include "base/display.h"
 #include "base/logging.h"
+#include "base/stringutil.h"
 #include "math/math_util.h"
 #include "gfx/texture_atlas.h"
 #include "gfx/gl_debug_log.h"
@@ -13,6 +14,7 @@
 #include "gfx_es2/draw_text.h"
 #include "gfx_es2/glsl_program.h"
 #include "util/text/utf8.h"
+#include "util/text/wrap_text.h"
 
 enum {
 	// Enough?
@@ -80,7 +82,7 @@ void DrawBuffer::Flush(bool set_blend_state) {
 	if (count_ == 0)
 		return;
 
-	shaderSet_->SetMatrix4x4("WorldViewProj", drawMatrix_);
+	shaderSet_->SetMatrix4x4("WorldViewProj", drawMatrix_.getReadPtr());
 
 	if (vbuf_) {
 		vbuf_->SubData((const uint8_t *)verts_, 0, sizeof(Vertex) * count_);
@@ -331,6 +333,36 @@ void DrawBuffer::DrawImage2GridH(ImageID atlas_image, float x1, float y1, float 
 	DrawTexRect(xb, y1, x2, y2, um, v1, u2, v2, color);
 }
 
+class AtlasWordWrapper : public WordWrapper {
+public:
+	// Note: maxW may be height if rotated.
+	AtlasWordWrapper(const AtlasFont &atlasfont, float scale, const char *str, float maxW) : WordWrapper(str, maxW), atlasfont_(atlasfont), scale_(scale) {
+	}
+
+protected:
+	float MeasureWidth(const char *str, size_t bytes) override;
+
+	const AtlasFont &atlasfont_;
+	const float scale_;
+};
+
+float AtlasWordWrapper::MeasureWidth(const char *str, size_t bytes) {
+	float w = 0.0f;
+	for (UTF8 utf(str); utf.byteIndex() < (int)bytes; ) {
+		uint32_t c = utf.next();
+		if (c == '&') {
+			// Skip ampersand prefixes ("&&" is an ampersand.)
+			c = utf.next();
+		}
+		const AtlasChar *ch = atlasfont_.getChar(c);
+		if (!ch)
+			ch = atlasfont_.getChar('?');
+
+		w += ch->wx * scale_;
+	}
+	return w;
+}
+
 void DrawBuffer::MeasureTextCount(int font, const char *text, int count, float *w, float *h) {
 	const AtlasFont &atlasfont = *atlas->fonts[font];
 
@@ -365,6 +397,16 @@ void DrawBuffer::MeasureTextCount(int font, const char *text, int count, float *
 	}
 	if (w) *w = std::max(wacc, maxX);
 	if (h) *h = atlasfont.height * fontscaley * lines;
+}
+
+void DrawBuffer::MeasureTextRect(int font, const char *text, int count, const Bounds &bounds, float *w, float *h, int align) {
+	std::string toMeasure = std::string(text, count);
+	if (align & FLAG_WRAP_TEXT) {
+		AtlasWordWrapper wrapper(*atlas->fonts[font], fontscalex, toMeasure.c_str(), bounds.w);
+		toMeasure = wrapper.Wrapped();
+	}
+
+	MeasureTextCount(font, toMeasure.c_str(), (int)toMeasure.length(), w, h);
 }
 
 void DrawBuffer::MeasureText(int font, const char *text, float *w, float *h) {
@@ -402,7 +444,35 @@ void DrawBuffer::DrawTextRect(int font, const char *text, float x, float y, floa
 		y += h;
 	}
 
-	DrawText(font, text, x, y, color, align);
+	std::string toDraw = text;
+	if (align & FLAG_WRAP_TEXT) {
+		AtlasWordWrapper wrapper(*atlas->fonts[font], fontscalex, toDraw.c_str(), w);
+		toDraw = wrapper.Wrapped();
+	}
+
+	float totalWidth, totalHeight;
+	MeasureTextRect(font, toDraw.c_str(), (int)toDraw.size(), Bounds(x, y, w, h), &totalWidth, &totalHeight, align);
+
+	std::vector<std::string> lines;
+	SplitString(toDraw, '\n', lines);
+
+	float baseY = y;
+	if (align & ALIGN_VCENTER) {
+		baseY -= totalHeight / 2;
+		align = align & ~ALIGN_VCENTER;
+	} else if (align & ALIGN_BOTTOM) {
+		baseY -= totalHeight;
+		align = align & ~ALIGN_BOTTOM;
+	}
+
+	// This allows each line to be horizontally centered by itself.
+	for (const std::string &line : lines) {
+		DrawText(font, line.c_str(), x, baseY, color, align);
+
+		float tw, th;
+		MeasureText(font, line.c_str(), &tw, &th);
+		baseY += th;
+	}
 }
 
 // ROTATE_* doesn't yet work right.

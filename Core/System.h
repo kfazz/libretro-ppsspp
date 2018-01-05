@@ -45,7 +45,10 @@ enum PSPDirectories {
 	DIRECTORY_DUMP,
 	DIRECTORY_SAVESTATE,
 	DIRECTORY_CACHE,
+	DIRECTORY_TEXTURES,
 	DIRECTORY_APP_CACHE,  // Use the OS app cache if available
+	DIRECTORY_VIDEO,
+	DIRECTORY_AUDIO
 };
 
 class GraphicsContext;
@@ -68,6 +71,8 @@ void PSP_BeginHostFrame();
 void PSP_EndHostFrame();
 void PSP_RunLoopUntil(u64 globalticks);
 void PSP_RunLoopFor(int cycles);
+void PSP_BeginFrame();
+void PSP_EndFrame();
 
 void Audio_Init();
 

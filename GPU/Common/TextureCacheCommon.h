@@ -21,8 +21,9 @@
 #include <vector>
 
 #include "Common/CommonTypes.h"
-#include "GPU/Common/GPUDebugInterface.h"
 #include "Common/MemoryUtil.h"
+#include "Core/TextureReplacer.h"
+#include "GPU/Common/GPUDebugInterface.h"
 
 enum TextureFiltering {
 	TEX_FILTER_AUTO = 1,
@@ -39,6 +40,8 @@ enum FramebufferNotification {
 
 struct VirtualFramebuffer;
 
+class CachedTextureVulkan;
+
 class TextureCacheCommon {
 public:
 	TextureCacheCommon();
@@ -52,6 +55,7 @@ public:
 	// FramebufferManager keeps TextureCache updated about what regions of memory are being rendered to.
 	void NotifyFramebuffer(u32 address, VirtualFramebuffer *framebuffer, FramebufferNotification msg);
 	void NotifyConfigChanged();
+	void NotifyVideoUpload(u32 addr, int size, int width, GEBufferFormat fmt);
 
 	int AttachedDrawingHeight();
 
@@ -76,7 +80,8 @@ public:
 			STATUS_CLUT_RECHECK = 0x20,    // Another texture with same addr had a hashfail.
 			STATUS_DEPALETTIZE = 0x40,     // Needs to go through a depalettize pass.
 			STATUS_TO_SCALE = 0x80,        // Pending texture scaling in a later frame.
-			STATUS_FREE_CHANGE = 0x100,    // Allow one change before marking "frequent".
+			STATUS_IS_SCALED = 0x100,      // Has been scaled (can't be replaceImages'd.)
+			STATUS_FREE_CHANGE = 0x200,    // Allow one change before marking "frequent".
 		};
 
 		// Status, but int so we can zero initialize.
@@ -96,6 +101,7 @@ public:
 		union {
 			u32 textureName;
 			void *texturePtr;
+			CachedTextureVulkan *vkTex;
 		};
 		int invalidHint;
 		u32 fullhash;
@@ -104,7 +110,7 @@ public:
 		u16 maxSeenV;
 
 		// Cache the current filter settings so we can avoid setting it again.
-		// (OpenGL madness where filter settings are attached to each texture).
+		// (OpenGL madness where filter settings are attached to each texture. Unused in Vulkan).
 		u8 magFilt;
 		u8 minFilt;
 		bool sClamp;
@@ -130,26 +136,53 @@ public:
 				SetAlphaStatus(STATUS_ALPHA_SIMPLE);
 			}
 		}
-		bool Matches(u16 dim2, u8 format2, u8 maxLevel2);
+
+		bool Matches(u16 dim2, u8 format2, u8 maxLevel2) const;
+		u64 CacheKey() const;
+		static u64 CacheKey(u32 addr, u8 format, u16 dim, u32 cluthash);
 	};
 
 protected:
 	// Can't be unordered_map, we use lower_bound ... although for some reason that compiles on MSVC.
 	typedef std::map<u64, TexCacheEntry> TexCache;
 
-	void *UnswizzleFromMem(const u8 *texptr, u32 bufw, u32 height, u32 bytesPerPixel);
-	void *RearrangeBuf(void *inBuf, u32 inRowBytes, u32 outRowBytes, int h, bool allowInPlace = true);
+	// Separate to keep main texture cache size down.
+	struct AttachedFramebufferInfo {
+		u32 xOffset;
+		u32 yOffset;
+	};
 
-	void GetSamplingParams(int &minFilt, int &magFilt, bool &sClamp, bool &tClamp, float &lodBias, u8 maxLevel);
-	void UpdateMaxSeenV(bool throughMode);
+	bool DecodeTextureLevel(u8 *out, int outPitch, GETextureFormat format, GEPaletteFormat clutformat, uint32_t texaddr, int level, int bufw, bool reverseColors, bool useBGRA = false);
+	void UnswizzleFromMem(u32 *dest, u32 destPitch, const u8 *texptr, u32 bufw, u32 height, u32 bytesPerPixel);
+	bool ReadIndexedTex(u8 *out, int outPitch, int level, const u8 *texptr, int bytesPerIndex, int bufw);
+
+	template <typename T>
+	inline const T *GetCurrentClut() {
+		return (const T *)clutBuf_;
+	}
+
+	u32 EstimateTexMemoryUsage(const TexCacheEntry *entry);
+	void GetSamplingParams(int &minFilt, int &magFilt, bool &sClamp, bool &tClamp, float &lodBias, u8 maxLevel, u32 addr);
+	void UpdateMaxSeenV(TexCacheEntry *entry, bool throughMode);
 
 	virtual bool AttachFramebuffer(TexCacheEntry *entry, u32 address, VirtualFramebuffer *framebuffer, u32 texaddrOffset = 0) = 0;
-	virtual void DetachFramebuffer(TexCacheEntry *entry, u32 address, VirtualFramebuffer *framebuffer) = 0;
+	void AttachFramebufferValid(TexCacheEntry *entry, VirtualFramebuffer *framebuffer, const AttachedFramebufferInfo &fbInfo);
+	void AttachFramebufferInvalid(TexCacheEntry *entry, VirtualFramebuffer *framebuffer, const AttachedFramebufferInfo &fbInfo);
+	void DetachFramebuffer(TexCacheEntry *entry, u32 address, VirtualFramebuffer *framebuffer);
 
 	virtual void DownloadFramebufferForClut(u32 clutAddr, u32 bytes) = 0;
 
+	void DecimateVideos();
+
+	TextureReplacer replacer;
+
 	TexCache cache;
+	u32 cacheSizeEstimate_;
+
 	std::vector<VirtualFramebuffer *> fbCache_;
+	std::map<u64, AttachedFramebufferInfo> fbTexInfo_;
+
+	std::map<u32, int> videos_;
 
 	SimpleBuf<u32> tmpTexBuf32;
 	SimpleBuf<u16> tmpTexBuf16;
@@ -160,14 +193,33 @@ protected:
 	// Raw is where we keep the original bytes.  Converted is where we swap colors if necessary.
 	u32 *clutBufRaw_;
 	u32 *clutBufConverted_;
+	// This is the active one.
+	u32 *clutBuf_;
 	u32 clutLastFormat_;
 	u32 clutTotalBytes_;
 	u32 clutMaxBytes_;
 	u32 clutRenderAddress_;
 	u32 clutRenderOffset_;
+	// True if the clut is just alpha values in the same order (RGBA4444-bit only.)
+	bool clutAlphaLinear_;
+	u16 clutAlphaLinearColor_;
+
 	int standardScaleFactor_;
 };
 
-inline bool TextureCacheCommon::TexCacheEntry::Matches(u16 dim2, u8 format2, u8 maxLevel2) {
+inline bool TextureCacheCommon::TexCacheEntry::Matches(u16 dim2, u8 format2, u8 maxLevel2) const {
 	return dim == dim2 && format == format2 && maxLevel == maxLevel2;
+}
+
+inline u64 TextureCacheCommon::TexCacheEntry::CacheKey() const {
+	return CacheKey(addr, format, dim, cluthash);
+}
+
+inline u64 TextureCacheCommon::TexCacheEntry::CacheKey(u32 addr, u8 format, u16 dim, u32 cluthash) {
+	u64 cachekey = ((u64)(addr & 0x3FFFFFFF) << 32) | dim;
+	bool hasClut = (format & 4) != 0;
+	if (hasClut) {
+		cachekey ^= cluthash;
+	}
+	return cachekey;
 }

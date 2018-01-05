@@ -163,6 +163,7 @@ static const JitLookup jitLookup[] = {
 
 JittedVertexDecoder VertexDecoderJitCache::Compile(const VertexDecoder &dec, int32_t *jittedSize) {
 	dec_ = &dec;
+	BeginWrite();
 	const u8 *start = AlignCode16();
 
 	bool prescaleStep = false;
@@ -184,6 +185,9 @@ JittedVertexDecoder VertexDecoderJitCache::Compile(const VertexDecoder &dec, int
 				skinning = true;
 		}
 	}
+
+	// Not used below, but useful for logging.
+	(void)skinning;
 
 	SetCC(CC_AL);
 
@@ -310,6 +314,7 @@ JittedVertexDecoder VertexDecoderJitCache::Compile(const VertexDecoder &dec, int
 	*/
 
 	*jittedSize = GetCodePtr() - start;
+	EndWrite();
 	return (JittedVertexDecoder)start;
 }
 

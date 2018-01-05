@@ -15,11 +15,15 @@
 // Official git repository and contact information can be found at
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
+#include "Common/GraphicsContext.h"
 #include "Core/Core.h"
 
 #include "GPU/GPU.h"
 #include "GPU/GPUInterface.h"
-#include "GPU/GLES/GLES_GPU.h"
+#include "GPU/GLES/GPU_GLES.h"
+#ifndef NO_VULKAN
+#include "GPU/Vulkan/GPU_Vulkan.h"
+#endif
 #include "GPU/Null/NullGpu.h"
 #include "GPU/Software/SoftGpu.h"
 
@@ -41,20 +45,28 @@ static void SetGPU(T *obj) {
 #ifdef USE_CRT_DBG
 #undef new
 #endif
-bool GPU_Init(GraphicsContext *ctx) {
+
+bool GPU_Init(GraphicsContext *ctx, Thin3DContext *thin3d) {
 	switch (PSP_CoreParameter().gpuCore) {
-	case GPU_NULL:
+	case GPUCORE_NULL:
 		SetGPU(new NullGPU());
 		break;
-	case GPU_GLES:
-		SetGPU(new GLES_GPU(ctx));
+	case GPUCORE_GLES:
+		SetGPU(new GPU_GLES(ctx));
 		break;
-	case GPU_SOFTWARE:
-		SetGPU(new SoftGPU());
+	case GPUCORE_SOFTWARE:
+		SetGPU(new SoftGPU(ctx, thin3d));
 		break;
-	case GPU_DIRECTX9:
+	case GPUCORE_DIRECTX9:
 #if defined(_WIN32_NO_LIBRETRO)
-		SetGPU(new DIRECTX9_GPU());
+		SetGPU(new DIRECTX9_GPU(ctx));
+#endif
+		break;
+	case GPUCORE_DIRECTX11:
+		return false;
+	case GPUCORE_VULKAN:
+#ifndef NO_VULKAN
+		SetGPU(new GPU_Vulkan(ctx));
 #endif
 		break;
 	}

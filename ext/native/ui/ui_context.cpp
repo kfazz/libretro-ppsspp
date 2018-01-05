@@ -23,6 +23,7 @@ UIContext::~UIContext() {
 void UIContext::Init(Thin3DContext *thin3d, Thin3DShaderSet *uishader, Thin3DShaderSet *uishadernotex, Thin3DTexture *uitexture, DrawBuffer *uidrawbuffer, DrawBuffer *uidrawbufferTop) {
 	thin3d_ = thin3d;
 	blend_ = thin3d_->GetBlendStatePreset(T3DBlendStatePreset::BS_STANDARD_ALPHA);
+	sampler_ = thin3d_->GetSamplerStatePreset(T3DSamplerStatePreset::SAMPS_LINEAR);
 	depth_ = thin3d_->CreateDepthStencilState(false, false, T3DComparison::LESS);
 
 	uishader_ = uishader;
@@ -33,12 +34,13 @@ void UIContext::Init(Thin3DContext *thin3d, Thin3DShaderSet *uishader, Thin3DSha
 #if defined(_WIN32) || defined(USING_QT_UI)
 	textDrawer_ = new TextDrawer(thin3d);
 #else
-	textDrawer_ = 0;
+	textDrawer_ = nullptr;
 #endif
 }
 
 void UIContext::Begin() {
 	thin3d_->SetBlendState(blend_);
+	thin3d_->SetSamplerStates(0, 1, &sampler_);
 	thin3d_->SetDepthStencilState(depth_);
 	thin3d_->SetRenderState(T3DRenderState::CULL_MODE, T3DCullMode::NO_CULL);
 	thin3d_->SetTexture(0, uitexture_);
@@ -48,6 +50,7 @@ void UIContext::Begin() {
 
 void UIContext::BeginNoTex() {
 	thin3d_->SetBlendState(blend_);
+	thin3d_->SetSamplerStates(0, 1, &sampler_);
 	thin3d_->SetRenderState(T3DRenderState::CULL_MODE, T3DCullMode::NO_CULL);
 
 	UIBegin(uishadernotex_);
@@ -124,19 +127,33 @@ void UIContext::SetFontStyle(const UI::FontStyle &fontStyle) {
 	}
 }
 
-void UIContext::MeasureText(const UI::FontStyle &style, const char *str, float *x, float *y, int align) const {
-	MeasureTextCount(style, str, (int)strlen(str), x, y, align);
+void UIContext::MeasureText(const UI::FontStyle &style, float scaleX, float scaleY, const char *str, float *x, float *y, int align) const {
+	MeasureTextCount(style, scaleX, scaleY, str, (int)strlen(str), x, y, align);
 }
 
-void UIContext::MeasureTextCount(const UI::FontStyle &style, const char *str, int count, float *x, float *y, int align) const {
+void UIContext::MeasureTextCount(const UI::FontStyle &style, float scaleX, float scaleY, const char *str, int count, float *x, float *y, int align) const {
 	if (!textDrawer_ || (align & FLAG_DYNAMIC_ASCII)) {
 		float sizeFactor = (float)style.sizePts / 24.0f;
-		Draw()->SetFontScale(fontScaleX_ * sizeFactor, fontScaleY_ * sizeFactor);
+		Draw()->SetFontScale(scaleX * sizeFactor, scaleY * sizeFactor);
 		Draw()->MeasureTextCount(style.atlasFont, str, count, x, y);
 	} else {
-		textDrawer_->SetFontScale(fontScaleX_, fontScaleY_);
-		std::string subset(str, count);
-		textDrawer_->MeasureString(subset.c_str(), x, y);
+		textDrawer_->SetFont(style.fontName.c_str(), style.sizePts, style.flags);
+		textDrawer_->SetFontScale(scaleX, scaleY);
+		textDrawer_->MeasureString(str, count, x, y);
+		textDrawer_->SetFont(fontStyle_->fontName.c_str(), fontStyle_->sizePts, fontStyle_->flags);
+	}
+}
+
+void UIContext::MeasureTextRect(const UI::FontStyle &style, float scaleX, float scaleY, const char *str, int count, const Bounds &bounds, float *x, float *y, int align) const {
+	if (!textDrawer_ || (align & FLAG_DYNAMIC_ASCII)) {
+		float sizeFactor = (float)style.sizePts / 24.0f;
+		Draw()->SetFontScale(scaleX * sizeFactor, scaleY * sizeFactor);
+		Draw()->MeasureTextRect(style.atlasFont, str, count, bounds, x, y, align);
+	} else {
+		textDrawer_->SetFont(style.fontName.c_str(), style.sizePts, style.flags);
+		textDrawer_->SetFontScale(scaleX, scaleY);
+		textDrawer_->MeasureStringRect(str, count, bounds, x, y, align);
+		textDrawer_->SetFont(fontStyle_->fontName.c_str(), fontStyle_->sizePts, fontStyle_->flags);
 	}
 }
 

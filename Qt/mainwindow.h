@@ -87,7 +87,6 @@ private slots:
 
 	// Options
 	// Core
-	void dynarecAct() { g_Config.bJit = !g_Config.bJit; }
 	void vertexDynarecAct() { g_Config.bVertexDecoderJit = !g_Config.bVertexDecoderJit; }
 	void fastmemAct() { g_Config.bFastMemory = !g_Config.bFastMemory; }
 	void ignoreIllegalAct() { g_Config.bIgnoreBadMemAccess = !g_Config.bIgnoreBadMemAccess; }
@@ -98,7 +97,7 @@ private slots:
 	void bufferRenderAct() { g_Config.iRenderingMode = !g_Config.iRenderingMode; }
 	void linearAct() { g_Config.iTexFiltering = (g_Config.iTexFiltering != 0) ? 0 : 3; }
 
-	void screenGroup_triggered(QAction *action) { SetZoom(action->data().toInt()); }
+	void screenGroup_triggered(QAction *action) { SetWindowScale(action->data().toInt()); }
 
 	void displayLayoutGroup_triggered(QAction *action) { g_Config.iSmallDisplayZoomType = action->data().toInt(); }
 	void transformAct() { g_Config.bHardwareTransform = !g_Config.bHardwareTransform; }
@@ -136,7 +135,7 @@ private slots:
 	void langChanged(QAction *action) { loadLanguage(action->data().toString(), true); }
 
 private:
-	void SetZoom(int zoom);
+	void SetWindowScale(int zoom);
 	void SetGameTitle(QString text);
 	void loadLanguage(const QString &language, bool retranslate);
 	void createMenus();

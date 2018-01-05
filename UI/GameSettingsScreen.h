@@ -20,6 +20,8 @@
 #include "ui/ui_screen.h"
 #include "UI/MiscScreens.h"
 
+class SettingInfoMessage;
+
 // Per-game settings screen - enables you to configure graphic options, control options, etc
 // per game.
 class GameSettingsScreen : public UIDialogScreenWithGameBackground {
@@ -40,18 +42,14 @@ protected:
 
 private:
 	std::string gameID_;
-	//edit the game-specific settings and restore the global settings after exiting
-	bool bEditThenRestore;
 	bool lastVertical_;
-	// As we load metadata in the background, we need to be able to update these after the fact.
-	UI::TextView *tvTitle_;
-	UI::TextView *tvGameSize_;
 	UI::CheckBox *enableReportsCheckbox_;
 	UI::Choice *layoutEditorChoice_;
 	UI::Choice *postProcChoice_;
 	UI::Choice *displayEditor_;
 	UI::PopupMultiChoice *resolutionChoice_;
 	UI::CheckBox *frameSkipAuto_;
+	SettingInfoMessage *settingInfo_;
 #ifdef _WIN32
 	UI::CheckBox *SavePathInMyDocumentChoice;
 	UI::CheckBox *SavePathInOtherChoice;
@@ -76,6 +74,7 @@ private:
 	UI::EventReturn OnPostProcShader(UI::EventParams &e);
 	UI::EventReturn OnPostProcShaderChange(UI::EventParams &e);
 	UI::EventReturn OnDeveloperTools(UI::EventParams &e);
+	UI::EventReturn OnRemoteISO(UI::EventParams &e);
 	UI::EventReturn OnChangeNickname(UI::EventParams &e);
 	UI::EventReturn OnChangeproAdhocServerAddress(UI::EventParams &e);
 	UI::EventReturn OnChangeMacAddress(UI::EventParams &e);
@@ -109,11 +108,33 @@ private:
 	int iAlternateSpeedPercent_;
 	bool enableReports_;
 
+	//edit the game-specific settings and restore the global settings after exiting
+	bool editThenRestore_;
+
 	// Cached booleans
 	bool vtxCacheEnable_;
 	bool postProcEnable_;
 	bool resolutionEnable_;
 	bool bloomHackEnable_;
+};
+
+class SettingInfoMessage : public UI::TextView {
+public:
+	SettingInfoMessage(int align, UI::AnchorLayoutParams *lp)
+		: UI::TextView("", align, false, lp), timeShown_(0.0) {
+	}
+
+	void SetBottomCutoff(float y) {
+		cutOffY_ = y;
+	}
+	void Show(const std::string &text, UI::View *refView = nullptr);
+
+	void GetContentDimensionsBySpec(const UIContext &dc, UI::MeasureSpec horiz, UI::MeasureSpec vert, float &w, float &h) const;
+	void Draw(UIContext &dc);
+
+private:
+	double timeShown_;
+	float cutOffY_;
 };
 
 class DeveloperToolsScreen : public UIDialogScreenWithBackground {
@@ -130,6 +151,7 @@ private:
 	UI::EventReturn OnLoggingChanged(UI::EventParams &e);
 	UI::EventReturn OnLoadLanguageIni(UI::EventParams &e);
 	UI::EventReturn OnSaveLanguageIni(UI::EventParams &e);
+	UI::EventReturn OnOpenTexturesIniFile(UI::EventParams &e);
 	UI::EventReturn OnLogConfig(UI::EventParams &e);
 	UI::EventReturn OnJitAffectingSetting(UI::EventParams &e);
 };

@@ -32,7 +32,7 @@ public:
 	void BeginFrame() override {}
 	void SetDisplayFramebuffer(u32 framebuf, u32 stride, GEBufferFormat format) override {}
 	void CopyDisplayToOutput() override {}
-	void UpdateStats() override;
+	void GetStats(char *buffer, size_t bufsize) override;
 	void InvalidateCache(u32 addr, int size, GPUInvalidationType type) override;
 	void NotifyVideoUpload(u32 addr, int size, int width, int format) override;
 	bool PerformMemoryCopy(u32 dest, u32 src, int size) override;
@@ -43,6 +43,7 @@ public:
 	void ClearCacheNextFrame() override {}
 
 	void DeviceLost() override {}
+	void DeviceRestore() override {}
 	void DumpNextFrame() override {}
 
 	void Resized() override {}

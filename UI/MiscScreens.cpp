@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2013- PPSSPP Project.
+// Copyright (c) 2013- PPSSPP Project.
 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -19,6 +19,7 @@
 
 #include "base/functional.h"
 #include "base/colorutil.h"
+#include "base/display.h"
 #include "base/timeutil.h"
 #include "gfx_es2/draw_buffer.h"
 #include "math/curves.h"
@@ -37,7 +38,7 @@
 #include "Core/Config.h"
 #include "Core/Host.h"
 #include "Core/System.h"
-#include "Core/MIPS/JitCommon/NativeJit.h"
+#include "Core/MIPS/JitCommon/JitCommon.h"
 #include "Core/HLE/sceUtility.h"
 #include "Common/FileUtil.h"
 #include "GPU/GPUState.h"
@@ -133,7 +134,7 @@ void HandleCommonMessages(const char *message, const char *value, ScreenManager 
 			MIPSComp::jit->ClearCache();
 		}
 		if (PSP_IsInited()) {
-			currentMIPS->UpdateCore(g_Config.bJit ? CPU_JIT : CPU_INTERPRETER);
+			currentMIPS->UpdateCore((CPUCore)g_Config.iCpuCore);
 		}
 	}
 }
@@ -231,7 +232,8 @@ void PromptScreen::CreateViews() {
 	ViewGroup *leftColumn = new AnchorLayout(new LinearLayoutParams(1.0f));
 	root_->Add(leftColumn);
 
-	leftColumn->Add(new TextView(message_, ALIGN_LEFT, false, new AnchorLayoutParams(10, 10, NONE, NONE)))->SetClip(false);
+	float leftColumnWidth = dp_xres - actionMenuMargins.left - actionMenuMargins.right - 300.0f;
+	leftColumn->Add(new TextView(message_, ALIGN_LEFT | FLAG_WRAP_TEXT, false, new AnchorLayoutParams(leftColumnWidth, WRAP_CONTENT, 10, 10, NONE, NONE)))->SetClip(false);
 
 	ViewGroup *rightColumnItems = new LinearLayout(ORIENT_VERTICAL, new LinearLayoutParams(300, FILL_PARENT, actionMenuMargins));
 	root_->Add(rightColumnItems);

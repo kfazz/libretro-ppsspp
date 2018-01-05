@@ -37,7 +37,7 @@
 namespace DX9 {
 
 class TextureCacheDX9;
-class TransformDrawEngineDX9;
+class DrawEngineDX9;
 class ShaderManagerDX9;
 
 class FramebufferManagerDX9 : public FramebufferManagerCommon {
@@ -51,17 +51,16 @@ public:
 	void SetShaderManager(ShaderManagerDX9 *sm) {
 		shaderManager_ = sm;
 	}
-	void SetTransformDrawEngine(TransformDrawEngineDX9 *td) {
+	void SetTransformDrawEngine(DrawEngineDX9 *td) {
 		transformDraw_ = td;
 	}
 
-	virtual void MakePixelTexture(const u8 *srcPixels, GEBufferFormat srcPixelFormat, int srcStride, int width, int height) override;
 	virtual void DrawPixels(VirtualFramebuffer *vfb, int dstX, int dstY, const u8 *srcPixels, GEBufferFormat srcPixelFormat, int srcStride, int width, int height) override;
 	virtual void DrawFramebufferToOutput(const u8 *srcPixels, GEBufferFormat srcPixelFormat, int srcStride, bool applyPostShader) override;
 	
 	void DrawActiveTexture(LPDIRECT3DTEXTURE9 texture, float x, float y, float w, float h, float destW, float destH, float u0, float v0, float u1, float v1, int uvRotation);
 
-	void DestroyAllFBOs();
+	void DestroyAllFBOs(bool forceDelete);
 
 	void EndFrame();
 	void Resized();
@@ -80,10 +79,10 @@ public:
 
 	virtual bool NotifyStencilUpload(u32 addr, int size, bool skipZero = false) override;
 
-	void DestroyFramebuf(VirtualFramebuffer *vfb);
-	void ResizeFramebufFBO(VirtualFramebuffer *vfb, u16 w, u16 h, bool force = false);
+	void DestroyFramebuf(VirtualFramebuffer *vfb) override;
+	void ResizeFramebufFBO(VirtualFramebuffer *vfb, u16 w, u16 h, bool force = false, bool skipCopy = false) override;
 
-	bool GetCurrentFramebuffer(GPUDebugBuffer &buffer);
+	bool GetCurrentFramebuffer(GPUDebugBuffer &buffer, int maxRes);
 	bool GetCurrentDepthbuffer(GPUDebugBuffer &buffer);
 	bool GetCurrentStencilbuffer(GPUDebugBuffer &buffer);
 	static bool GetDisplayFramebuffer(GPUDebugBuffer &buffer);
@@ -92,23 +91,25 @@ public:
 
 	FBO_DX9 *GetTempFBO(u16 w, u16 h, FBOColorDepth depth = FBO_8888);
 	LPDIRECT3DSURFACE9 GetOffscreenSurface(LPDIRECT3DSURFACE9 similarSurface, VirtualFramebuffer *vfb);
+	LPDIRECT3DSURFACE9 GetOffscreenSurface(D3DFORMAT fmt, u32 w, u32 h);
 
 protected:
-	virtual void DisableState() override;
-	virtual void ClearBuffer(bool keepState = false) override;
-	virtual void FlushBeforeCopy() override;
-	virtual void DecimateFBOs() override;
+	void DisableState() override;
+	void ClearBuffer(bool keepState = false) override;
+	void FlushBeforeCopy() override;
+	void DecimateFBOs() override;
 
 	// Used by ReadFramebufferToMemory and later framebuffer block copies
-	virtual void BlitFramebuffer(VirtualFramebuffer *dst, int dstX, int dstY, VirtualFramebuffer *src, int srcX, int srcY, int w, int h, int bpp) override;
+	void BlitFramebuffer(VirtualFramebuffer *dst, int dstX, int dstY, VirtualFramebuffer *src, int srcX, int srcY, int w, int h, int bpp) override;
 
-	virtual void NotifyRenderFramebufferCreated(VirtualFramebuffer *vfb) override;
-	virtual void NotifyRenderFramebufferSwitched(VirtualFramebuffer *prevVfb, VirtualFramebuffer *vfb, bool isClearingDepth) override;
-	virtual void NotifyRenderFramebufferUpdated(VirtualFramebuffer *vfb, bool vfbFormatChanged) override;
-	virtual bool CreateDownloadTempBuffer(VirtualFramebuffer *nvfb) override;
-	virtual void UpdateDownloadTempBuffer(VirtualFramebuffer *nvfb) override;
+	void NotifyRenderFramebufferCreated(VirtualFramebuffer *vfb) override;
+	void NotifyRenderFramebufferSwitched(VirtualFramebuffer *prevVfb, VirtualFramebuffer *vfb, bool isClearingDepth) override;
+	void NotifyRenderFramebufferUpdated(VirtualFramebuffer *vfb, bool vfbFormatChanged) override;
+	bool CreateDownloadTempBuffer(VirtualFramebuffer *nvfb) override;
+	void UpdateDownloadTempBuffer(VirtualFramebuffer *nvfb) override;
 
 private:
+	void MakePixelTexture(const u8 *srcPixels, GEBufferFormat srcPixelFormat, int srcStride, int width, int height);
 	void CompileDraw2DProgram();
 	void DestroyDraw2DProgram();
 
@@ -132,7 +133,7 @@ private:
 
 	TextureCacheDX9 *textureCache_;
 	ShaderManagerDX9 *shaderManager_;
-	TransformDrawEngineDX9 *transformDraw_;
+	DrawEngineDX9 *transformDraw_;
 	
 	// Used by post-processing shader
 	std::vector<FBO *> extraFBOs_;

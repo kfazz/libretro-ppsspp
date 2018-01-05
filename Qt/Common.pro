@@ -7,8 +7,7 @@ include(Settings.pri)
 
 # CPU
 arm {
-	SOURCES += $$P/Common/ArmCPUDetect.cpp \
-		$$P/Common/ArmThunk.cpp
+	SOURCES += $$P/Common/ArmCPUDetect.cpp
 }
 else:i86 {
 	SOURCES += $$P/Common/ABI.cpp \
@@ -72,4 +71,5 @@ HEADERS += $$P/Common/ChunkFile.h \
 	$$P/Common/Crypto/*.h
 
 INCLUDEPATH += $$P/ext/native
+INCLUDEPATH += $$P/ext
 

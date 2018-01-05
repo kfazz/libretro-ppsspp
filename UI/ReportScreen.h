@@ -27,15 +27,39 @@ public:
 	ReportScreen(const std::string &gamePath);
 
 protected:
+	void update(InputState &input) override;
+	void CreateViews() override;
+	void UpdateSubmit();
+
 	UI::EventReturn HandleChoice(UI::EventParams &e);
 	UI::EventReturn HandleSubmit(UI::EventParams &e);
 	UI::EventReturn HandleBrowser(UI::EventParams &e);
-
-	virtual void CreateViews();
+	UI::EventReturn HandleReportingChange(UI::EventParams &e);
 
 	UI::Choice *submit_;
+	UI::View *screenshot_;
+	UI::TextView *reportingNotice_;
+	std::string screenshotFilename_;
+
 	int overall_;
 	int graphics_;
 	int speed_;
 	int gameplay_;
+	bool enableReporting_;
+	bool ratingEnabled_;
+	bool includeScreenshot_;
+};
+
+class ReportFinishScreen : public UIScreenWithGameBackground {
+public:
+	ReportFinishScreen(const std::string &gamePath);
+
+protected:
+	void update(InputState &input) override;
+	void CreateViews() override;
+
+	UI::EventReturn HandleViewFeedback(UI::EventParams &e);
+
+	UI::TextView *resultNotice_;
+	bool setStatus_;
 };

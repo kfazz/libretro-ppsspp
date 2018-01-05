@@ -29,7 +29,7 @@
 #include "Core/System.h"
 #include "Core/Config.h"
 #include "Core/Reporting.h"
-#include "GPU/GLES/GLES_GPU.h"
+#include "GPU/GLES/GPU_GLES.h"
 #include "GPU/GLES/GLStateCache.h"
 #include "GPU/GLES/ShaderManager.h"
 #include "GPU/GLES/TextureCache.h"
@@ -114,7 +114,7 @@ static const GLushort logicOps[] = {
 };
 #endif
 
-bool TransformDrawEngine::ApplyShaderBlending() {
+bool DrawEngineGLES::ApplyShaderBlending() {
 	if (gstate_c.featureFlags & GPU_SUPPORTS_ANY_FRAMEBUFFER_FETCH) {
 		return true;
 	}
@@ -142,7 +142,7 @@ bool TransformDrawEngine::ApplyShaderBlending() {
 	return true;
 }
 
-inline void TransformDrawEngine::ResetShaderBlending() {
+inline void DrawEngineGLES::ResetShaderBlending() {
 	if (fboTexBound_) {
 		glActiveTexture(GL_TEXTURE1);
 		glBindTexture(GL_TEXTURE_2D, 0);
@@ -151,8 +151,8 @@ inline void TransformDrawEngine::ResetShaderBlending() {
 	}
 }
 
-void TransformDrawEngine::ApplyDrawState(int prim) {
-	// TODO: All this setup is soon so expensive that we'll need dirty flags, or simply do it in the command writes where we detect dirty by xoring. Silly to do all this work on every drawcall.
+void DrawEngineGLES::ApplyDrawState(int prim) {
+	// TODO: All this setup is so expensive that we'll need dirty flags, or simply do it in the command writes where we detect dirty by xoring. Silly to do all this work on every drawcall.
 
 	if (gstate_c.textureChanged != TEXCHANGE_UNCHANGED && !gstate.isModeClear() && gstate.isTextureMapEnabled()) {
 		textureCache_->SetTexture();
@@ -369,14 +369,10 @@ void TransformDrawEngine::ApplyDrawState(int prim) {
 	}
 }
 
-void TransformDrawEngine::ApplyDrawStateLate() {
+void DrawEngineGLES::ApplyDrawStateLate() {
 	// At this point, we know if the vertices are full alpha or not.
 	// TODO: Set the nearest/linear here (since we correctly know if alpha/color tests are needed)?
 	if (!gstate.isModeClear()) {
-		if (gstate.isAlphaTestEnabled() || gstate.isColorTestEnabled()) {
-			fragmentTestCache_->BindTestTexture(GL_TEXTURE2);
-		}
-
 		if (fboTexNeedBind_) {
 			// Note that this is positions, not UVs, that we need the copy from.
 			framebufferManager_->BindFramebufferColor(GL_TEXTURE1, gstate.getFrameBufRawAddress(), nullptr, BINDFBCOLOR_MAY_COPY);
@@ -394,5 +390,10 @@ void TransformDrawEngine::ApplyDrawStateLate() {
 		// Apply the texture after the FBO tex, since it might unbind the texture.
 		// TODO: Could use a separate texture unit to be safer?
 		textureCache_->ApplyTexture();
+
+		// Apply last, once we know the alpha params of the texture.
+		if (gstate.isAlphaTestEnabled() || gstate.isColorTestEnabled()) {
+			fragmentTestCache_->BindTestTexture(GL_TEXTURE2);
+		}
 	}
 }

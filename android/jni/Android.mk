@@ -57,7 +57,6 @@ ARCH_FILES := \
   $(SRC)/Core/Util/AudioFormatNEON.cpp.neon \
   $(SRC)/Common/ArmEmitter.cpp \
   $(SRC)/Common/ArmCPUDetect.cpp \
-  $(SRC)/Common/ArmThunk.cpp \
   $(SRC)/Common/ColorConvNEON.cpp.neon \
   $(SRC)/Core/MIPS/ARM/ArmCompALU.cpp \
   $(SRC)/Core/MIPS/ARM/ArmCompBranch.cpp \
@@ -102,7 +101,6 @@ ifeq ($(TARGET_ARCH_ABI),armeabi)
 ARCH_FILES := \
   $(SRC)/Common/ArmEmitter.cpp \
   $(SRC)/Common/ArmCPUDetect.cpp \
-  $(SRC)/Common/ArmThunk.cpp \
   $(SRC)/Core/MIPS/ARM/ArmCompALU.cpp \
   $(SRC)/Core/MIPS/ARM/ArmCompBranch.cpp \
   $(SRC)/Core/MIPS/ARM/ArmCompFPU.cpp \
@@ -124,9 +122,29 @@ EGL_FILES := \
   $(SRC)/Common/GL/GLInterface/EGLAndroid.cpp \
   $(SRC)/Common/GL/GLInterface/GLInterface.cpp
 
+VULKAN_FILES := \
+  $(SRC)/Common/Vulkan/VulkanLoader.cpp \
+  $(SRC)/Common/Vulkan/VulkanContext.cpp \
+  $(SRC)/Common/Vulkan/VulkanImage.cpp \
+  $(SRC)/Common/Vulkan/VulkanMemory.cpp \
+  $(SRC)/GPU/Vulkan/FragmentShaderGeneratorVulkan.cpp \
+  $(SRC)/GPU/Vulkan/DrawEngineVulkan.cpp \
+  $(SRC)/GPU/Vulkan/FramebufferVulkan.cpp \
+  $(SRC)/GPU/Vulkan/GPU_Vulkan.cpp \
+  $(SRC)/GPU/Vulkan/PipelineManagerVulkan.cpp \
+  $(SRC)/GPU/Vulkan/ShaderManagerVulkan.cpp \
+  $(SRC)/GPU/Vulkan/StateMappingVulkan.cpp \
+  $(SRC)/GPU/Vulkan/TextureCacheVulkan.cpp \
+  $(SRC)/GPU/Vulkan/TextureScalerVulkan.cpp \
+  $(SRC)/GPU/Vulkan/DepalettizeShaderVulkan.cpp \
+  $(SRC)/GPU/Vulkan/VertexShaderGeneratorVulkan.cpp \
+  $(SRC)/GPU/Vulkan/VulkanUtil.cpp
+#endif
+
 EXEC_AND_LIB_FILES := \
   $(ARCH_FILES) \
   $(EGL_FILES) \
+  $(VULKAN_FILES) \
   TestRunner.cpp \
   $(SRC)/Core/MIPS/MIPS.cpp.arm \
   $(SRC)/Core/MIPS/MIPSAnalyst.cpp \
@@ -139,8 +157,18 @@ EXEC_AND_LIB_FILES := \
   $(SRC)/Core/MIPS/MIPSVFPUUtils.cpp.arm \
   $(SRC)/Core/MIPS/MIPSCodeUtils.cpp.arm \
   $(SRC)/Core/MIPS/MIPSDebugInterface.cpp \
+  $(SRC)/Core/MIPS/IR/IRFrontend.cpp \
+  $(SRC)/Core/MIPS/IR/IRJit.cpp \
+  $(SRC)/Core/MIPS/IR/IRCompALU.cpp \
+  $(SRC)/Core/MIPS/IR/IRCompBranch.cpp \
+  $(SRC)/Core/MIPS/IR/IRCompFPU.cpp \
+  $(SRC)/Core/MIPS/IR/IRCompLoadStore.cpp \
+  $(SRC)/Core/MIPS/IR/IRCompVFPU.cpp \
+  $(SRC)/Core/MIPS/IR/IRInst.cpp \
+  $(SRC)/Core/MIPS/IR/IRInterpreter.cpp \
+  $(SRC)/Core/MIPS/IR/IRPassSimplify.cpp \
+  $(SRC)/Core/MIPS/IR/IRRegCache.cpp \
   $(SRC)/UI/ui_atlas.cpp \
-  $(SRC)/UI/OnScreenDisplay.cpp \
   $(SRC)/ext/libkirk/AES.c \
   $(SRC)/ext/libkirk/amctrl.c \
   $(SRC)/ext/libkirk/SHA1.c \
@@ -197,12 +225,12 @@ EXEC_AND_LIB_FILES := \
   $(SRC)/GPU/Debugger/Stepping.cpp \
   $(SRC)/GPU/GLES/Framebuffer.cpp \
   $(SRC)/GPU/GLES/DepalettizeShader.cpp \
-  $(SRC)/GPU/GLES/GLES_GPU.cpp.arm \
+  $(SRC)/GPU/GLES/GPU_GLES.cpp.arm \
   $(SRC)/GPU/GLES/GLStateCache.cpp.arm \
   $(SRC)/GPU/GLES/FBO.cpp \
   $(SRC)/GPU/GLES/StencilBuffer.cpp.arm \
   $(SRC)/GPU/GLES/TextureCache.cpp.arm \
-  $(SRC)/GPU/GLES/TransformPipeline.cpp.arm \
+  $(SRC)/GPU/GLES/DrawEngineGLES.cpp.arm \
   $(SRC)/GPU/GLES/StateMapping.cpp.arm \
   $(SRC)/GPU/GLES/ShaderManager.cpp.arm \
   $(SRC)/GPU/GLES/VertexShaderGenerator.cpp.arm \
@@ -248,6 +276,7 @@ EXEC_AND_LIB_FILES := \
   $(SRC)/Core/SaveState.cpp \
   $(SRC)/Core/Screenshot.cpp \
   $(SRC)/Core/System.cpp \
+  $(SRC)/Core/TextureReplacer.cpp \
   $(SRC)/Core/Debugger/Breakpoints.cpp \
   $(SRC)/Core/Debugger/SymbolMap.cpp \
   $(SRC)/Core/Dialog/PSPDialog.cpp \
@@ -366,6 +395,7 @@ LOCAL_SRC_FILES := \
   $(SRC)/UI/EmuScreen.cpp \
   $(SRC)/UI/MainScreen.cpp \
   $(SRC)/UI/MiscScreens.cpp \
+  $(SRC)/UI/RemoteISOScreen.cpp \
   $(SRC)/UI/ReportScreen.cpp \
   $(SRC)/UI/PauseScreen.cpp \
   $(SRC)/UI/SavedataScreen.cpp \
@@ -381,6 +411,7 @@ LOCAL_SRC_FILES := \
   $(SRC)/UI/TouchControlVisibilityScreen.cpp \
   $(SRC)/UI/CwCheatScreen.cpp \
   $(SRC)/UI/InstallZipScreen.cpp \
+  $(SRC)/UI/OnScreenDisplay.cpp \
   $(SRC)/UI/ProfilerDraw.cpp \
   $(SRC)/UI/NativeApp.cpp \
   $(SRC)/UI/ComboKeyMappingScreen.cpp
@@ -448,6 +479,7 @@ ifeq ($(UNITTEST),1)
 	$(SRC)/ext/armips/Core/Assembler.cpp \
 	$(SRC)/ext/armips/Core/Common.cpp \
 	$(SRC)/ext/armips/Core/Expression.cpp \
+	$(SRC)/ext/armips/Core/ExpressionFunctions.cpp \
 	$(SRC)/ext/armips/Core/FileManager.cpp \
 	$(SRC)/ext/armips/Core/Misc.cpp \
 	$(SRC)/ext/armips/Core/SymbolData.cpp \
@@ -492,6 +524,7 @@ endif
 
 $(call import-module,libzip)
 $(call import-module,native)
+$(call import-module,glslang)
 
 ifeq ($(ANDROID_NDK_PROFILER),1)
   $(call import-module,android-ndk-profiler)

@@ -32,7 +32,7 @@ struct VirtualFramebuffer;
 class FramebufferManager;
 class DepalShaderCache;
 class ShaderManager;
-class TransformDrawEngine;
+class DrawEngineGLES;
 
 inline bool UseBGRA8888() {
 	// TODO: Other platforms?  May depend on vendor which is faster?
@@ -65,7 +65,7 @@ public:
 	void SetShaderManager(ShaderManager *sm) {
 		shaderManager_ = sm;
 	}
-	void SetTransformDrawEngine(TransformDrawEngine *td) {
+	void SetTransformDrawEngine(DrawEngineGLES *td) {
 		transformDraw_ = td;
 	}
 
@@ -93,45 +93,31 @@ protected:
 private:
 	void Decimate();  // Run this once per frame to get rid of old textures.
 	void DeleteTexture(TexCache::iterator it);
-	void *ReadIndexedTex(int level, const u8 *texptr, int bytesPerIndex, GLuint dstFmt, int bufw);
 	void UpdateSamplingParams(TexCacheEntry &entry, bool force);
-	void LoadTextureLevel(TexCacheEntry &entry, int level, bool replaceImages, int scaleFactor, GLenum dstFmt);
+	void LoadTextureLevel(TexCacheEntry &entry, ReplacedTexture &replaced, int level, bool replaceImages, int scaleFactor, GLenum dstFmt);
 	GLenum GetDestFormat(GETextureFormat format, GEPaletteFormat clutFormat) const;
-	void *DecodeTextureLevel(GETextureFormat format, GEPaletteFormat clutformat, int level, u32 &texByteAlign, GLenum dstFmt, int scaleFactor, int *bufw = 0);
+	void *DecodeTextureLevelOld(GETextureFormat format, GEPaletteFormat clutformat, int level, GLenum dstFmt, int scaleFactor, int *bufw = 0);
 	TexCacheEntry::Status CheckAlpha(const u32 *pixelData, GLenum dstFmt, int stride, int w, int h);
-	template <typename T>
-	const T *GetCurrentClut();
 	u32 GetCurrentClutHash();
 	void UpdateCurrentClut(GEPaletteFormat clutFormat, u32 clutBase, bool clutIndexIsSimple);
 	bool AttachFramebuffer(TexCacheEntry *entry, u32 address, VirtualFramebuffer *framebuffer, u32 texaddrOffset = 0) override;
-	void DetachFramebuffer(TexCacheEntry *entry, u32 address, VirtualFramebuffer *framebuffer) override;
 	void SetTextureFramebuffer(TexCacheEntry *entry, VirtualFramebuffer *framebuffer);
 	void ApplyTextureFramebuffer(TexCacheEntry *entry, VirtualFramebuffer *framebuffer);
 
-	TexCache secondCache;
-	std::vector<u32> nameCache_;
-	u32 cacheSizeEstimate_;
-	u32 secondCacheSizeEstimate_;
+	bool CheckFullHash(TexCacheEntry *const entry, bool &doDelete);
+	bool HandleTextureChange(TexCacheEntry *const entry, const char *reason, bool initialMatch, bool doDelete);
+	void BuildTexture(TexCacheEntry *const entry, bool replaceImages);
 
-	// Separate to keep main texture cache size down.
-	struct AttachedFramebufferInfo {
-		u32 xOffset;
-		u32 yOffset;
-	};
-	std::map<u32, AttachedFramebufferInfo> fbTexInfo_;
-	void AttachFramebufferValid(TexCacheEntry *entry, VirtualFramebuffer *framebuffer, const AttachedFramebufferInfo &fbInfo);
-	void AttachFramebufferInvalid(TexCacheEntry *entry, VirtualFramebuffer *framebuffer, const AttachedFramebufferInfo &fbInfo);
+	std::vector<u32> nameCache_;
+	TexCache secondCache;
+	u32 secondCacheSizeEstimate_;
 
 	bool clearCacheNextFrame_;
 	bool lowMemoryMode_;
 
 	TextureScalerGL scaler;
 
-	u32 *clutBuf_;
 	u32 clutHash_;
-	// True if the clut is just alpha values in the same order (RGBA4444-bit only.)
-	bool clutAlphaLinear_;
-	u16 clutAlphaLinearColor_;
 
 	u32 lastBoundTexture;
 	float maxAnisotropyLevel;
@@ -143,7 +129,12 @@ private:
 	FramebufferManager *framebufferManager_;
 	DepalShaderCache *depalShaderCache_;
 	ShaderManager *shaderManager_;
-	TransformDrawEngine *transformDraw_;
+	DrawEngineGLES *transformDraw_;
+
+	const char *nextChangeReason_;
+	bool nextNeedsRehash_;
+	bool nextNeedsChange_;
+	bool nextNeedsRebuild_;
 };
 
 GLenum getClutDestFormat(GEPaletteFormat format);

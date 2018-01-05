@@ -426,9 +426,13 @@ int main(int argc, char *argv[]) {
 
 	net::Init();
 
+	bool joystick_enabled = true;
 	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK | SDL_INIT_AUDIO) < 0) {
-		fprintf(stderr, "Unable to initialize SDL: %s\n", SDL_GetError());
-		return 1;
+		joystick_enabled = false;
+		if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) {
+			fprintf(stderr, "Unable to initialize SDL: %s\n", SDL_GetError());
+			return 1;
+		}
 	}
 
 #ifdef __APPLE__
@@ -583,10 +587,17 @@ int main(int argc, char *argv[]) {
 
 
 #ifndef USING_GLES2
+	// Some core profile drivers elide certain extensions from GL_EXTENSIONS/etc.
+	// glewExperimental allows us to force GLEW to search for the pointers anyway.
+	if (gl_extensions.IsCoreContext)
+		glewExperimental = true;
 	if (GLEW_OK != glewInit()) {
 		printf("Failed to initialize glew!\n");
 		return 1;
 	}
+	// Unfortunately, glew will generate an invalid enum error, ignore.
+	if (gl_extensions.IsCoreContext)
+		glGetError();
 
 	if (GLEW_VERSION_2_0) {
 		printf("OpenGL 2.0 or higher.\n");
@@ -659,7 +670,11 @@ int main(int argc, char *argv[]) {
 	// Audio must be unpaused _after_ NativeInit()
 	SDL_PauseAudio(0);
 #ifndef _WIN32
-	joystick = new SDLJoystick();
+	if (joystick_enabled) {
+		joystick = new SDLJoystick();
+	} else {
+		joystick = nullptr;
+	}
 #endif
 	EnableFZ();
 
@@ -848,7 +863,9 @@ int main(int argc, char *argv[]) {
 				break;
 			default:
 #ifndef _WIN32
-				joystick->ProcessInput(event);
+				if (joystick) {
+					joystick->ProcessInput(event);
+				}
 #endif
 				break;
 			}
@@ -859,7 +876,7 @@ int main(int argc, char *argv[]) {
 		SimulateGamepad(keys, &input_state);
 		input_state.pad_buttons = pad_buttons;
 		UpdateInputState(&input_state, true);
-		UpdateRunLoop();
+		UpdateRunLoop(&input_state);
 		if (g_QuitRequested)
 			break;
 #if defined(PPSSPP) && !defined(MOBILE_DEVICE)

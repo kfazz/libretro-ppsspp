@@ -34,7 +34,7 @@
 namespace Gen
 {
 
-enum X64Reg
+enum X64Reg : u32
 {
 	EAX = 0, EBX = 3, ECX = 1, EDX = 2,
 	ESI = 6, EDI = 7, EBP = 5, ESP = 4,
@@ -374,12 +374,13 @@ public:
 	void WriteModRM(int mod, int rm, int reg);
 	void WriteSIB(int scale, int index, int base);
 
-	void SetCodePtr(u8 *ptr);
+	void SetCodePointer(u8 *ptr);
+	const u8 *GetCodePointer() const;
+
 	void ReserveCodeSpace(int bytes);
 	const u8 *AlignCode4();
 	const u8 *AlignCode16();
 	const u8 *AlignCodePage();
-	const u8 *GetCodePtr() const;
 	u8 *GetWritableCodePtr();
 
 	void LockFlags() { flags_locked = true; }

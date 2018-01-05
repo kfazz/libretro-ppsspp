@@ -21,10 +21,11 @@
 #include "Core/CoreParameter.h"
 
 class GraphicsContext;
+struct InputState;
 
 // called from emu thread
-void UpdateRunLoop();
-void Core_Run(GraphicsContext *ctx);
+void UpdateRunLoop(InputState *input_state);
+void Core_Run(GraphicsContext *ctx, InputState *input_state);
 void Core_Stop();
 void Core_ErrorPause();
 // For platforms that don't call Core_Run
@@ -51,3 +52,6 @@ bool UpdateScreenScale(int width, int height, bool smallWindow);
 // Don't run the core when minimized etc.
 void Core_NotifyWindowHidden(bool hidden);
 void Core_NotifyActivity();
+
+void Core_SetPowerSaving(bool mode);
+bool Core_GetPowerSaving();

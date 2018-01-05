@@ -32,6 +32,9 @@
 
 #include "Common/KeyMap.h"
 
+#ifndef MOBILE_DEVICE
+#include "Core/AVIDump.h"
+#endif
 #include "Core/Config.h"
 #include "Core/CoreTiming.h"
 #include "Core/CoreParameter.h"
@@ -52,6 +55,7 @@
 #include "Core/HLE/__sceAudio.h"
 
 #include "UI/ui_atlas.h"
+#include "UI/BackgroundAudio.h"
 #include "UI/OnScreenDisplay.h"
 #include "UI/GamepadEmu.h"
 #include "UI/PauseScreen.h"
@@ -66,9 +70,54 @@
 #include "UI/InstallZipScreen.h"
 #include "UI/ProfilerDraw.h"
 
+#ifdef _WIN32
+#include "Windows/MainWindow.h"
+#endif
+
+#ifndef MOBILE_DEVICE
+AVIDump avi;
+#endif
+
+static bool frameStep_;
+static int lastNumFlips;
+static bool startDumping;
+
+static void __EmuScreenVblank()
+{
+	if (frameStep_ && lastNumFlips != gpuStats.numFlips)
+	{
+		frameStep_ = false;
+		Core_EnableStepping(true);
+		lastNumFlips = gpuStats.numFlips;
+	}
+#ifndef MOBILE_DEVICE
+	if (g_Config.bDumpFrames && !startDumping)
+	{
+		avi.Start(PSP_CoreParameter().renderWidth, PSP_CoreParameter().renderHeight);
+		osm.Show("AVI Dump started.", 3.0f);
+		startDumping = true;
+	}
+	if (g_Config.bDumpFrames && startDumping)
+	{
+		avi.AddFrame();
+	}
+	else if (!g_Config.bDumpFrames && startDumping)
+	{
+		avi.Stop();
+		osm.Show("AVI Dump stopped.", 3.0f);
+		startDumping = false;
+	}
+#endif
+}
+
 EmuScreen::EmuScreen(const std::string &filename)
 	: bootPending_(true), gamePath_(filename), invalid_(true), quit_(false), pauseTrigger_(false), saveStatePreviewShownTime_(0.0), saveStatePreview_(nullptr) {
 	memset(axisState_, 0, sizeof(axisState_));
+	saveStateSlot_ = SaveState::GetCurrentSlot();
+	__DisplayListenVblank(__EmuScreenVblank);
+	frameStep_ = false;
+	lastNumFlips = gpuStats.numFlips;
+	startDumping = false;
 }
 
 void EmuScreen::bootGame(const std::string &filename) {
@@ -88,6 +137,8 @@ void EmuScreen::bootGame(const std::string &filename) {
 		return;
 	}
 
+	SetBackgroundAudioGame("");
+
 	//pre-emptive loading of game specific config if possible, to get all the settings
 	GameInfo *info = g_gameInfoCache->GetInfo(NULL, filename, 0);
 	if (info && !info->id.empty()) {
@@ -97,13 +148,38 @@ void EmuScreen::bootGame(const std::string &filename) {
 	invalid_ = true;
 
 	CoreParameter coreParam;
-	coreParam.cpuCore = g_Config.bJit ? CPU_JIT : CPU_INTERPRETER;
-	coreParam.gpuCore = g_Config.bSoftwareRendering ? GPU_SOFTWARE : GPU_GLES;
-	if (GetGPUBackend() == GPUBackend::DIRECT3D9) {
-		coreParam.gpuCore = GPU_DIRECTX9;
+	coreParam.cpuCore = (CPUCore)g_Config.iCpuCore;
+	coreParam.gpuCore = GPUCORE_GLES;
+	switch (GetGPUBackend()) {
+	case GPUBackend::OPENGL:
+		coreParam.gpuCore = GPUCORE_GLES;
+		break;
+	case GPUBackend::DIRECT3D9:
+		coreParam.gpuCore = GPUCORE_DIRECTX9;
+		break;
+	case GPUBackend::DIRECT3D11:
+		coreParam.gpuCore = GPUCORE_DIRECTX11;
+		break;
+	case GPUBackend::VULKAN:
+		coreParam.gpuCore = GPUCORE_VULKAN;
+		if (g_Config.iRenderingMode != FB_NON_BUFFERED_MODE) {
+#ifdef _WIN32
+			if (IDYES == MessageBox(MainWindow::GetHWND(), L"The Vulkan backend is not yet compatible with buffered rendering. Switch to non-buffered (WARNING: This will cause glitches with the other backends unless you switch back)", L"Vulkan Experimental Support", MB_ICONINFORMATION | MB_YESNO)) {
+				g_Config.iRenderingMode = FB_NON_BUFFERED_MODE;
+			} else {
+				errorMessage_ = "Non-buffered rendering required for Vulkan";
+				return;
+			}
+#endif
+		}
+		break;
+	}
+	if (g_Config.bSoftwareRendering) {
+		coreParam.gpuCore = GPUCORE_SOFTWARE;
 	}
 	// Preserve the existing graphics context.
 	coreParam.graphicsContext = PSP_CoreParameter().graphicsContext;
+	coreParam.thin3d = screenManager()->getThin3DContext();
 	coreParam.enableSound = g_Config.bEnableSound;
 	coreParam.fileToStart = filename;
 	coreParam.mountIso = "";
@@ -144,7 +220,7 @@ void EmuScreen::bootComplete() {
 	NOTICE_LOG(BOOT, "Loading %s...", PSP_CoreParameter().fileToStart.c_str());
 	autoLoad();
 
-	I18NCategory *sc = GetI18NCategory("Screen"); 
+	I18NCategory *sc = GetI18NCategory("Screen");
 
 #ifndef MOBILE_DEVICE
 	if (g_Config.bFirstRun) {
@@ -166,7 +242,14 @@ void EmuScreen::bootComplete() {
 		}
 	}
 
+	if (Core_GetPowerSaving()) {
+		I18NCategory *sy = GetI18NCategory("System");
+		osm.Show(sy->T("WARNING: Battery save mode is on"), 2.0f, 0xFFFFFF, -1, true, "core_powerSaving");
+	}
+
 	System_SendMessage("event", "startgame");
+
+	saveStateSlot_ = SaveState::GetCurrentSlot();
 }
 
 EmuScreen::~EmuScreen() {
@@ -174,6 +257,14 @@ EmuScreen::~EmuScreen() {
 		// If we were invalid, it would already be shutdown.
 		PSP_Shutdown();
 	}
+#ifndef MOBILE_DEVICE
+	if (g_Config.bDumpFrames && startDumping)
+	{
+		avi.Stop();
+		osm.Show("AVI Dump stopped.", 3.0f);
+		startDumping = false;
+	}
+#endif
 }
 
 void EmuScreen::dialogFinished(const Screen *dialog, DialogResult result) {
@@ -188,7 +279,14 @@ void EmuScreen::dialogFinished(const Screen *dialog, DialogResult result) {
 	RecreateViews();
 }
 
-static void AfterStateLoad(bool success, void *ignored) {
+static void AfterSaveStateAction(bool success, const std::string &message, void *) {
+	if (!message.empty()) {
+		osm.Show(message, 2.0);
+	}
+}
+
+static void AfterStateBoot(bool success, const std::string &message, void *ignored) {
+	AfterSaveStateAction(success, message, ignored);
 	Core_EnableStepping(false);
 	host->UpdateDisassembly();
 }
@@ -222,7 +320,7 @@ void EmuScreen::sendMessage(const char *message, const char *value) {
 	} else if (!strcmp(message, "boot")) {
 		const char *ext = strrchr(value, '.');
 		if (ext != nullptr && !strcmp(ext, ".ppst")) {
-			SaveState::Load(value, &AfterStateLoad);
+			SaveState::Load(value, &AfterStateBoot);
 		} else {
 			PSP_Shutdown();
 			bootPending_ = true;
@@ -253,29 +351,13 @@ void EmuScreen::sendMessage(const char *message, const char *value) {
 	} else if (!strcmp(message, "clear jit")) {
 		currentMIPS->ClearJitCache();
 		if (PSP_IsInited()) {
-			currentMIPS->UpdateCore(g_Config.bJit ? CPU_JIT : CPU_INTERPRETER);
+			currentMIPS->UpdateCore((CPUCore)g_Config.iCpuCore);
 		}
 	} else if (!strcmp(message, "window minimized")) {
 		if (!strcmp(value, "true")) {
 			gstate_c.skipDrawReason |= SKIPDRAW_WINDOW_MINIMIZED;
 		} else {
 			gstate_c.skipDrawReason &= ~SKIPDRAW_WINDOW_MINIMIZED;
-		}
-	} else if (!strcmp(message, "slotchanged")) {
-		if (saveStatePreview_) {
-			int curSlot = SaveState::GetCurrentSlot();
-			std::string fn;
-			if (SaveState::HasSaveInSlot(gamePath_, curSlot)) {
-				fn = SaveState::GenerateSaveSlotFilename(gamePath_, curSlot, SaveState::SCREENSHOT_EXTENSION);
-			}
-
-			saveStatePreview_->SetFilename(fn);
-			if (!fn.empty()) {
-				saveStatePreview_->SetVisibility(UI::V_VISIBLE);
-				saveStatePreviewShownTime_ = time_now_d();
-			} else {
-				saveStatePreview_->SetVisibility(UI::V_GONE);
-			}
 		}
 	}
 }
@@ -313,7 +395,7 @@ bool EmuScreen::touch(const TouchInput &touch) {
 }
 
 void EmuScreen::onVKeyDown(int virtualKeyCode) {
-	I18NCategory *sc = GetI18NCategory("Screen"); 
+	I18NCategory *sc = GetI18NCategory("Screen");
 
 	switch (virtualKeyCode) {
 	case VIRTKEY_UNTHROTTLE:
@@ -333,6 +415,19 @@ void EmuScreen::onVKeyDown(int virtualKeyCode) {
 
 	case VIRTKEY_PAUSE:
 		pauseTrigger_ = true;
+		break;
+
+	case VIRTKEY_FRAME_ADVANCE:
+		// If game is running, pause emulation immediately. Otherwise, advance a single frame.
+		if (Core_IsStepping())
+		{
+			frameStep_ = true;
+			Core_EnableStepping(false);
+		}
+		else if (!frameStep_)
+		{
+			Core_EnableStepping(true);
+		}
 		break;
 
 	case VIRTKEY_AXIS_SWAP:
@@ -371,19 +466,20 @@ void EmuScreen::onVKeyDown(int virtualKeyCode) {
 
 	case VIRTKEY_REWIND:
 		if (SaveState::CanRewind()) {
-			SaveState::Rewind();
+			SaveState::Rewind(&AfterSaveStateAction);
 		} else {
 			osm.Show(sc->T("norewind", "No rewind save states available"), 2.0);
 		}
 		break;
 	case VIRTKEY_SAVE_STATE:
-		SaveState::SaveSlot(gamePath_, g_Config.iCurrentStateSlot, SaveState::Callback());
+		SaveState::SaveSlot(gamePath_, g_Config.iCurrentStateSlot, &AfterSaveStateAction);
 		break;
 	case VIRTKEY_LOAD_STATE:
-		SaveState::LoadSlot(gamePath_, g_Config.iCurrentStateSlot, SaveState::Callback());
+		SaveState::LoadSlot(gamePath_, g_Config.iCurrentStateSlot, &AfterSaveStateAction);
 		break;
 	case VIRTKEY_NEXT_SLOT:
 		SaveState::NextSlot();
+		NativeMessageReceived("savestate_displayslot", "");
 		break;
 	case VIRTKEY_TOGGLE_FULLSCREEN:
 		System_SendMessage("toggle_fullscreen", "");
@@ -688,7 +784,7 @@ void EmuScreen::update(InputState &input) {
 
 	UIScreen::update(input);
 
-	// Simply forcibily update to the current screen size every frame. Doesn't cost much.
+	// Simply forcibly update to the current screen size every frame. Doesn't cost much.
 	// If bounds is set to be smaller than the actual pixel resolution of the display, respect that.
 	// TODO: Should be able to use g_dpi_scale here instead. Might want to store the dpi scale in the UI context too.
 	const Bounds &bounds = screenManager()->getUIContext()->GetBounds();
@@ -749,7 +845,7 @@ void EmuScreen::update(InputState &input) {
 		}
 
 		float delta_y =  tiltInputCurve(normalized_input_y * 2.0 * (g_Config.iTiltSensitivityY)) ;
-		
+
 		if (g_Config.bInvertTiltY) {
 			delta_y *= -1;
 		}
@@ -758,7 +854,7 @@ void EmuScreen::update(InputState &input) {
 		leftstick_x += clamp1(delta_x);
 		__CtrlSetAnalogX(clamp1(leftstick_x), CTRL_STICK_LEFT);
 
-		
+
 		leftstick_y += clamp1(delta_y);
 		__CtrlSetAnalogY(clamp1(leftstick_y), CTRL_STICK_LEFT);
 	}
@@ -777,8 +873,34 @@ void EmuScreen::update(InputState &input) {
 		screenManager()->push(new GamePauseScreen(gamePath_));
 	}
 
-	if (time_now_d() - saveStatePreviewShownTime_ > 2 && saveStatePreview_->GetVisibility() == UI::V_VISIBLE) {
-		saveStatePreview_->SetVisibility(UI::V_GONE);
+	if (saveStatePreview_ && !bootPending_) {
+		int currentSlot = SaveState::GetCurrentSlot();
+		if (saveStateSlot_ != currentSlot) {
+			saveStateSlot_ = currentSlot;
+
+			std::string fn;
+			if (SaveState::HasSaveInSlot(gamePath_, currentSlot)) {
+				fn = SaveState::GenerateSaveSlotFilename(gamePath_, currentSlot, SaveState::SCREENSHOT_EXTENSION);
+			}
+
+			saveStatePreview_->SetFilename(fn);
+			if (!fn.empty()) {
+				saveStatePreview_->SetVisibility(UI::V_VISIBLE);
+				saveStatePreviewShownTime_ = time_now_d();
+			} else {
+				saveStatePreview_->SetVisibility(UI::V_GONE);
+			}
+		}
+
+		if (saveStatePreview_->GetVisibility() == UI::V_VISIBLE) {
+			double endTime = saveStatePreviewShownTime_ + 2.0;
+			float alpha = clamp_value((endTime - time_now_d()) * 4.0, 0.0, 1.0);
+			saveStatePreview_->SetColor(colorAlpha(0x00FFFFFF, alpha));
+
+			if (time_now_d() - saveStatePreviewShownTime_ > 2) {
+				saveStatePreview_->SetVisibility(UI::V_GONE);
+			}
+		}
 	}
 }
 
@@ -795,7 +917,7 @@ void EmuScreen::checkPowerDown() {
 }
 
 static void DrawDebugStats(DrawBuffer *draw2d) {
-	char statbuf[4096] = { 0 };
+	char statbuf[4096];
 	__DisplayGetDebugStats(statbuf, sizeof(statbuf));
 	draw2d->SetFontScale(.7f, .7f);
 	draw2d->DrawText(UBUNTU24, statbuf, 11, 31, 0xc0000000, FLAG_DYNAMIC_ASCII);
@@ -894,6 +1016,7 @@ void EmuScreen::render() {
 	while (coreState == CORE_RUNNING) {
 		PSP_RunLoopFor(blockTicks);
 	}
+
 	// Hopefully coreState is now CORE_NEXTFRAME
 	if (coreState == CORE_NEXTFRAME) {
 		// set back to running for the next frame
@@ -953,6 +1076,7 @@ void EmuScreen::render() {
 	}
 
 	// We have no use for backbuffer depth or stencil, so let tiled renderers discard them after tiling.
+	/*
 	if (gl_extensions.GLES3 && glInvalidateFramebuffer != nullptr) {
 		GLenum attachments[2] = { GL_DEPTH, GL_STENCIL };
 		glInvalidateFramebuffer(GL_FRAMEBUFFER, 2, attachments);
@@ -966,12 +1090,19 @@ void EmuScreen::render() {
 		}
 #endif
 	}
+	*/
 }
 
 void EmuScreen::deviceLost() {
 	ILOG("EmuScreen::deviceLost()");
 	if (gpu)
 		gpu->DeviceLost();
+}
+
+void EmuScreen::deviceRestore() {
+	ILOG("EmuScreen::deviceRestore()");
+	if (gpu)
+		gpu->DeviceRestore();
 
 	RecreateViews();
 }
@@ -980,7 +1111,7 @@ void EmuScreen::autoLoad() {
 	//check if save state has save, if so, load
 	int lastSlot = SaveState::GetNewestSlot(gamePath_);
 	if (g_Config.bEnableAutoLoad && lastSlot != -1) {
-		SaveState::LoadSlot(gamePath_, lastSlot, SaveState::Callback(), 0);
+		SaveState::LoadSlot(gamePath_, lastSlot, &AfterSaveStateAction);
 		g_Config.iCurrentStateSlot = lastSlot;
 	}
 }

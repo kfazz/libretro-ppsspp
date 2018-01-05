@@ -73,16 +73,12 @@ u32 JitBreakpoint()
 	if (CBreakPoints::CheckSkipFirst() == currentMIPS->pc)
 		return 0;
 
-	auto cond = CBreakPoints::GetBreakPointCondition(currentMIPS->pc);
-	if (cond && !cond->Evaluate())
+	BreakAction result = CBreakPoints::ExecBreakPoint(currentMIPS->pc);
+	if ((result & BREAK_ACTION_PAUSE) == 0)
 		return 0;
 
-	Core_EnableStepping(true);
-	host->SetDebugMode(true);
-
 	// There's probably a better place for this.
-	if (USE_JIT_MISSMAP)
-	{
+	if (USE_JIT_MISSMAP) {
 		std::map<u32, std::string> notJitSorted;
 		std::transform(notJitOps.begin(), notJitOps.end(), std::inserter(notJitSorted, notJitSorted.begin()), flip_pair<std::string, u32>);
 
@@ -261,7 +257,7 @@ void Jit::CompileDelaySlot(int flags, RegCacheState *state)
 
 	js.inDelaySlot = true;
 	MIPSOpcode op = GetOffsetInstruction(1);
-	MIPSCompileOp(op);
+	MIPSCompileOp(op, this);
 	js.inDelaySlot = false;
 
 	if (flags & DELAYSLOT_FLUSH)
@@ -294,15 +290,18 @@ void Jit::EatInstruction(MIPSOpcode op)
 void Jit::Compile(u32 em_address)
 {
 	PROFILE_THIS_SCOPE("jitc");
-	if (GetSpaceLeft() < 0x10000 || blocks.IsFull())
-	{
+	if (GetSpaceLeft() < 0x10000 || blocks.IsFull()) {
 		ClearCache();
 	}
+
+	BeginWrite();
 
 	int block_num = blocks.AllocateBlock(em_address);
 	JitBlock *b = blocks.GetBlock(block_num);
 	DoJit(em_address, b);
 	blocks.FinalizeBlock(block_num, jo.enableBlocklink);
+
+	EndWrite();
 
 	bool cleanSlate = false;
 
@@ -359,7 +358,7 @@ const u8 *Jit::DoJit(u32 em_address, JitBlock *b)
 	js.PrefixStart();
 
 	// We add a check before the block, used when entering from a linked block.
-	b->checkedEntry = GetCodePtr();
+	b->checkedEntry = (u8 *)GetCodePtr();
 	// Downcount flag check. The last block decremented downcounter, and the flag should still be available.
 	FixupBranch skip = J_CC(CC_NS);
 	MOV(32, M(&mips_->pc), Imm32(js.blockStart));
@@ -381,7 +380,7 @@ const u8 *Jit::DoJit(u32 em_address, JitBlock *b)
 		MIPSOpcode inst = Memory::Read_Opcode_JIT(GetCompilerPC());
 		js.downcountAmount += MIPSGetInstructionCycleEstimate(inst);
 
-		MIPSCompileOp(inst);
+		MIPSCompileOp(inst, this);
 
 		if (js.afterOp & JitState::AFTER_CORE_STATE) {
 			// TODO: Save/restore?
@@ -495,10 +494,45 @@ bool Jit::DescribeCodePtr(const u8 *ptr, std::string &name) {
 	return true;
 }
 
-void Jit::Comp_RunBlock(MIPSOpcode op)
-{
+void Jit::Comp_RunBlock(MIPSOpcode op) {
 	// This shouldn't be necessary, the dispatcher should catch us before we get here.
 	ERROR_LOG(JIT, "Comp_RunBlock");
+}
+
+void Jit::LinkBlock(u8 *exitPoint, const u8 *checkedEntry) {
+	if (PlatformIsWXExclusive()) {
+		ProtectMemoryPages(exitPoint, 32, MEM_PROT_READ | MEM_PROT_WRITE);
+	}
+	XEmitter emit(exitPoint);
+	// Okay, this is a bit ugly, but we check here if it already has a JMP.
+	// That means it doesn't have a full exit to pad with INT 3.
+	bool prelinked = *emit.GetCodePointer() == 0xE9;
+	emit.JMP(checkedEntry, true);
+	if (!prelinked) {
+		ptrdiff_t actualSize = emit.GetWritableCodePtr() - exitPoint;
+		int pad = JitBlockCache::GetBlockExitSize() - (int)actualSize;
+		for (int i = 0; i < pad; ++i) {
+			emit.INT3();
+		}
+	}
+	if (PlatformIsWXExclusive()) {
+		ProtectMemoryPages(exitPoint, 32, MEM_PROT_READ | MEM_PROT_EXEC);
+	}
+}
+
+void Jit::UnlinkBlock(u8 *checkedEntry, u32 originalAddress) {
+	if (PlatformIsWXExclusive()) {
+		ProtectMemoryPages(checkedEntry, 16, MEM_PROT_READ | MEM_PROT_WRITE);
+	}
+	// Send anyone who tries to run this block back to the dispatcher.
+	// Not entirely ideal, but .. pretty good.
+	// Spurious entrances from previously linked blocks can only come through checkedEntry
+	XEmitter emit(checkedEntry);
+	emit.MOV(32, M(&mips_->pc), Imm32(originalAddress));
+	emit.JMP(MIPSComp::jit->GetDispatcher(), true);
+	if (PlatformIsWXExclusive()) {
+		ProtectMemoryPages(checkedEntry, 16, MEM_PROT_READ | MEM_PROT_EXEC);
+	}
 }
 
 bool Jit::ReplaceJalTo(u32 dest) {
@@ -572,14 +606,14 @@ void Jit::Comp_ReplacementFunc(MIPSOpcode op)
 	}
 
 	if (disabled) {
-		MIPSCompileOp(origInstruction);
+		MIPSCompileOp(origInstruction, this);
 	} else if (entry->jitReplaceFunc) {
 		MIPSReplaceFunc repl = entry->jitReplaceFunc;
 		int cycles = (this->*repl)();
 
 		if (entry->flags & (REPFLAG_HOOKENTER | REPFLAG_HOOKEXIT)) {
 			// Compile the original instruction at this address.  We ignore cycles for hooks.
-			MIPSCompileOp(origInstruction);
+			MIPSCompileOp(origInstruction, this);
 		} else {
 			FlushAll();
 			MOV(32, R(ECX), M(&mips_->r[MIPS_REG_RA]));
@@ -599,7 +633,7 @@ void Jit::Comp_ReplacementFunc(MIPSOpcode op)
 		if (entry->flags & (REPFLAG_HOOKENTER | REPFLAG_HOOKEXIT)) {
 			// Compile the original instruction at this address.  We ignore cycles for hooks.
 			ApplyRoundingMode();
-			MIPSCompileOp(Memory::Read_Instruction(GetCompilerPC(), true));
+			MIPSCompileOp(Memory::Read_Instruction(GetCompilerPC(), true), this);
 		} else {
 			MOV(32, R(ECX), M(&mips_->r[MIPS_REG_RA]));
 			SUB(32, M(&mips_->downcount), R(EAX));
@@ -814,5 +848,15 @@ void Jit::CallProtectedFunction(const void *func, const OpArg &arg1, const u32 a
 }
 
 void Jit::Comp_DoNothing(MIPSOpcode op) { }
+
+MIPSOpcode Jit::GetOriginalOp(MIPSOpcode op) {
+	JitBlockCache *bc = GetBlockCache();
+	int block_num = bc->GetBlockNumberFromEmuHackOp(op, true);
+	if (block_num >= 0) {
+		return bc->GetOriginalFirstOp(block_num);
+	} else {
+		return op;
+	}
+}
 
 } // namespace

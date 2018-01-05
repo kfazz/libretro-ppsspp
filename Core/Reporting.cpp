@@ -18,11 +18,14 @@
 #include "Core/Reporting.h"
 
 #include "Common/CPUDetect.h"
+#include "Core/Core.h"
 #include "Core/CoreTiming.h"
 #include "Core/Config.h"
 #include "Core/CwCheat.h"
+#include "Core/Loaders.h"
 #include "Core/SaveState.h"
 #include "Core/System.h"
+#include "Core/FileSystems/BlockDevices.h"
 #include "Core/FileSystems/MetaFileSystem.h"
 #include "Core/HLE/sceDisplay.h"
 #include "Core/HLE/sceKernelMemory.h"
@@ -37,6 +40,7 @@
 #include "base/stringutil.h"
 #include "base/buffer.h"
 #include "thread/thread.h"
+#include "thread/threadutil.h"
 #include "file/zip_read.h"
 
 #include <set>
@@ -47,7 +51,7 @@ namespace Reporting
 {
 	const int DEFAULT_PORT = 80;
 	const u32 SPAM_LIMIT = 100;
-	const int PAYLOAD_BUFFER_SIZE = 100;
+	const int PAYLOAD_BUFFER_SIZE = 200;
 
 	// Internal limiter on number of requests per instance.
 	static u32 spamProtectionCount = 0;
@@ -59,9 +63,12 @@ namespace Reporting
 	static bool everUnsupported = false;
 	// Support is cached here to avoid checking it on every single request.
 	static bool currentSupported = false;
+	// Whether the most recent server request seemed successful.
+	static bool serverWorking = true;
 
-	enum RequestType
+	enum class RequestType
 	{
+		NONE,
 		MESSAGE,
 		COMPAT,
 	};
@@ -78,8 +85,70 @@ namespace Reporting
 	static Payload payloadBuffer[PAYLOAD_BUFFER_SIZE];
 	static int payloadBufferPos = 0;
 
+	static recursive_mutex crcLock;
+	static condition_variable crcCond;
+	static std::string crcFilename;
+	static std::map<std::string, u32> crcResults;
+
+	static int CalculateCRCThread() {
+		setCurrentThreadName("ReportCRC");
+
+		// TODO: Use the blockDevice from pspFileSystem?
+		FileLoader *fileLoader = ConstructFileLoader(crcFilename);
+		BlockDevice *blockDevice = constructBlockDevice(fileLoader);
+
+		u32 crc = 0;
+		if (blockDevice) {
+			crc = blockDevice->CalculateCRC();
+		}
+
+		delete blockDevice;
+		delete fileLoader;
+
+		lock_guard guard(crcLock);
+		crcResults[crcFilename] = crc;
+		crcCond.notify_one();
+
+		return 0;
+	}
+
+	void QueueCRC() {
+		lock_guard guard(crcLock);
+
+		const std::string &gamePath = PSP_CoreParameter().fileToStart;
+		auto it = crcResults.find(gamePath);
+		if (it != crcResults.end()) {
+			// Nothing to do, we've already calculated it.
+			// Note: we assume it stays static until the app is closed.
+			return;
+		}
+
+		if (crcFilename == gamePath) {
+			// Already in process.
+			return;
+		}
+
+		crcFilename = gamePath;
+		std::thread th(CalculateCRCThread);
+		th.detach();
+	}
+
+	u32 RetrieveCRC() {
+		const std::string &gamePath = PSP_CoreParameter().fileToStart;
+		QueueCRC();
+
+		lock_guard guard(crcLock);
+		auto it = crcResults.find(gamePath);
+		while (it == crcResults.end()) {
+			crcCond.wait(crcLock);
+			it = crcResults.find(gamePath);
+		}
+
+		return it->second;
+	}
+
 	// Returns the full host (e.g. report.ppsspp.org:80.)
-	inline std::string ServerHost()
+	std::string ServerHost()
 	{
 		if (g_Config.sReportHost.compare("default") == 0)
 			return "";
@@ -155,15 +224,19 @@ namespace Reporting
 		if (output == NULL)
 			output = &theVoid;
 
-		if (http.Resolve(ServerHostname(), ServerPort()))
-		{
-			http.Connect();
-			http.POST(uri, data, mimeType, output);
-			http.Disconnect();
-			result = true;
-		}
+		const char *serverHost = ServerHostname();
+		if (!serverHost)
+			return false;
 
-		return result;
+		if (http.Resolve(serverHost, ServerPort())) {
+			http.Connect();
+			int result = http.POST(uri, data, mimeType, output);
+			http.Disconnect();
+
+			return result >= 200 && result < 300;
+		} else {
+			return false;
+		}
 	}
 
 	std::string StripTrailingNull(const std::string &str)
@@ -253,10 +326,17 @@ namespace Reporting
 		return logOnceUsed.insert(identifier).second;
 	}
 
-	void AddGameInfo(UrlEncoder &postdata)
+	std::string CurrentGameID()
 	{
 		// TODO: Maybe ParamSFOData shouldn't include nulls in std::strings?  Don't work to break savedata, though...
-		postdata.Add("game", StripTrailingNull(g_paramSFO.GetValueString("DISC_ID")) + "_" + StripTrailingNull(g_paramSFO.GetValueString("DISC_VERSION")));
+		const std::string disc_id = StripTrailingNull(g_paramSFO.GetValueString("DISC_ID"));
+		const std::string disc_version = StripTrailingNull(g_paramSFO.GetValueString("DISC_VERSION"));
+		return disc_id + "_" + disc_version;
+	}
+
+	void AddGameInfo(UrlEncoder &postdata)
+	{
+		postdata.Add("game", CurrentGameID());
 		postdata.Add("game_title", StripTrailingNull(g_paramSFO.GetValueString("TITLE")));
 		postdata.Add("sdkver", sceKernelGetCompiledSdkVersion());
 	}
@@ -298,11 +378,27 @@ namespace Reporting
 		postdata.Add("savestate_used", SaveState::HasLoadedState());
 	}
 
+	void AddScreenshotData(MultipartFormDataEncoder &postdata, std::string filename)
+	{
+		std::string data;
+		if (!filename.empty() && readFileToString(false, filename.c_str(), data))
+			postdata.Add("screenshot", data, "screenshot.jpg", "image/jpeg");
+
+		const std::string iconFilename = "disc0:/PSP_GAME/ICON0.PNG";
+		std::vector<u8> iconData;
+		if (pspFileSystem.ReadEntireFile(iconFilename, iconData) >= 0) {
+			postdata.Add("icon", iconData, "icon.png", "image/png");
+		}
+	}
+
 	int Process(int pos)
 	{
-		Payload &payload = payloadBuffer[pos];
+		setCurrentThreadName("Report");
 
-		UrlEncoder postdata;
+		Payload &payload = payloadBuffer[pos];
+		Buffer output;
+
+		MultipartFormDataEncoder postdata;
 		AddSystemInfo(postdata);
 		AddGameInfo(postdata);
 		AddConfigInfo(postdata);
@@ -310,27 +406,52 @@ namespace Reporting
 
 		switch (payload.type)
 		{
-		case MESSAGE:
+		case RequestType::MESSAGE:
+			// TODO: Add CRC?
 			postdata.Add("message", payload.string1);
 			postdata.Add("value", payload.string2);
+			// We tend to get corrupted data, this acts as a very primitive verification check.
+			postdata.Add("verify", payload.string1 + payload.string2);
 			payload.string1.clear();
 			payload.string2.clear();
 
 			postdata.Finish();
-			SendReportRequest("/report/message", postdata.ToString(), postdata.GetMimeType());
+			serverWorking = true;
+			if (!SendReportRequest("/report/message", postdata.ToString(), postdata.GetMimeType()))
+				serverWorking = false;
 			break;
 
-		case COMPAT:
+		case RequestType::COMPAT:
 			postdata.Add("compat", payload.string1);
+			// We tend to get corrupted data, this acts as a very primitive verification check.
+			postdata.Add("verify", payload.string1);
 			postdata.Add("graphics", StringFromFormat("%d", payload.int1));
 			postdata.Add("speed", StringFromFormat("%d", payload.int2));
 			postdata.Add("gameplay", StringFromFormat("%d", payload.int3));
+			postdata.Add("crc", StringFromFormat("%08x", Core_GetPowerSaving() ? 0 : RetrieveCRC()));
+			AddScreenshotData(postdata, payload.string2);
 			payload.string1.clear();
+			payload.string2.clear();
 
 			postdata.Finish();
-			SendReportRequest("/report/compat", postdata.ToString(), postdata.GetMimeType());
+			serverWorking = true;
+			if (!SendReportRequest("/report/compat", postdata.ToString(), postdata.GetMimeType(), &output)) {
+				serverWorking = false;
+			} else {
+				char res = 0;
+				if (!output.empty()) {
+					output.Take(1, &res);
+				}
+				if (res == 0)
+					serverWorking = false;
+			}
+			break;
+
+		case RequestType::NONE:
 			break;
 		}
+
+		payload.type = RequestType::NONE;
 
 		return 0;
 	}
@@ -375,14 +496,16 @@ namespace Reporting
 		return true;
 	}
 
-	void Enable(bool flag, std::string host)
+	bool Enable(bool flag, std::string host)
 	{
 		if (IsSupported() && IsEnabled() != flag)
 		{
 			// "" means explicitly disabled.  Don't ever turn on by default.
 			// "default" means it's okay to turn it on by default.
 			g_Config.sReportHost = flag ? host : "";
+			return true;
 		}
+		return false;
 	}
 
 	void EnableDefault()
@@ -390,9 +513,40 @@ namespace Reporting
 		g_Config.sReportHost = "default";
 	}
 
+	Status GetStatus()
+	{
+		if (!serverWorking)
+			return Status::FAILING;
+
+		for (int pos = 0; pos < PAYLOAD_BUFFER_SIZE; ++pos)
+		{
+			if (payloadBuffer[pos].type != RequestType::NONE)
+				return Status::BUSY;
+		}
+
+		return Status::WORKING;
+	}
+
+	int NextFreePos()
+	{
+		int start = payloadBufferPos % PAYLOAD_BUFFER_SIZE;
+		do
+		{
+			int pos = payloadBufferPos++ % PAYLOAD_BUFFER_SIZE;
+			if (payloadBuffer[pos].type == RequestType::NONE)
+				return pos;
+		}
+		while (payloadBufferPos != start);
+
+		return -1;
+	}
+
 	void ReportMessage(const char *message, ...)
 	{
 		if (!IsEnabled() || CheckSpamLimited())
+			return;
+		int pos = NextFreePos();
+		if (pos == -1)
 			return;
 
 		const int MESSAGE_BUFFER_SIZE = 65536;
@@ -404,9 +558,8 @@ namespace Reporting
 		temp[MESSAGE_BUFFER_SIZE - 1] = '\0';
 		va_end(args);
 
-		int pos = payloadBufferPos++ % PAYLOAD_BUFFER_SIZE;
 		Payload &payload = payloadBuffer[pos];
-		payload.type = MESSAGE;
+		payload.type = RequestType::MESSAGE;
 		payload.string1 = message;
 		payload.string2 = temp;
 
@@ -418,10 +571,12 @@ namespace Reporting
 	{
 		if (!IsEnabled() || CheckSpamLimited())
 			return;
+		int pos = NextFreePos();
+		if (pos == -1)
+			return;
 
-		int pos = payloadBufferPos++ % PAYLOAD_BUFFER_SIZE;
 		Payload &payload = payloadBuffer[pos];
-		payload.type = MESSAGE;
+		payload.type = RequestType::MESSAGE;
 		payload.string1 = message;
 		payload.string2 = formatted;
 
@@ -429,15 +584,18 @@ namespace Reporting
 		th.detach();
 	}
 
-	void ReportCompatibility(const char *compat, int graphics, int speed, int gameplay)
+	void ReportCompatibility(const char *compat, int graphics, int speed, int gameplay, const std::string &screenshotFilename)
 	{
 		if (!IsEnabled())
 			return;
+		int pos = NextFreePos();
+		if (pos == -1)
+			return;
 
-		int pos = payloadBufferPos++ % PAYLOAD_BUFFER_SIZE;
 		Payload &payload = payloadBuffer[pos];
-		payload.type = COMPAT;
+		payload.type = RequestType::COMPAT;
 		payload.string1 = compat;
+		payload.string2 = screenshotFilename;
 		payload.int1 = graphics;
 		payload.int2 = speed;
 		payload.int3 = gameplay;
@@ -445,5 +603,4 @@ namespace Reporting
 		std::thread th(Process, pos);
 		th.detach();
 	}
-
 }

@@ -48,12 +48,8 @@
 #include "unittest/TestVertexJit.h"
 #include "unittest/UnitTest.h"
 
-InputState input_state;
-
 std::string System_GetProperty(SystemProperty prop) { return ""; }
 int System_GetPropertyInt(SystemProperty prop) { return -1; }
-void NativeMessageReceived(const char *message, const char *value) {}
-void GL_SwapInterval(int) {}
 
 #ifndef M_PI_2
 #define M_PI_2     1.57079632679489661923
@@ -206,7 +202,7 @@ void fcs2(float theta, float &outsine, float &outcosine) {
 
 	float x = 2 * gamma - gamma * fabs(gamma);
 	float y = 2 * theta - theta * fabs(theta);
-	const float P = 0.225;
+	const float P = 0.225f;
 	outsine = P * (y * fabsf(y) - y) + y;   // Q * y + P * y * abs(y)
 	outcosine = P * (x * fabsf(x) - x) + x;   // Q * y + P * y * abs(y)
 }

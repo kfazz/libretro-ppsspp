@@ -30,7 +30,7 @@
 #ifdef _WIN32
 #include "GPU/Directx9/GPU_DX9.h"
 #endif
-#include "GPU/GLES/GLES_GPU.h"
+#include "GPU/GLES/GPU_GLES.h"
 #include "GPU/GPUInterface.h"
 #include "GPU/GPUState.h"
 
@@ -125,7 +125,7 @@ static bool WriteScreenshotToPNG(png_imagep image, const char *filename, int con
 }
 #endif
 
-static const u8 *ConvertBufferTo888RGB(const GPUDebugBuffer &buf, u8 *&temp, u32 &w, u32 &h) {
+const u8 *ConvertBufferTo888RGB(const GPUDebugBuffer &buf, u8 *&temp, u32 &w, u32 &h) {
 	// The temp buffer will be freed by the caller if set, and can be the return value.
 	temp = nullptr;
 
@@ -215,7 +215,7 @@ static const u8 *ConvertBufferTo888RGB(const GPUDebugBuffer &buf, u8 *&temp, u32
 	return buffer;
 }
 
-bool TakeGameScreenshot(const char *filename, ScreenshotFormat fmt, ScreenshotType type) {
+bool TakeGameScreenshot(const char *filename, ScreenshotFormat fmt, ScreenshotType type, int *width, int *height, int maxRes) {
 	GPUDebugBuffer buf;
 	bool success = false;
 	u32 w = (u32)-1;
@@ -224,18 +224,18 @@ bool TakeGameScreenshot(const char *filename, ScreenshotFormat fmt, ScreenshotTy
 #if 0
 	if (type == SCREENSHOT_RENDER) {
 		if (gpuDebug) {
-			success = gpuDebug->GetCurrentFramebuffer(buf);
+			success = gpuDebug->GetCurrentFramebuffer(buf, maxRes);
 		}
 
 		// Only crop to the top left when using a render screenshot.
-		w = PSP_CoreParameter().renderWidth;
-		h = PSP_CoreParameter().renderHeight;
+		w = maxRes > 0 ? 480 * maxRes : PSP_CoreParameter().renderWidth;
+		h = maxRes > 0 ? 272 * maxRes : PSP_CoreParameter().renderHeight;
 	} else {
 		if (GetGPUBackend() == GPUBackend::OPENGL) {
-			success = GLES_GPU::GetDisplayFramebuffer(buf);
+			success = GPU_GLES::GetDisplayFramebuffer(buf);
 #ifdef _WIN32
 		} else if (GetGPUBackend() == GPUBackend::DIRECT3D9) {
-			success = DX9::DIRECTX9_GPU::GetDisplayFramebuffer(buf);
+			success = DX9::GPU_DX9::GetDisplayFramebuffer(buf);
 #endif
 		}
 	}
@@ -262,6 +262,11 @@ bool TakeGameScreenshot(const char *filename, ScreenshotFormat fmt, ScreenshotTy
 		if (buffer == nullptr) {
 			success = false;
 		}
+
+		if (width)
+			*width = w;
+		if (height)
+			*height = h;
 
 		if (success && fmt == SCREENSHOT_PNG) {
 			png_image png;

@@ -47,7 +47,7 @@
 #include "Windows/Debugger/Debugger_Disasm.h"
 #include "Windows/Debugger/Debugger_MemoryDlg.h"
 #include "Windows/GEDebugger/GEDebugger.h"
-#include "Core/MIPS/JitCommon/NativeJit.h"
+#include "Core/MIPS/JitCommon/JitCommon.h"
 #include "Core/MIPS/JitCommon/JitBlockCache.h"
 
 #include "main.h"
@@ -829,11 +829,11 @@ namespace MainWindow
 				else
 				{
 					TCHAR filename[512];
-					DragQueryFile(hdrop,0,filename,512);
-					TCHAR *type = filename+_tcslen(filename)-3;
-					
-					NativeMessageReceived("boot", ConvertWStringToUTF8(filename).c_str());
-					Core_EnableStepping(false);
+					if (DragQueryFile(hdrop, 0, filename, 512) != 0) {
+						const std::string utf8_filename = ReplaceAll(ConvertWStringToUTF8(filename), "\\", "/");
+						NativeMessageReceived("boot", utf8_filename.c_str());
+						Core_EnableStepping(false);
+					}
 				}
 			}
 			break;

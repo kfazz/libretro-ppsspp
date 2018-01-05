@@ -89,6 +89,16 @@ struct CPUInfo {
 	bool bXBurst1;
 	bool bXBurst2;
 
+	// Quirks
+	struct {
+		// Samsung Galaxy S7 devices (Exynos 8890) have a big.LITTLE configuration where the cacheline size differs between big and LITTLE.
+		// GCC's cache clearing function would detect the cacheline size on one and keep it for later. When clearing
+		// with the wrong cacheline size on the other, that's an issue. In case we want to do something different in this
+		// situation in the future, let's keep this as a quirk, but our current code won't detect it reliably
+		// if it happens on new archs. We now use better clearing code on ARM64 that doesn't have this issue.
+		bool bExynos8890DifferingCachelineSizes;
+	} sQuirks;
+
 	// Call Detect()
 	explicit CPUInfo();
 

@@ -111,8 +111,11 @@ struct MIPSInfo {
 typedef void (CDECL *MIPSDisFunc)(MIPSOpcode opcode, char *out);
 typedef void (CDECL *MIPSInterpretFunc)(MIPSOpcode opcode);
 
+namespace MIPSComp {
+	class MIPSFrontendInterface;
+}
 
-void MIPSCompileOp(MIPSOpcode op);
+void MIPSCompileOp(MIPSOpcode op, MIPSComp::MIPSFrontendInterface *jit);
 void MIPSDisAsm(MIPSOpcode op, u32 pc, char *out, bool tabsToSpaces = false);
 MIPSInfo MIPSGetInfo(MIPSOpcode op);
 void MIPSInterpret(MIPSOpcode op); //only for those rare ones
@@ -124,3 +127,4 @@ const char *MIPSGetName(MIPSOpcode op);
 const char *MIPSDisasmAt(u32 compilerPC);
 
 void FillMIPSTables();
+

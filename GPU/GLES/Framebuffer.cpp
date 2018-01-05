@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2012- PPSSPP Project.
+// Copyright (c) 2012- PPSSPP Project.
 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -43,14 +43,10 @@
 #include "GPU/GLES/FBO.h"
 #include "GPU/GLES/Framebuffer.h"
 #include "GPU/GLES/TextureCache.h"
-#include "GPU/GLES/TransformPipeline.h"
+#include "GPU/GLES/DrawEngineGLES.h"
 #include "GPU/GLES/ShaderManager.h"
 
-#include "UI/OnScreenDisplay.h"
-
 // #define DEBUG_READ_PIXELS 1
-
-extern int g_iNumVideos;
 
 static const char tex_fs[] =
 #ifdef USING_GLES2
@@ -182,9 +178,9 @@ void FramebufferManager::CompileDraw2DProgram() {
 					}
 				}
 				if (!firstLine.empty()) {
-					osm.Show("Post-shader error: " + firstLine + "...", 10.0f, 0xFF3090FF);
+					host->NotifyUserMessage("Post-shader error: " + firstLine + "...", 10.0f, 0xFF3090FF);
 				} else {
-					osm.Show("Post-shader error, see log for details", 10.0f, 0xFF3090FF);
+					host->NotifyUserMessage("Post-shader error, see log for details", 10.0f, 0xFF3090FF);
 				}
 				usePostShader_ = false;
 			} else {
@@ -248,8 +244,8 @@ FramebufferManager::FramebufferManager() :
 	postShaderProgram_(nullptr),
 	stencilUploadProgram_(nullptr),
 	timeLoc_(-1),
-	deltaLoc_(-1),
 	pixelDeltaLoc_(-1),
+	deltaLoc_(-1),
 	textureCache_(nullptr),
 	shaderManager_(nullptr),
 	resized_(false),
@@ -561,7 +557,7 @@ void FramebufferManager::RebindFramebuffer() {
 		glstate.viewport.restore();
 }
 
-void FramebufferManager::ResizeFramebufFBO(VirtualFramebuffer *vfb, u16 w, u16 h, bool force) {
+void FramebufferManager::ResizeFramebufFBO(VirtualFramebuffer *vfb, u16 w, u16 h, bool force, bool skipCopy) {
 	VirtualFramebuffer old = *vfb;
 
 	if (force) {
@@ -621,7 +617,7 @@ void FramebufferManager::ResizeFramebufFBO(VirtualFramebuffer *vfb, u16 w, u16 h
 		if (vfb->fbo) {
 			fbo_bind_as_render_target(vfb->fbo);
 			ClearBuffer();
-			if (!g_Config.bDisableSlowFramebufEffects) {
+			if (!skipCopy && !g_Config.bDisableSlowFramebufEffects) {
 				BlitFramebuffer(vfb, 0, 0, &old, 0, 0, std::min(vfb->bufferWidth, vfb->width), std::min(vfb->height, vfb->bufferHeight), 0);
 			}
 		}
@@ -658,6 +654,8 @@ void FramebufferManager::NotifyRenderFramebufferCreated(VirtualFramebuffer *vfb)
 void FramebufferManager::NotifyRenderFramebufferSwitched(VirtualFramebuffer *prevVfb, VirtualFramebuffer *vfb, bool isClearingDepth) {
 	if (ShouldDownloadFramebuffer(vfb) && !vfb->memoryUpdated) {
 		ReadFramebufferToMemory(vfb, true, 0, 0, vfb->width, vfb->height);
+	} else {
+		DownloadFramebufferOnSwitch(prevVfb);
 	}
 	textureCache_->ForgetLastTexture();
 
@@ -884,7 +882,7 @@ void FramebufferManager::BindFramebufferColor(int stage, u32 fbRawAddress, Virtu
 	}
 
 	if (stage != GL_TEXTURE0) {
-		glActiveTexture(stage);
+		glActiveTexture(GL_TEXTURE0);
 	}
 }
 
@@ -915,9 +913,10 @@ struct CardboardSettings * FramebufferManager::GetCardboardSettings(struct Cardb
 }
 
 void FramebufferManager::CopyDisplayToOutput() {
-	fbo_unbind();
-	glstate.viewport.set(0, 0, pixelWidth_, pixelHeight_);
+	DownloadFramebufferOnSwitch(currentRenderVfb_);
 
+	glstate.viewport.set(0, 0, pixelWidth_, pixelHeight_);
+	fbo_unbind();
 	currentRenderVfb_ = 0;
 
 	if (displayFramebufPtr_ == 0) {
@@ -1783,14 +1782,10 @@ void FramebufferManager::PackDepthbuffer(VirtualFramebuffer *vfb, int x, int y, 
 	fbo_unbind_read();
 }
 
-#ifdef _WIN32
-void ShowScreenResolution();
-#endif
-
 void FramebufferManager::EndFrame() {
 	if (resized_) {
 		// TODO: Only do this if the new size actually changed the renderwidth/height.
-		DestroyAllFBOs();
+		DestroyAllFBOs(false);
 
 		// Probably not necessary
 		glstate.viewport.set(0, 0, PSP_CoreParameter().pixelWidth, PSP_CoreParameter().pixelHeight);
@@ -1860,7 +1855,7 @@ void FramebufferManager::EndFrame() {
 }
 
 void FramebufferManager::DeviceLost() {
-	DestroyAllFBOs();
+	DestroyAllFBOs(false);
 	DestroyDraw2DProgram();
 	resized_ = false;
 }
@@ -1931,7 +1926,7 @@ void FramebufferManager::DecimateFBOs() {
 	}
 }
 
-void FramebufferManager::DestroyAllFBOs() {
+void FramebufferManager::DestroyAllFBOs(bool forceDelete) {
 	fbo_unbind();
 	currentRenderVfb_ = 0;
 	displayFramebuf_ = 0;
@@ -1975,7 +1970,7 @@ void FramebufferManager::Resized() {
 	resized_ = true;
 }
 
-bool FramebufferManager::GetFramebuffer(u32 fb_address, int fb_stride, GEBufferFormat format, GPUDebugBuffer &buffer) {
+bool FramebufferManager::GetFramebuffer(u32 fb_address, int fb_stride, GEBufferFormat format, GPUDebugBuffer &buffer, int maxRes) {
 	VirtualFramebuffer *vfb = currentRenderVfb_;
 	if (!vfb) {
 		vfb = GetVFBAt(fb_address);
@@ -1987,14 +1982,37 @@ bool FramebufferManager::GetFramebuffer(u32 fb_address, int fb_stride, GEBufferF
 		return true;
 	}
 
-	buffer.Allocate(vfb->renderWidth, vfb->renderHeight, GE_FORMAT_8888, false, true);
-	if (vfb->fbo)
-		fbo_bind_for_read(vfb->fbo);
+	int w = vfb->renderWidth, h = vfb->renderHeight;
+	if (vfb->fbo) {
+		if (maxRes > 0 && vfb->renderWidth > vfb->width * maxRes) {
+			w = vfb->width * maxRes;
+			h = vfb->height * maxRes;
+
+			FBO *tempFBO = GetTempFBO(w, h);
+			VirtualFramebuffer tempVfb = *vfb;
+			tempVfb.fbo = tempFBO;
+			tempVfb.bufferWidth = vfb->width;
+			tempVfb.bufferHeight = vfb->height;
+			tempVfb.renderWidth = w;
+			tempVfb.renderHeight = h;
+			BlitFramebuffer(&tempVfb, 0, 0, vfb, 0, 0, vfb->width, vfb->height, 0);
+
+			fbo_bind_for_read(tempFBO);
+		} else {
+			fbo_bind_for_read(vfb->fbo);
+		}
+	}
+
+	buffer.Allocate(w, h, GE_FORMAT_8888, !useBufferedRendering_, true);
 	if (gl_extensions.GLES3 || !gl_extensions.IsGLES)
 		glReadBuffer(GL_COLOR_ATTACHMENT0);
 
 	glPixelStorei(GL_PACK_ALIGNMENT, 4);
-	SafeGLReadPixels(0, 0, vfb->renderWidth, vfb->renderHeight, GL_RGBA, GL_UNSIGNED_BYTE, buffer.GetData());
+	SafeGLReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, buffer.GetData());
+
+	// We may have clitted to a temp FBO.
+	fbo_unbind_read();
+	RebindFramebuffer();
 	return true;
 }
 
@@ -2024,9 +2042,9 @@ bool FramebufferManager::GetDepthbuffer(u32 fb_address, int fb_stride, u32 z_add
 	}
 
 	if (gstate_c.Supports(GPU_SCALE_DEPTH_FROM_24BIT_TO_16BIT)) {
-		buffer.Allocate(vfb->renderWidth, vfb->renderHeight, GPU_DBG_FORMAT_FLOAT_DIV_256, false);
+		buffer.Allocate(vfb->renderWidth, vfb->renderHeight, GPU_DBG_FORMAT_FLOAT_DIV_256, !useBufferedRendering_);
 	} else {
-		buffer.Allocate(vfb->renderWidth, vfb->renderHeight, GPU_DBG_FORMAT_FLOAT, false);
+		buffer.Allocate(vfb->renderWidth, vfb->renderHeight, GPU_DBG_FORMAT_FLOAT, !useBufferedRendering_);
 	}
 	if (vfb->fbo)
 		fbo_bind_for_read(vfb->fbo);
@@ -2052,7 +2070,7 @@ bool FramebufferManager::GetStencilbuffer(u32 fb_address, int fb_stride, GPUDebu
 	}
 
 #ifndef USING_GLES2
-	buffer.Allocate(vfb->renderWidth, vfb->renderHeight, GPU_DBG_FORMAT_8BIT, false);
+	buffer.Allocate(vfb->renderWidth, vfb->renderHeight, GPU_DBG_FORMAT_8BIT, !useBufferedRendering_);
 	if (vfb->fbo)
 		fbo_bind_for_read(vfb->fbo);
 	if (gl_extensions.GLES3 || !gl_extensions.IsGLES)

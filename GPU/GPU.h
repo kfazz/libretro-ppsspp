@@ -90,19 +90,15 @@ struct GPUStatistics {
 	int otherGPUCycles;
 	int gpuCommandsAtCallLevel[4];
 
-	// Total statistics, updated by the GPU core in UpdateStats
-	int numVBlanks;
+	// Flip count. Doesn't really belong here.
 	int numFlips;
-	int numTextures;
-	int numVertexShaders;
-	int numFragmentShaders;
-	int numShaders;
-	int numFBOs;
 };
 
 extern GPUStatistics gpuStats;
 extern GPUInterface *gpu;
 extern GPUDebugInterface *gpuDebug;
 
-bool GPU_Init(GraphicsContext *ctx);
+class Thin3DContext;
+
+bool GPU_Init(GraphicsContext *ctx, Thin3DContext *thin3d);
 void GPU_Shutdown();

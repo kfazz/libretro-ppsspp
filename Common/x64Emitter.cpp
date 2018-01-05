@@ -96,12 +96,12 @@ enum NormalSSEOps
 };
 
 
-void XEmitter::SetCodePtr(u8 *ptr)
+void XEmitter::SetCodePointer(u8 *ptr)
 {
 	code = ptr;
 }
 
-const u8 *XEmitter::GetCodePtr() const
+const u8 *XEmitter::GetCodePointer() const
 {
 	return code;
 }
@@ -135,9 +135,11 @@ const u8 *XEmitter::AlignCode16()
 
 const u8 *XEmitter::AlignCodePage()
 {
-	int c = int((u64)code & 4095);
+	// Memory protection pages matter.
+	int page_size = GetMemoryProtectPageSize();
+	int c = int((u64)code & (page_size - 1));
 	if (c)
-		ReserveCodeSpace(4096-c);
+		ReserveCodeSpace(page_size - c);
 	return code;
 }
 
@@ -235,7 +237,7 @@ void OpArg::WriteRest(XEmitter *emit, int extraBytes, X64Reg _operandReg,
 		emit->WriteModRM(0, _operandReg, _offsetOrBaseReg);
 		//TODO : add some checks
 #ifdef _M_X64
-		u64 ripAddr = (u64)emit->GetCodePtr() + 4 + extraBytes;
+		u64 ripAddr = (u64)emit->GetCodePointer() + 4 + extraBytes;
 		s64 distance = (s64)offset - (s64)ripAddr;
 		_assert_msg_(DYNA_REC,
 		             (distance < 0x80000000LL &&

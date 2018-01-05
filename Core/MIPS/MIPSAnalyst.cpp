@@ -25,6 +25,7 @@
 #include "Core/MemMap.h"
 #include "Core/System.h"
 #include "Core/MIPS/MIPS.h"
+#include "Core/MIPS/MIPSVFPUUtils.h"
 #include "Core/MIPS/MIPSTables.h"
 #include "Core/MIPS/MIPSAnalyst.h"
 #include "Core/MIPS/MIPSCodeUtils.h"
@@ -178,6 +179,7 @@ static const HardHashTableEntry hardcodedHashes[] = {
 	{ 0x3840f5766fada4b1, 592, "dissidia_recordframe_avi", }, // Dissidia (US), Dissidia 012 (US)
 	{ 0x388043e96b0e11fd, 144, "dl_write_material_2", },
 	{ 0x38f19bc3be215acc, 388, "log10f", },
+	{ 0x3913b81ddcbe1efe, 880, "katamari_render_check", }, // Me and My Katamari (US)
 	{ 0x393047f06eceaba1, 96, "strcspn", },
 	{ 0x39a651942a0b3861, 204, "tan", },
 	{ 0x3a3bc2b20a55bf02, 68, "memchr", },
@@ -323,6 +325,7 @@ static const HardHashTableEntry hardcodedHashes[] = {
 	{ 0x95bd33ac373c019a, 24, "fabsf", },
 	{ 0x9705934b0950d68d, 280, "dl_write_framebuffer_ptr", },
 	{ 0x9734cf721bc0f3a1, 732, "atanf", },
+	{ 0x99b85c5fce389911, 408, "mytranwars_upload_frame", }, // Mytran Wars
 	{ 0x99c9288185c352ea, 592, "orenoimouto_download_frame_2", }, // Ore no Imouto ga Konnani Kawaii Wake ga Nai
 	{ 0x9a06b9d5c16c4c20, 76, "dl_write_clut_ptrload", },
 	{ 0x9b88b739267d189e, 88, "strrchr", },
@@ -426,6 +429,7 @@ static const HardHashTableEntry hardcodedHashes[] = {
 	{ 0xd76d1a8804c7ec2c, 100, "dl_write_material", },
 	{ 0xd7d350c0b33a4662, 28, "vadd_q", },
 	{ 0xd80051931427dca0, 116, "__subdf3", },
+	{ 0xd96ba6e4ff86f1bf, 276, "katamari_screenshot_to_565", }, // Me and My Katamari (US)
 	{ 0xda51dab503b06979, 32, "vmidt_q", },
 	{ 0xdc0cc8b400ecfbf2, 36, "strcmp", },
 	{ 0xdcab869acf2bacab, 292, "strncasecmp", },
@@ -577,6 +581,41 @@ namespace MIPSAnalyst {
 	}
 	static bool IsSVQInstr(MIPSOpcode op) {
 		return (op & MIPSTABLE_IMM_MASK) == 0xF8000000;
+	}
+
+	int OpMemoryAccessSize(u32 pc) {
+		const auto op = Memory::Read_Instruction(pc, true);
+		MIPSInfo info = MIPSGetInfo(op);
+		if ((info & (IN_MEM | OUT_MEM)) == 0) {
+			return 0;
+		}
+
+		// TODO: Verify lwl/lwr/etc.?
+		switch (info & MEMTYPE_MASK) {
+		case MEMTYPE_BYTE:
+			return 1;
+		case MEMTYPE_HWORD:
+			return 2;
+		case MEMTYPE_WORD:
+		case MEMTYPE_FLOAT:
+			return 4;
+		case MEMTYPE_VQUAD:
+			return 16;
+		}
+
+		return 0;
+	}
+
+	bool IsOpMemoryWrite(u32 pc) {
+		const auto op = Memory::Read_Instruction(pc, true);
+		MIPSInfo info = MIPSGetInfo(op);
+		return (info & OUT_MEM) != 0;
+	}
+
+	bool OpHasDelaySlot(u32 pc) {
+		const auto op = Memory::Read_Instruction(pc, true);
+		MIPSInfo info = MIPSGetInfo(op);
+		return (info & DELAYSLOT) != 0;
 	}
 
 	bool OpWouldChangeMemory(u32 pc, u32 addr, u32 size) {

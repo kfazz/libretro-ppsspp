@@ -306,7 +306,8 @@ u32 sceKernelDevkitVersion()
 	int minor = (firmwareVersion / 10) % 10;
 	int revision = firmwareVersion % 10;
 	int devkitVersion = (major << 24) | (minor << 16) | (revision << 8) | 0x10;
-	DEBUG_LOG(SCEKERNEL, "sceKernelDevkitVersion (%i) ", devkitVersion);
+
+	DEBUG_LOG_REPORT_ONCE(devkitVer, SCEKERNEL, "%08x=sceKernelDevkitVersion()", devkitVersion);
 	return devkitVersion;
 }
 
@@ -596,6 +597,8 @@ KernelObject *KernelObjectPool::CreateByIDType(int type) {
 		return __KernelFileNodeObject();
 	case PPSSPP_KERNEL_TMID_DirList:
 		return __KernelDirListingObject();
+	case SCE_KERNEL_TMID_ThreadEventHandler:
+		return __KernelThreadEventHandlerObject();
 
 	default:
 		ERROR_LOG(COMMON, "Unable to load state: could not find object type %d.", type);
@@ -668,24 +671,6 @@ static int sceKernelReferGlobalProfiler(u32 statusPtr) {
 	return 0;
 }
 
-static int ThreadManForKernel_446d8de6(const char *threadName, u32 entry, u32 prio, int stacksize, u32 attr, u32 optionAddr)
-{
-	WARN_LOG(SCEKERNEL,"ThreadManForKernel_446d8de6:Not support this patcher");
-	return sceKernelCreateThread(threadName, entry, prio, stacksize,  attr, optionAddr);
-}
-
-static int ThreadManForKernel_f475845d(SceUID threadToStartID, int argSize, u32 argBlockPtr)
-{	
-	WARN_LOG(SCEKERNEL,"ThreadManForKernel_f475845d:Not support this patcher");
-	return sceKernelStartThread(threadToStartID,argSize,argBlockPtr);
-}
-
-static int ThreadManForKernel_ceadeb47(u32 usec)
-{	
-	WARN_LOG(SCEKERNEL,"ThreadManForKernel_ceadeb47:Not support this patcher");
-	return sceKernelDelayThread(usec);
-}
-
 const HLEFunction ThreadManForUser[] =
 {
 	{0X55C20A00, &WrapI_CUUU<sceKernelCreateEventFlag>,              "sceKernelCreateEventFlag",                  'i', "sxxx"    },
@@ -732,8 +717,8 @@ const HLEFunction ThreadManForUser[] =
 	{0X71BC9871, &WrapI_II<sceKernelChangeThreadPriority>,           "sceKernelChangeThreadPriority",             'i', "ii"      },
 	{0X446D8DE6, &WrapI_CUUIUU<sceKernelCreateThread>,               "sceKernelCreateThread",                     'i', "sxxixx", HLE_NOT_IN_INTERRUPT },
 	{0X9FA03CD3, &WrapI_I<sceKernelDeleteThread>,                    "sceKernelDeleteThread",                     'i', "i"       },
-	{0XBD123D9E, &WrapI_U<sceKernelDelaySysClockThread>,             "sceKernelDelaySysClockThread",              'i', "x",      HLE_NOT_IN_INTERRUPT | HLE_NOT_DISPATCH_SUSPENDED },
-	{0X1181E963, &WrapI_U<sceKernelDelaySysClockThreadCB>,           "sceKernelDelaySysClockThreadCB",            'i', "x",      HLE_NOT_IN_INTERRUPT | HLE_NOT_DISPATCH_SUSPENDED },
+	{0XBD123D9E, &WrapI_U<sceKernelDelaySysClockThread>,             "sceKernelDelaySysClockThread",              'i', "P",      HLE_NOT_IN_INTERRUPT | HLE_NOT_DISPATCH_SUSPENDED },
+	{0X1181E963, &WrapI_U<sceKernelDelaySysClockThreadCB>,           "sceKernelDelaySysClockThreadCB",            'i', "P",      HLE_NOT_IN_INTERRUPT | HLE_NOT_DISPATCH_SUSPENDED },
 	{0XCEADEB47, &WrapI_U<sceKernelDelayThread>,                     "sceKernelDelayThread",                      'i', "x",      HLE_NOT_IN_INTERRUPT | HLE_NOT_DISPATCH_SUSPENDED },
 	{0X68DA9E36, &WrapI_U<sceKernelDelayThreadCB>,                   "sceKernelDelayThreadCB",                    'i', "x",      HLE_NOT_IN_INTERRUPT | HLE_NOT_DISPATCH_SUSPENDED },
 	{0XAA73C935, &WrapV_I<sceKernelExitThread>,                      "sceKernelExitThread",                       'v', "i"       },
@@ -786,9 +771,9 @@ const HLEFunction ThreadManForUser[] =
 	{0X278C0DF5, &WrapI_IU<sceKernelWaitThreadEnd>,                  "sceKernelWaitThreadEnd",                    'i', "ix"      },
 	{0XD59EAD2F, &WrapI_I<sceKernelWakeupThread>,                    "sceKernelWakeupThread",                     'i', "i"       }, //AI Go, audio?
 
-	{0X0C106E53, nullptr,                                            "sceKernelRegisterThreadEventHandler",       '?', ""        },
-	{0X72F3C145, nullptr,                                            "sceKernelReleaseThreadEventHandler",        '?', ""        },
-	{0X369EEB6B, nullptr,                                            "sceKernelReferThreadEventHandlerStatus",    '?', ""        },
+	{0x0C106E53, &WrapI_CIUUU<sceKernelRegisterThreadEventHandler>,  "sceKernelRegisterThreadEventHandler",       'i', "sixxx",  },
+	{0x72F3C145, &WrapI_I<sceKernelReleaseThreadEventHandler>,       "sceKernelReleaseThreadEventHandler",        'i', "i"       },
+	{0x369EEB6B, &WrapI_IU<sceKernelReferThreadEventHandlerStatus>,  "sceKernelReferThreadEventHandlerStatus",    'i', "ip"      },
 
 	{0x349d6d6c, &sceKernelCheckCallback,                            "sceKernelCheckCallback",                    'i', ""        },
 	{0XE81CAF8F, &WrapI_CUU<sceKernelCreateCallback>,                "sceKernelCreateCallback",                   'i', "sxx"     },
@@ -864,16 +849,15 @@ const HLEFunction ThreadManForUser[] =
 	{0x0E927AED, &_sceKernelReturnFromTimerHandler,                  "_sceKernelReturnFromTimerHandler",          'v', ""        },
 	{0X532A522E, &WrapV_I<_sceKernelExitThread>,                     "_sceKernelExitThread",                      'v', "i"       },
 
-
 	// Shouldn't hook this up. No games should import this function manually and call it.
 	// {0x6E9EA350, _sceKernelReturnFromCallback,"_sceKernelReturnFromCallback"},
 };
 
 const HLEFunction ThreadManForKernel[] =
 {
-	{0XCEADEB47, &WrapI_U<ThreadManForKernel_ceadeb47>,              "ThreadManForKernel_ceadeb47",               'i', "x"       },
-	{0X446D8DE6, &WrapI_CUUIUU<ThreadManForKernel_446d8de6>,         "ThreadManForKernel_446d8de6",               'i', "sxxixx"  },//Not sure right
-	{0XF475845D, &WrapI_IIU<ThreadManForKernel_f475845d>,            "ThreadManForKernel_f475845d",               'i', "iix"     },//Not sure right
+	{0xCEADEB47, &WrapI_U<sceKernelDelayThread>,                     "sceKernelDelayThread",                      'i', "x",      HLE_NOT_IN_INTERRUPT | HLE_NOT_DISPATCH_SUSPENDED | HLE_KERNEL_SYSCALL },
+	{0x446D8DE6, &WrapI_CUUIUU<sceKernelCreateThread>,               "sceKernelCreateThread",                     'i', "sxxixx", HLE_NOT_IN_INTERRUPT | HLE_KERNEL_SYSCALL },
+	{0xF475845D, &WrapI_IIU<sceKernelStartThread>,                   "sceKernelStartThread",                      'i', "iix",    HLE_NOT_IN_INTERRUPT | HLE_KERNEL_SYSCALL },
 };
 
 void Register_ThreadManForUser()
@@ -896,16 +880,10 @@ void Register_LoadExecForUser()
 {
 	RegisterModule("LoadExecForUser", ARRAY_SIZE(LoadExecForUser), LoadExecForUser);
 }
-
-static int LoadExecForKernel_4AC57943(SceUID cbId) 
-{
-	WARN_LOG(SCEKERNEL,"LoadExecForKernel_4AC57943:Not support this patcher");
-	return sceKernelRegisterExitCallback(cbId);//not sure right
-}
  
 const HLEFunction LoadExecForKernel[] =
 {
-	{0X4AC57943, &WrapI_I<LoadExecForKernel_4AC57943>,               "LoadExecForKernel_4AC57943",                'i', "i"       },
+	{0x4AC57943, &WrapI_I<sceKernelRegisterExitCallback>,            "sceKernelRegisterExitCallback",             'i', "i",      HLE_KERNEL_SYSCALL },
 	{0XA3D5E142, nullptr,                                            "LoadExecForKernel_a3d5e142",                '?', ""        },
 };
  
@@ -914,29 +892,17 @@ void Register_LoadExecForKernel()
 	RegisterModule("LoadExecForKernel", ARRAY_SIZE(LoadExecForKernel), LoadExecForKernel);
 }
 
-const HLEFunction SysMemForKernel[] =
-{
-	{0X636C953B, nullptr,                                            "SysMemForKernel_636c953b",                  '?', ""        },
-	{0XC9805775, nullptr,                                            "SysMemForKernel_c9805775",                  '?', ""        },
-	{0X1C1FBFE7, nullptr,                                            "SysMemForKernel_1c1fbfe7",                  '?', ""        },
-};
-
 const HLEFunction ExceptionManagerForKernel[] =
 {
 	{0X3FB264FC, nullptr,                                            "sceKernelRegisterExceptionHandler",         '?', ""        },
 	{0X5A837AD4, nullptr,                                            "sceKernelRegisterPriorityExceptionHandler", '?', ""        },
-	{0x565C0B0E, &WrapI_V<sceKernelRegisterDefaultExceptionHandler>, "sceKernelRegisterDefaultExceptionHandler",  'i', ""        },
+	{0x565C0B0E, &WrapI_V<sceKernelRegisterDefaultExceptionHandler>, "sceKernelRegisterDefaultExceptionHandler",  'i', "",       HLE_KERNEL_SYSCALL },
 	{0X1AA6CFFA, nullptr,                                            "sceKernelReleaseExceptionHandler",          '?', ""        },
 	{0XDF83875E, nullptr,                                            "sceKernelGetActiveDefaultExceptionHandler", '?', ""        },
 	{0X291FF031, nullptr,                                            "sceKernelReleaseDefaultExceptionHandler",   '?', ""        },
 	{0X15ADC862, nullptr,                                            "sceKernelRegisterNmiHandler",               '?', ""        },
 	{0XB15357C9, nullptr,                                            "sceKernelReleaseNmiHandler",                '?', ""        },
 };
-
-void Register_SysMemForKernel()
-{
-	RegisterModule("SysMemForKernel", ARRAY_SIZE(SysMemForKernel), SysMemForKernel);
-}
 
 void Register_ExceptionManagerForKernel()
 {
@@ -945,7 +911,7 @@ void Register_ExceptionManagerForKernel()
 
 // Seen in some homebrew
 const HLEFunction UtilsForKernel[] = {
-	{0XC2DF770E, WrapI_UI<sceKernelIcacheInvalidateRange>,           "sceKernelIcacheInvalidateRange",            '?', ""        },
+	{0xC2DF770E, WrapI_UI<sceKernelIcacheInvalidateRange>,           "sceKernelIcacheInvalidateRange",            '?', "",       HLE_KERNEL_SYSCALL },
 	{0X78934841, nullptr,                                            "sceKernelGzipDecompress",                   '?', ""        },
 	{0XE8DB3CE6, nullptr,                                            "sceKernelDeflateDecompress",                '?', ""        },
 	{0X840259F1, nullptr,                                            "sceKernelUtilsSha1Digest",                  '?', ""        },

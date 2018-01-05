@@ -185,7 +185,7 @@ void ArmJit::CompileDelaySlot(int flags)
 
 	js.inDelaySlot = true;
 	MIPSOpcode op = GetOffsetInstruction(1);
-	MIPSCompileOp(op);
+	MIPSCompileOp(op, this);
 	js.inDelaySlot = false;
 
 	if (flags & DELAYSLOT_FLUSH)
@@ -201,10 +201,14 @@ void ArmJit::Compile(u32 em_address) {
 		ClearCache();
 	}
 
+	BeginWrite();
+
 	int block_num = blocks.AllocateBlock(em_address);
 	JitBlock *b = blocks.GetBlock(block_num);
 	DoJit(em_address, b);
 	blocks.FinalizeBlock(block_num, jo.enableBlocklink);
+
+	EndWrite();
 
 	bool cleanSlate = false;
 
@@ -271,17 +275,17 @@ const u8 *ArmJit::DoJit(u32 em_address, JitBlock *b)
 		JumpTarget backJump = GetCodePtr();
 		gpr.SetRegImm(R0, js.blockStart);
 		B((const void *)outerLoopPCInR0);
-		b->checkedEntry = GetCodePtr();
+		b->checkedEntry = (u8 *)GetCodePtr();
 		SetCC(CC_LT);
 		B(backJump);
 		SetCC(CC_AL);
 	} else if (jo.useForwardJump) {
-		b->checkedEntry = GetCodePtr();
+		b->checkedEntry = (u8 *)GetCodePtr();
 		SetCC(CC_LT);
 		bail = B();
 		SetCC(CC_AL);
 	} else {
-		b->checkedEntry = GetCodePtr();
+		b->checkedEntry = (u8 *)GetCodePtr();
 		SetCC(CC_LT);
 		gpr.SetRegImm(R0, js.blockStart);
 		B((const void *)outerLoopPCInR0);
@@ -309,7 +313,7 @@ const u8 *ArmJit::DoJit(u32 em_address, JitBlock *b)
 
 		js.downcountAmount += MIPSGetInstructionCycleEstimate(inst);
 
-		MIPSCompileOp(inst);
+		MIPSCompileOp(inst, this);
 	
 		js.compilerPC += 4;
 		js.numInstructions++;
@@ -397,6 +401,50 @@ void ArmJit::Comp_RunBlock(MIPSOpcode op)
 	ERROR_LOG(JIT, "Comp_RunBlock should never be reached!");
 }
 
+void ArmJit::LinkBlock(u8 *exitPoint, const u8 *checkedEntry) {
+	if (PlatformIsWXExclusive()) {
+		ProtectMemoryPages(exitPoint, 32, MEM_PROT_READ | MEM_PROT_WRITE);
+	}
+
+	ARMXEmitter emit(exitPoint);
+	u32 op = *((const u32 *)emit.GetCodePointer());
+	bool prelinked = (op & 0xFF000000) == 0xEA000000;
+	// Jump directly to the block, yay.
+	emit.B(checkedEntry);
+
+	if (!prelinked) {
+		do {
+			op = *((const u32 *)emit.GetCodePointer());
+			// Overwrite whatever is here with a breakpoint.
+			emit.BKPT(1);
+			// Stop after overwriting the next unconditional branch or BKPT.
+			// It can be a BKPT if we unlinked, and are now linking a different one.
+		} while ((op & 0xFF000000) != 0xEA000000 && (op & 0xFFF000F0) != 0xE1200070);
+	}
+	emit.FlushIcache();
+	if (PlatformIsWXExclusive()) {
+		ProtectMemoryPages(exitPoint, 32, MEM_PROT_READ | MEM_PROT_EXEC);
+	}
+}
+
+void ArmJit::UnlinkBlock(u8 *checkedEntry, u32 originalAddress) {
+	if (PlatformIsWXExclusive()) {
+		ProtectMemoryPages(checkedEntry, 16, MEM_PROT_READ | MEM_PROT_WRITE);
+	}
+	// Send anyone who tries to run this block back to the dispatcher.
+	// Not entirely ideal, but .. pretty good.
+	// I hope there's enough space...
+	// checkedEntry is the only "linked" entrance so it's enough to overwrite that.
+	ARMXEmitter emit(checkedEntry);
+	emit.MOVI2R(R0, originalAddress);
+	emit.STR(R0, CTXREG, offsetof(MIPSState, pc));
+	emit.B(MIPSComp::jit->GetDispatcher());
+	emit.FlushIcache();
+	if (PlatformIsWXExclusive()) {
+		ProtectMemoryPages(checkedEntry, 16, MEM_PROT_READ | MEM_PROT_EXEC);
+	}
+}
+
 bool ArmJit::ReplaceJalTo(u32 dest) {
 #ifdef ARM
 	const ReplacementTableEntry *entry = nullptr;
@@ -455,14 +503,14 @@ void ArmJit::Comp_ReplacementFunc(MIPSOpcode op)
 	}
 
 	if (entry->flags & REPFLAG_DISABLED) {
-		MIPSCompileOp(Memory::Read_Instruction(GetCompilerPC(), true));
+		MIPSCompileOp(Memory::Read_Instruction(GetCompilerPC(), true), this);
 	} else if (entry->jitReplaceFunc) {
 		MIPSReplaceFunc repl = entry->jitReplaceFunc;
 		int cycles = (this->*repl)();
 
 		if (entry->flags & (REPFLAG_HOOKENTER | REPFLAG_HOOKEXIT)) {
 			// Compile the original instruction at this address.  We ignore cycles for hooks.
-			MIPSCompileOp(Memory::Read_Instruction(GetCompilerPC(), true));
+			MIPSCompileOp(Memory::Read_Instruction(GetCompilerPC(), true), this);
 		} else {
 			FlushAll();
 			// Flushed, so R1 is safe.
@@ -489,7 +537,7 @@ void ArmJit::Comp_ReplacementFunc(MIPSOpcode op)
 		if (entry->flags & (REPFLAG_HOOKENTER | REPFLAG_HOOKEXIT)) {
 			// Compile the original instruction at this address.  We ignore cycles for hooks.
 			ApplyRoundingMode();
-			MIPSCompileOp(Memory::Read_Instruction(GetCompilerPC(), true));
+			MIPSCompileOp(Memory::Read_Instruction(GetCompilerPC(), true), this);
 		} else {
 			ApplyRoundingMode();
 			LDR(R1, CTXREG, MIPS_REG_RA * 4);
@@ -646,4 +694,14 @@ void ArmJit::WriteSyscallExit()
 
 void ArmJit::Comp_DoNothing(MIPSOpcode op) { }
 
+MIPSOpcode ArmJit::GetOriginalOp(MIPSOpcode op) {
+	JitBlockCache *bc = GetBlockCache();
+	int block_num = bc->GetBlockNumberFromEmuHackOp(op, true);
+	if (block_num >= 0) {
+		return bc->GetOriginalFirstOp(block_num);
+	} else {
+		return op;
+	}
 }
+
+}  // namespace

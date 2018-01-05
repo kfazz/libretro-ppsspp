@@ -28,8 +28,9 @@
 #include "Core/CoreTiming.h"
 #include "Core/Reporting.h"
 #include "Core/Debugger/Breakpoints.h"
+#include "base/logging.h"
 
-#include "JitCommon/NativeJit.h"
+#include "JitCommon/JitCommon.h"
 
 enum MipsEncoding {
 	Imme,
@@ -81,17 +82,7 @@ struct MIPSInstruction {
 #define ENCODING(a) {a}
 #define INSTR(name, comp, dis, inter, flags) {Instruc, name, comp, dis, inter, MIPSInfo(flags)}
 
-#ifdef ARM
-#define JITFUNC(f) (&ArmJit::f)
-#elif defined(ARM64)
-#define JITFUNC(f) (&Arm64Jit::f)
-#elif defined(_M_X64) || defined(_M_IX86)
-#define JITFUNC(f) (&Jit::f)
-#elif defined(MIPS)
-#define JITFUNC(f) (&MipsJit::f)
-#else
-#define JITFUNC(f) (&FakeJit::f)
-#endif
+#define JITFUNC(f) (&MIPSFrontendInterface::f)
 
 using namespace MIPSDis;
 using namespace MIPSInt;
@@ -921,20 +912,19 @@ const MIPSInstruction *MIPSGetInstruction(MIPSOpcode op) {
 	return instr;
 }
 
-void MIPSCompileOp(MIPSOpcode op) {
+void MIPSCompileOp(MIPSOpcode op, MIPSComp::MIPSFrontendInterface *jit) {
 	if (op == 0)
 		return;
 	const MIPSInstruction *instr = MIPSGetInstruction(op);
 	const MIPSInfo info = MIPSGetInfo(op);
 	if (instr) {
 		if (instr->compile) {
-			(MIPSComp::jit->*(instr->compile))(op);
+			(jit->*(instr->compile))(op);
 		} else {
 			ERROR_LOG_REPORT(CPU,"MIPSCompileOp %08x failed",op.encoding);
 		}
-
 		if (info & OUT_EAT_PREFIX)
-			MIPSComp::jit->EatPrefix();
+			jit->EatPrefix();
 	} else {
 		ERROR_LOG_REPORT(CPU, "MIPSCompileOp: Invalid instruction %08x", op.encoding);
 	}
@@ -987,6 +977,7 @@ int MIPSInterpret_RunUntil(u64 globalTicks)
 	while (coreState == CORE_RUNNING)
 	{
 		CoreTiming::Advance();
+		u32 lastPC = 0;
 
 		// NEVER stop in a delay slot!
 		while (curMips->downcount >= 0 && coreState == CORE_RUNNING)
@@ -1025,6 +1016,17 @@ int MIPSInterpret_RunUntil(u64 globalTicks)
 
 				bool wasInDelaySlot = curMips->inDelaySlot;
 
+				/*
+				if (curMips->pc != lastPC + 4) {
+					if (blockCount > 0) {
+						MIPSState *mips_ = curMips;
+						fprintf(f, "BLOCK : %08x v0: %08x v1: %08x a0: %08x s0: %08x s4: %08x\n", mips_->pc, mips_->r[MIPS_REG_V0], mips_->r[MIPS_REG_V1], mips_->r[MIPS_REG_A0], mips_->r[MIPS_REG_S0], mips_->r[MIPS_REG_S4]);
+						fflush(f);
+						blockCount--;
+					}
+				}
+				lastPC = curMips->pc;
+				*/
 				MIPSInterpret(op);
 
 				if (curMips->inDelaySlot)
@@ -1050,13 +1052,6 @@ int MIPSInterpret_RunUntil(u64 globalTicks)
 	}
 
 	return 1;
-}
-
-static inline void DelayBranchTo(MIPSState *curMips, u32 where)
-{
-	curMips->pc += 4;
-	curMips->nextPC = where;
-	curMips->inDelaySlot = true;
 }
 
 const char *MIPSGetName(MIPSOpcode op)

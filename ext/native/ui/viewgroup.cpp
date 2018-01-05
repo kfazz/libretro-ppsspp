@@ -405,12 +405,12 @@ void LinearLayout::Measure(const UIContext &dc, MeasureSpec horiz, MeasureSpec v
 
 	int numVisible = 0;
 
-	for (size_t i = 0; i < views_.size(); i++) {
-		if (views_[i]->GetVisibility() == V_GONE)
+	for (View *view : views_) {
+		if (view->GetVisibility() == V_GONE)
 			continue;
 		numVisible++;
 
-		const LinearLayoutParams *linLayoutParams = views_[i]->GetLayoutParams()->As<LinearLayoutParams>();
+		const LinearLayoutParams *linLayoutParams = view->GetLayoutParams()->As<LinearLayoutParams>();
 
 		Margins margins = defaultMargins_;
 
@@ -422,22 +422,23 @@ void LinearLayout::Measure(const UIContext &dc, MeasureSpec horiz, MeasureSpec v
 
 		if (orientation_ == ORIENT_HORIZONTAL) {
 			MeasureSpec v = vert;
-			if (v.type == UNSPECIFIED && measuredHeight_ != 0.0)
+			if (v.type == UNSPECIFIED && measuredHeight_ != 0.0f)
 				v = MeasureSpec(AT_MOST, measuredHeight_);
-			views_[i]->Measure(dc, MeasureSpec(UNSPECIFIED, measuredWidth_), v - (float)(margins.top + margins.bottom));
+			view->Measure(dc, MeasureSpec(UNSPECIFIED, measuredWidth_), v - (float)margins.vert());
 		} else if (orientation_ == ORIENT_VERTICAL) {
 			MeasureSpec h = horiz;
-			if (h.type == UNSPECIFIED && measuredWidth_ != 0) h = MeasureSpec(AT_MOST, measuredWidth_);
-			views_[i]->Measure(dc, h - (float)(margins.left + margins.right), MeasureSpec(UNSPECIFIED, measuredHeight_));
+			if (h.type == UNSPECIFIED && measuredWidth_ != 0.0f)
+				h = MeasureSpec(AT_MOST, measuredWidth_);
+			view->Measure(dc, h - (float)margins.horiz(), MeasureSpec(UNSPECIFIED, measuredHeight_));
 		}
 
 		float amount;
 		if (orientation_ == ORIENT_HORIZONTAL) {
-			amount = views_[i]->GetMeasuredWidth() + margins.left + margins.right;
-			maxOther = std::max(maxOther, views_[i]->GetMeasuredHeight() + margins.top + margins.bottom);
+			amount = view->GetMeasuredWidth() + margins.horiz();
+			maxOther = std::max(maxOther, view->GetMeasuredHeight() + margins.vert());
 		} else {
-			amount = views_[i]->GetMeasuredHeight() + margins.top + margins.bottom;
-			maxOther = std::max(maxOther, views_[i]->GetMeasuredWidth() + margins.left + margins.right);
+			amount = view->GetMeasuredHeight() + margins.vert();
+			maxOther = std::max(maxOther, view->GetMeasuredWidth() + margins.horiz());
 		}
 
 		sum += amount;
@@ -457,7 +458,6 @@ void LinearLayout::Measure(const UIContext &dc, MeasureSpec horiz, MeasureSpec v
 	// and distribute among the weighted ones.
 	if (orientation_ == ORIENT_HORIZONTAL) {
 		MeasureBySpec(layoutParams_->width, weightZeroSum, horiz, &measuredWidth_);
-		MeasureBySpec(layoutParams_->height, maxOther, vert, &measuredHeight_);
 
 		// If we've got stretch, allow growing to fill the parent.
 		float allowedWidth = measuredWidth_;
@@ -469,34 +469,36 @@ void LinearLayout::Measure(const UIContext &dc, MeasureSpec horiz, MeasureSpec v
 		float usedWidth = 0.0f;
 
 		// Redistribute the stretchy ones! and remeasure the children!
-		for (size_t i = 0; i < views_.size(); i++) {
-			if (views_[i]->GetVisibility() == V_GONE)
+		for (View *view : views_) {
+			if (view->GetVisibility() == V_GONE)
 				continue;
-			const LinearLayoutParams *linLayoutParams = views_[i]->GetLayoutParams()->As<LinearLayoutParams>();
+			const LinearLayoutParams *linLayoutParams = view->GetLayoutParams()->As<LinearLayoutParams>();
 
 			if (linLayoutParams && linLayoutParams->weight > 0.0f) {
 				Margins margins = defaultMargins_;
 				if (linLayoutParams->HasMargins())
 					margins = linLayoutParams->margins;
-				int marginSum = margins.left + margins.right;
 				MeasureSpec v = vert;
-				if (v.type == UNSPECIFIED && measuredHeight_ != 0.0)
+				if (v.type == UNSPECIFIED && measuredHeight_ != 0.0f)
 					v = MeasureSpec(AT_MOST, measuredHeight_);
-				MeasureSpec h(AT_MOST, unit * linLayoutParams->weight - marginSum);
+				MeasureSpec h(AT_MOST, unit * linLayoutParams->weight - margins.horiz());
 				if (horiz.type == EXACTLY) {
 					h.type = EXACTLY;
 				}
-				views_[i]->Measure(dc, h, v - (float)(margins.top + margins.bottom));
-				usedWidth += views_[i]->GetMeasuredWidth();
+				view->Measure(dc, h, v - (float)margins.vert());
+				usedWidth += view->GetMeasuredWidth();
+				maxOther = std::max(maxOther, view->GetMeasuredHeight() + margins.vert());
 			}
 		}
 
 		if (horiz.type == AT_MOST && measuredWidth_ < horiz.size) {
 			measuredWidth_ += usedWidth;
 		}
+
+		// Measure here in case maxOther moved (can happen due to word wrap.)
+		MeasureBySpec(layoutParams_->height, maxOther, vert, &measuredHeight_);
 	} else {
 		MeasureBySpec(layoutParams_->height, weightZeroSum, vert, &measuredHeight_);
-		MeasureBySpec(layoutParams_->width, maxOther, horiz, &measuredWidth_);
 
 		// If we've got stretch, allow growing to fill the parent.
 		float allowedHeight = measuredHeight_;
@@ -508,31 +510,34 @@ void LinearLayout::Measure(const UIContext &dc, MeasureSpec horiz, MeasureSpec v
 		float usedHeight = 0.0f;
 
 		// Redistribute the stretchy ones! and remeasure the children!
-		for (size_t i = 0; i < views_.size(); i++) {
-			if (views_[i]->GetVisibility() == V_GONE)
+		for (View *view : views_) {
+			if (view->GetVisibility() == V_GONE)
 				continue;
-			const LinearLayoutParams *linLayoutParams = views_[i]->GetLayoutParams()->As<LinearLayoutParams>();
+			const LinearLayoutParams *linLayoutParams = view->GetLayoutParams()->As<LinearLayoutParams>();
 
 			if (linLayoutParams && linLayoutParams->weight > 0.0f) {
 				Margins margins = defaultMargins_;
 				if (linLayoutParams->HasMargins())
 					margins = linLayoutParams->margins;
-				int marginSum = margins.top + margins.bottom;
 				MeasureSpec h = horiz;
-				if (h.type == UNSPECIFIED && measuredWidth_ != 0.0)
+				if (h.type == UNSPECIFIED && measuredWidth_ != 0.0f)
 					h = MeasureSpec(AT_MOST, measuredWidth_);
-				MeasureSpec v(AT_MOST, unit * linLayoutParams->weight - marginSum);
+				MeasureSpec v(AT_MOST, unit * linLayoutParams->weight - margins.vert());
 				if (vert.type == EXACTLY) {
 					v.type = EXACTLY;
 				}
-				views_[i]->Measure(dc, h - (float)(margins.left + margins.right), v);
-				usedHeight += views_[i]->GetMeasuredHeight();
+				view->Measure(dc, h - (float)margins.horiz(), v);
+				usedHeight += view->GetMeasuredHeight();
+				maxOther = std::max(maxOther, view->GetMeasuredWidth() + margins.horiz());
 			}
 		}
 
 		if (vert.type == AT_MOST && measuredHeight_ < vert.size) {
 			measuredHeight_ += usedHeight;
 		}
+
+		// Measure here in case maxOther moved (can happen due to word wrap.)
+		MeasureBySpec(layoutParams_->width, maxOther, horiz, &measuredWidth_);
 	}
 }
 
@@ -569,10 +574,10 @@ void LinearLayout::Layout() {
 
 		if (orientation_ == ORIENT_HORIZONTAL) {
 			itemBounds.x = pos;
-			itemBounds.w = views_[i]->GetMeasuredWidth() + margins.left + margins.right;
+			itemBounds.w = views_[i]->GetMeasuredWidth() + margins.horiz();
 		} else {
 			itemBounds.y = pos;
-			itemBounds.h = views_[i]->GetMeasuredHeight() + margins.top + margins.bottom;
+			itemBounds.h = views_[i]->GetMeasuredHeight() + margins.vert();
 		}
 
 		Bounds innerBounds;
@@ -629,15 +634,23 @@ void ScrollView::Measure(const UIContext &dc, MeasureSpec horiz, MeasureSpec ver
 	}
 
 	// The scroll view itself simply obeys its parent - but also tries to fit the child if possible.
-	MeasureBySpec(layoutParams_->width, 0.0f, horiz, &measuredWidth_);
-	MeasureBySpec(layoutParams_->height, 0.0f, vert, &measuredHeight_);
+	MeasureBySpec(layoutParams_->width, horiz.size, horiz, &measuredWidth_);
+	MeasureBySpec(layoutParams_->height, vert.size, vert, &measuredHeight_);
 
 	if (views_.size()) {
 		if (orientation_ == ORIENT_HORIZONTAL) {
-			views_[0]->Measure(dc, MeasureSpec(UNSPECIFIED), MeasureSpec(UNSPECIFIED));
+			MeasureSpec v = MeasureSpec(AT_MOST, measuredHeight_ - margins.vert());
+			if (measuredHeight_ == 0.0f && layoutParams_->height == WRAP_CONTENT) {
+				v.type = UNSPECIFIED;
+			}
+			views_[0]->Measure(dc, MeasureSpec(UNSPECIFIED, measuredWidth_), v);
 			MeasureBySpec(layoutParams_->height, views_[0]->GetMeasuredHeight(), vert, &measuredHeight_);
 		} else {
-			views_[0]->Measure(dc, MeasureSpec(AT_MOST, measuredWidth_ - (margins.left + margins.right)), MeasureSpec(UNSPECIFIED));
+			MeasureSpec h = MeasureSpec(AT_MOST, measuredWidth_ - margins.horiz());
+			if (measuredWidth_ == 0.0f && layoutParams_->width == WRAP_CONTENT) {
+				h.type = UNSPECIFIED;
+			}
+			views_[0]->Measure(dc, h, MeasureSpec(UNSPECIFIED, measuredHeight_));
 			MeasureBySpec(layoutParams_->width, views_[0]->GetMeasuredWidth(), horiz, &measuredWidth_);
 		}
 		if (orientation_ == ORIENT_VERTICAL && vert.type != EXACTLY) {
@@ -666,8 +679,8 @@ void ScrollView::Layout() {
 		margins = linLayoutParams->margins;
 	}
 
-	scrolled.w = views_[0]->GetMeasuredWidth() - (margins.left + margins.right);
-	scrolled.h = views_[0]->GetMeasuredHeight() - (margins.top + margins.bottom);
+	scrolled.w = views_[0]->GetMeasuredWidth() - margins.horiz();
+	scrolled.h = views_[0]->GetMeasuredHeight() - margins.vert();
 
 	float layoutScrollPos = ClampedScrollPos(scrollPos_);
 
@@ -968,8 +981,8 @@ void AnchorLayout::Measure(const UIContext &dc, MeasureSpec horiz, MeasureSpec v
 		Size width = WRAP_CONTENT;
 		Size height = WRAP_CONTENT;
 
-		MeasureSpec specW(UNSPECIFIED, 0.0f);
-		MeasureSpec specH(UNSPECIFIED, 0.0f);
+		MeasureSpec specW(UNSPECIFIED, measuredWidth_);
+		MeasureSpec specH(UNSPECIFIED, measuredHeight_);
 
 		if (!overflow_) {
 			if (horiz.type != UNSPECIFIED) {
@@ -1108,9 +1121,9 @@ TabHolder::TabHolder(Orientation orientation, float stripSize, LayoutParams *lay
 		currentTab_(0) {
 	SetSpacing(0.0f);
 	if (orientation == ORIENT_HORIZONTAL) {
-		tabStrip_ = new ChoiceStrip(orientation, new LayoutParams(FILL_PARENT, WRAP_CONTENT));
+		tabStrip_ = new ChoiceStrip(orientation, new LayoutParams(WRAP_CONTENT, WRAP_CONTENT));
 		tabStrip_->SetTopTabs(true);
-		tabScroll_ = new ScrollView(orientation, new LayoutParams(FILL_PARENT, FILL_PARENT));
+		tabScroll_ = new ScrollView(orientation, new LayoutParams(FILL_PARENT, WRAP_CONTENT));
 		tabScroll_->Add(tabStrip_);
 		Add(tabScroll_);
 	} else {
@@ -1164,7 +1177,7 @@ ChoiceStrip::ChoiceStrip(Orientation orientation, LayoutParams *layoutParams)
 void ChoiceStrip::AddChoice(const std::string &title) {
 	StickyChoice *c = new StickyChoice(title, "",
 			orientation_ == ORIENT_HORIZONTAL ?
-			0 :
+			nullptr :
 			new LinearLayoutParams(FILL_PARENT, ITEM_HEIGHT));
 	c->OnClick.Handle(this, &ChoiceStrip::OnChoiceClick);
 	Add(c);
@@ -1175,7 +1188,7 @@ void ChoiceStrip::AddChoice(const std::string &title) {
 void ChoiceStrip::AddChoice(ImageID buttonImage) {
 	StickyChoice *c = new StickyChoice(buttonImage,
 			orientation_ == ORIENT_HORIZONTAL ?
-			0 :
+			nullptr :
 			new LinearLayoutParams(FILL_PARENT, ITEM_HEIGHT));
 	c->OnClick.Handle(this, &ChoiceStrip::OnChoiceClick);
 	Add(c);

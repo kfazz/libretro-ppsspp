@@ -1,5 +1,5 @@
-VERSION = 1.2.2.0
-DEFINES += USING_QT_UI USE_FFMPEG
+VERSION = 1.3.0.0
+DEFINES += USING_QT_UI USE_FFMPEG NO_VULKAN
 
 exists( /usr/include/snappy-c.h ) {
 	DEFINES += SHARED_SNAPPY
@@ -65,6 +65,11 @@ win32-msvc* {
 	QMAKE_CFLAGS_RELEASE ~= s/-O.*/
 	QMAKE_CXXFLAGS_RELEASE ~= s/-O.*/
 	QMAKE_ALLFLAGS_RELEASE += -O3 -ffast-math
+}
+
+symbian {
+	# Silence a common warning in system headers.
+	QMAKE_CXXFLAGS += -Wno-address
 }
 
 contains(QT_CONFIG, opengles.) {

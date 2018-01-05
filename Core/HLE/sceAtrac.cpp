@@ -176,7 +176,7 @@ struct Atrac {
 		channels_(0), outputChannels_(2), bitrate_(64), bytesPerFrame_(0), bufferMaxSize_(0), jointStereo_(0),
 		currentSample_(0), endSample_(0), firstSampleOffset_(0), dataOff_(0),
 		loopStartSample_(-1), loopEndSample_(-1), loopNum_(0),
-		failedDecode_(false), codecType_(0), ignoreDataBuf_(false),
+		failedDecode_(false), ignoreDataBuf_(false), codecType_(0),
 		bufferState_(ATRAC_STATUS_NO_DATA) {
 		memset(&first_, 0, sizeof(first_));
 		memset(&second_, 0, sizeof(second_));
@@ -457,9 +457,13 @@ struct Atrac {
 		avcodec_close(codecCtx_);
 		av_freep(&codecCtx_);
 #endif
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(57, 12, 100)
+		av_packet_free(&packet_);
+#else
 		av_free_packet(packet_);
 		delete packet_;
 		packet_ = nullptr;
+#endif
 	}
 #endif // USE_FFMPEG
 
@@ -552,7 +556,11 @@ struct Atrac {
 
 		int got_frame = 0;
 		int bytes_read = avcodec_decode_audio4(codecCtx_, frame_, &got_frame, packet_);
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(57, 12, 100)
+		av_packet_unref(packet_);
+#else
 		av_free_packet(packet_);
+#endif
 		if (bytes_read == AVERROR_PATCHWELCOME) {
 			ERROR_LOG(ME, "Unsupported feature in ATRAC audio.");
 			// Let's try the next packet.
@@ -1836,10 +1844,14 @@ int __AtracSetContext(Atrac *atrac) {
 
 	// alloc audio frame
 	atrac->frame_ = av_frame_alloc();
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(57, 12, 100)
+	atrac->packet_ = av_packet_alloc();
+#else
 	atrac->packet_ = new AVPacket;
 	av_init_packet(atrac->packet_);
 	atrac->packet_->data = nullptr;
 	atrac->packet_->size = 0;
+#endif
 	// reinit decodePos, because ffmpeg had changed it.
 	atrac->decodePos_ = 0;
 #endif

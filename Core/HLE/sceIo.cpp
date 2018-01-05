@@ -33,7 +33,9 @@
 #include "Core/SaveState.h"
 #include "Core/HLE/HLE.h"
 #include "Core/HLE/FunctionWrappers.h"
+#include "Core/HLE/sceDisplay.h"
 #include "Core/HLE/sceKernel.h"
+#include "Core/HLE/sceUmd.h"
 #include "Core/MIPS/MIPS.h"
 #include "Core/HW/MemoryStick.h"
 #include "Core/HW/AsyncIOManager.h"
@@ -62,13 +64,9 @@ extern "C" {
 
 static const int ERROR_ERRNO_FILE_NOT_FOUND               = 0x80010002;
 static const int ERROR_ERRNO_IO_ERROR                     = 0x80010005;
-static const int ERROR_ERRNO_FILE_ALREADY_EXISTS          = 0x80010011;
 static const int ERROR_MEMSTICK_DEVCTL_BAD_PARAMS         = 0x80220081;
 static const int ERROR_MEMSTICK_DEVCTL_TOO_MANY_CALLBACKS = 0x80220082;
-static const int ERROR_KERNEL_BAD_FILE_DESCRIPTOR         = 0x80020323;
-
 static const int ERROR_PGD_INVALID_HEADER                 = 0x80510204;
-
 /*
 
 TODO: async io is missing features!
@@ -121,8 +119,12 @@ const int PSP_STDIN = 3;
 static int asyncNotifyEvent = -1;
 static int syncNotifyEvent = -1;
 static SceUID fds[PSP_COUNT_FDS];
-static std::set<SceUID> memStickCallbacks;
-static std::set<SceUID> memStickFatCallbacks;
+
+static std::vector<SceUID> memStickCallbacks;
+static std::vector<SceUID> memStickFatCallbacks;
+static MemStickState lastMemStickState;
+static MemStickFatState lastMemStickFatState;
+
 static AsyncIOManager ioManager;
 static bool ioManagerThreadEnabled = false;
 static std::thread *ioManagerThread;
@@ -256,7 +258,7 @@ static void TellFsThreadEnded (SceUID threadID) {
 
 static FileNode *__IoGetFd(int fd, u32 &error) {
 	if (fd < 0 || fd >= PSP_COUNT_FDS) {
-		error = ERROR_KERNEL_BAD_FILE_DESCRIPTOR;
+		error = SCE_KERNEL_ERROR_BADF;
 		return NULL;
 	}
 
@@ -277,11 +279,19 @@ static int __IoAllocFd(FileNode *f) {
 }
 
 static void __IoFreeFd(int fd, u32 &error) {
-	if (fd < PSP_MIN_FD || fd >= PSP_COUNT_FDS) {
-		error = ERROR_KERNEL_BAD_FILE_DESCRIPTOR;
+	if (fd == PSP_STDIN || fd == PSP_STDERR || fd == PSP_STDOUT) {
+		error = SCE_KERNEL_ERROR_ILLEGAL_PERM;
+	} else if (fd < PSP_MIN_FD || fd >= PSP_COUNT_FDS) {
+		error = SCE_KERNEL_ERROR_BADF;
 	} else {
 		FileNode *f = __IoGetFd(fd, error);
 		if (f) {
+			// If there are pending results, don't allow closing.
+			if (ioManager.HasOperation(f->handle)) {
+				error = SCE_KERNEL_ERROR_ASYNC_BUSY;
+				return;
+			}
+
 			// Wake anyone waiting on the file before closing it.
 			for (size_t i = 0; i < f->waitingThreads.size(); ++i) {
 				HLEKernel::ResumeFromWait(f->waitingThreads[i], WAITTYPE_ASYNCIO, f->GetUID(), (int)SCE_KERNEL_ERROR_WAIT_DELETE);
@@ -492,6 +502,53 @@ static void __IoWakeManager() {
 	ioManager.FinishEventLoop();
 }
 
+static void __IoVblank() {
+	// We update memstick status here just to avoid possible thread safety issues.
+	// It doesn't actually need to be on a vblank.
+
+	// This will only change status if g_Config was changed.
+	MemoryStick_SetState(g_Config.bMemStickInserted ? PSP_MEMORYSTICK_STATE_INSERTED : PSP_MEMORYSTICK_STATE_NOT_INSERTED);
+
+	MemStickState newState = MemoryStick_State();
+	MemStickFatState newFatState = MemoryStick_FatState();
+
+	// First, the fat callbacks, these are easy.
+	if (lastMemStickFatState != newFatState) {
+		int notifyMsg = 0;
+		if (newFatState == PSP_FAT_MEMORYSTICK_STATE_ASSIGNED) {
+			notifyMsg = 1;
+		} else if (newFatState == PSP_FAT_MEMORYSTICK_STATE_UNASSIGNED) {
+			notifyMsg = 2;
+		}
+		if (notifyMsg != 0) {
+			for (SceUID cbId : memStickFatCallbacks) {
+				__KernelNotifyCallback(cbId, notifyMsg);
+			}
+		}
+	}
+
+	// Next, the controller notifies mounting (fat) too.
+	if (lastMemStickState != newState || lastMemStickFatState != newFatState) {
+		int notifyMsg = 0;
+		if (newState == PSP_MEMORYSTICK_STATE_INSERTED && newFatState == PSP_FAT_MEMORYSTICK_STATE_ASSIGNED) {
+			notifyMsg = 1;
+		} else if (newState == PSP_MEMORYSTICK_STATE_INSERTED && newFatState == PSP_FAT_MEMORYSTICK_STATE_UNASSIGNED) {
+			// Still mounting (1 will come later.)
+			notifyMsg = 4;
+		} else if (newState == PSP_MEMORYSTICK_STATE_NOT_INSERTED) {
+			notifyMsg = 2;
+		}
+		if (notifyMsg != 0) {
+			for (SceUID cbId : memStickCallbacks) {
+				__KernelNotifyCallback(cbId, notifyMsg);
+			}
+		}
+	}
+
+	lastMemStickState = newState;
+	lastMemStickFatState = newFatState;
+}
+
 void __IoInit() {
 	MemoryStick_Init();
 
@@ -540,10 +597,14 @@ void __IoInit() {
 	}
 
 	__KernelRegisterWaitTypeFuncs(WAITTYPE_ASYNCIO, __IoAsyncBeginCallback, __IoAsyncEndCallback);
+
+	lastMemStickState = MemoryStick_State();
+	lastMemStickFatState = MemoryStick_FatState();
+	__DisplayListenVblank(__IoVblank);
 }
 
 void __IoDoState(PointerWrap &p) {
-	auto s = p.Section("sceIo", 1);
+	auto s = p.Section("sceIo", 1, 3);
 	if (!s)
 		return;
 
@@ -553,8 +614,29 @@ void __IoDoState(PointerWrap &p) {
 	CoreTiming::RestoreRegisterEvent(asyncNotifyEvent, "IoAsyncNotify", __IoAsyncNotify);
 	p.Do(syncNotifyEvent);
 	CoreTiming::RestoreRegisterEvent(syncNotifyEvent, "IoSyncNotify", __IoSyncNotify);
-	p.Do(memStickCallbacks);
-	p.Do(memStickFatCallbacks);
+	if (s < 2) {
+		std::set<SceUID> legacy;
+		memStickCallbacks.clear();
+		memStickFatCallbacks.clear();
+
+		// Convert from set to vector.
+		p.Do(legacy);
+		for (SceUID id : legacy) {
+			memStickCallbacks.push_back(id);
+		}
+		p.Do(legacy);
+		for (SceUID id : legacy) {
+			memStickFatCallbacks.push_back(id);
+		}
+	} else {
+		p.Do(memStickCallbacks);
+		p.Do(memStickFatCallbacks);
+	}
+
+	if (s >= 3) {
+		p.Do(lastMemStickState);
+		p.Do(lastMemStickFatState);
+	}
 }
 
 void __IoShutdown() {
@@ -810,7 +892,7 @@ static bool __IoRead(int &result, int id, u32 data_addr, int size, int &us) {
 			return true;
 		}
 		if (!(f->openMode & FILEACCESS_READ)) {
-			result = ERROR_KERNEL_BAD_FILE_DESCRIPTOR;
+			result = SCE_KERNEL_ERROR_BADF;
 			return true;
 		} else if (size < 0) {
 			result = SCE_KERNEL_ERROR_ILLEGAL_ADDR;
@@ -949,7 +1031,7 @@ static bool __IoWrite(int &result, int id, u32 data_addr, int size, int &us) {
 			return true;
 		}
 		if (!(f->openMode & FILEACCESS_WRITE)) {
-			result = ERROR_KERNEL_BAD_FILE_DESCRIPTOR;
+			result = SCE_KERNEL_ERROR_BADF;
 			return true;
 		}
 		if (size < 0) {
@@ -1073,7 +1155,7 @@ static u32 sceIoGetDevType(int id) {
 		result = pspFileSystem.DevType(f->handle);
 	} else {
 		ERROR_LOG(SCEIO, "sceIoGetDevType: unknown id %d", id);
-		result = ERROR_KERNEL_BAD_FILE_DESCRIPTOR;
+		result = SCE_KERNEL_ERROR_BADF;
 	}
 
 	return result;
@@ -1088,7 +1170,7 @@ static u32 sceIoCancel(int id)
 		// TODO: Cancel the async operation if possible?
 	} else {
 		ERROR_LOG(SCEIO, "sceIoCancel: unknown id %d", id);
-		error = ERROR_KERNEL_BAD_FILE_DESCRIPTOR;
+		error = SCE_KERNEL_ERROR_BADF;
 	}
 
 	return error;
@@ -1175,7 +1257,9 @@ static s64 sceIoLseek(int id, s64 offset, int whence) {
 	if (result >= 0 || result == -1) {
 		DEBUG_LOG(SCEIO, "%lli = sceIoLseek(%d, %llx, %i)", result, id, offset, whence);
 		// Educated guess at timing.
-		return hleDelayResult(result, "io seek", 100);
+		hleEatCycles(1400);
+		hleReSchedule("io seek");
+		return result;
 	} else {
 		ERROR_LOG(SCEIO, "sceIoLseek(%d, %llx, %i) - ERROR: invalid file", id, offset, whence);
 		return result;
@@ -1187,7 +1271,9 @@ static u32 sceIoLseek32(int id, int offset, int whence) {
 	if (result >= 0 || result == -1) {
 		DEBUG_LOG(SCEIO, "%i = sceIoLseek32(%d, %x, %i)", result, id, offset, whence);
 		// Educated guess at timing.
-		return hleDelayResult(result, "io seek", 100);
+		hleEatCycles(1400);
+		hleReSchedule("io seek");
+		return result;
 	} else {
 		ERROR_LOG(SCEIO, "sceIoLseek32(%d, %x, %i) - ERROR: invalid file", id, offset, whence);
 		return result;
@@ -1340,7 +1426,7 @@ static u32 sceIoMkdir(const char *dirname, int mode) {
 	if (pspFileSystem.MkDir(dirname))
 		return hleDelayResult(0, "mkdir", 1000);
 	else
-		return hleDelayResult(ERROR_ERRNO_FILE_ALREADY_EXISTS, "mkdir", 1000);
+		return hleDelayResult(SCE_KERNEL_ERROR_ERRNO_FILE_ALREADY_EXISTS, "mkdir", 1000);
 }
 
 static u32 sceIoRmdir(const char *dirname) {
@@ -1467,45 +1553,69 @@ static u32 sceIoDevctl(const char *name, int cmd, u32 argAddr, int argLen, u32 o
 
 	if (!strcmp(name, "mscmhc0:") || !strcmp(name, "ms0:") || !strcmp(name, "memstick:"))
 	{
-		// MemorySticks Checks
+		// MemoryStick checks
 		switch (cmd) {
 		case 0x02025801:	
-			// Check the MemoryStick's driver status (mscmhc0).
-			if (Memory::IsValidAddress(outPtr)) {
-				Memory::Write_U32(4, outPtr);  // JPSCP: The right return value is 4 for some reason
+			// Check the MemoryStick's driver status (mscmhc0: only.)
+			if (Memory::IsValidAddress(outPtr) && outLen >= 4) {
+				if (MemoryStick_State() == PSP_MEMORYSTICK_STATE_INSERTED) {
+					// 1 = not inserted (ready), 4 = inserted
+					Memory::Write_U32(PSP_MEMORYSTICK_STATE_DEVICE_INSERTED, outPtr);
+				} else {
+					Memory::Write_U32(PSP_MEMORYSTICK_STATE_DRIVER_READY, outPtr);
+				}
 				return 0;
 			} else {
 				return ERROR_MEMSTICK_DEVCTL_BAD_PARAMS;
 			}
 			break;
-		case 0x02015804:	
+		case 0x02015804:
 			// Register MemoryStick's insert/eject callback (mscmhc0)
-			if (Memory::IsValidAddress(argAddr) && argLen == 4) {
-				// TODO: Verify how duplicates work / how many are allowed.
+			if (Memory::IsValidAddress(argAddr) && outPtr == 0 && argLen >= 4) {
 				u32 cbId = Memory::Read_U32(argAddr);
-				if (memStickCallbacks.find(cbId) == memStickCallbacks.end()) {
-					memStickCallbacks.insert(cbId);
-					DEBUG_LOG(SCEIO, "sceIoDevCtl: Memstick callback %i registered, notifying immediately.", cbId);
-					__KernelNotifyCallback(cbId, MemoryStick_State());
+				int type = -1;
+				kernelObjects.GetIDType(cbId, &type);
+
+				if (memStickCallbacks.size() < 32 && type == SCE_KERNEL_TMID_Callback) {
+					memStickCallbacks.push_back(cbId);
+					if (MemoryStick_State() == PSP_MEMORYSTICK_STATE_INSERTED) {
+						// Only fired immediately if the card is currently inserted.
+						// Values observed:
+						//  * 1 = Memory stick inserted
+						//  * 2 = Memory stick removed
+						//  * 4 = Memory stick mounting? (followed by a 1 about 500ms later)
+						DEBUG_LOG(SCEIO, "sceIoDevctl: Memstick callback %i registered, notifying immediately", cbId);
+						__KernelNotifyCallback(cbId, MemoryStick_State());
+					} else {
+						DEBUG_LOG(SCEIO, "sceIoDevctl: Memstick callback %i registered", cbId);
+					}
 					return 0;
 				} else {
-					return ERROR_MEMSTICK_DEVCTL_TOO_MANY_CALLBACKS;
+					return SCE_KERNEL_ERROR_ERRNO_INVALID_ARGUMENT;
 				}
 			} else {
 				return ERROR_MEMSTICK_DEVCTL_BAD_PARAMS;
 			}
 			break;
-		case 0x02025805:	
+		case 0x02015805:	
 			// Unregister MemoryStick's insert/eject callback (mscmhc0)
-			if (Memory::IsValidAddress(argAddr) && argLen == 4) {
-				// TODO: Verify how duplicates work / how many are allowed.
+			if (Memory::IsValidAddress(argAddr) && argLen >= 4) {
 				u32 cbId = Memory::Read_U32(argAddr);
-				if (memStickCallbacks.find(cbId) != memStickCallbacks.end()) {
-					memStickCallbacks.erase(cbId);
-					DEBUG_LOG(SCEIO, "sceIoDevCtl: Unregistered memstick callback %i", cbId);
+				size_t slot = (size_t)-1;
+				// We want to only remove one at a time.
+				for (size_t i = 0; i < memStickCallbacks.size(); ++i) {
+					if (memStickCallbacks[i] == cbId) {
+						slot = i;
+						break;
+					}
+				}
+
+				if (slot != (size_t)-1) {
+					memStickCallbacks.erase(memStickCallbacks.begin() + slot);
+					DEBUG_LOG(SCEIO, "sceIoDevctl: Unregistered memstick callback %i", cbId);
 					return 0;
 				} else {
-					return ERROR_MEMSTICK_DEVCTL_BAD_PARAMS;
+					return SCE_KERNEL_ERROR_ERRNO_INVALID_ARGUMENT;
 				}
 			} else {
 				return ERROR_MEMSTICK_DEVCTL_BAD_PARAMS;
@@ -1513,18 +1623,21 @@ static u32 sceIoDevctl(const char *name, int cmd, u32 argAddr, int argLen, u32 o
 			break;
 		case 0x02025806:	
 			// Check if the device is inserted (mscmhc0)
-			if (Memory::IsValidAddress(outPtr)) {
-				// 0 = Not inserted.
+			if (Memory::IsValidAddress(outPtr) && outLen >= 4) {
 				// 1 = Inserted.
-				Memory::Write_U32(1, outPtr);
+				// 2 = Not inserted.
+				Memory::Write_U32(MemoryStick_State(), outPtr);
 				return 0;
 			} else {
 				return ERROR_MEMSTICK_DEVCTL_BAD_PARAMS;
 			}
 			break;
 		case 0x02425818:  
-			// // Get MS capacity (fatms0).
-			// Pretend we have a 2GB memory stick.
+			// Get MS capacity (fatms0).
+			if (MemoryStick_State() != PSP_MEMORYSTICK_STATE_INSERTED) {
+				return SCE_KERNEL_ERROR_ERRNO_DEVICE_NOT_FOUND;
+			}
+			// TODO: Pretend we have a 2GB memory stick?  Should we check MemoryStick_FreeSpace?
 			if (Memory::IsValidAddress(argAddr) && argLen >= 4) {  // NOTE: not outPtr
 				u32 pointer = Memory::Read_U32(argAddr);
 				u32 sectorSize = 0x200;
@@ -1543,7 +1656,11 @@ static u32 sceIoDevctl(const char *name, int cmd, u32 argAddr, int argLen, u32 o
 				return ERROR_MEMSTICK_DEVCTL_BAD_PARAMS;
 			}
 			break;
-		case 0x02425824:  // Check if write protected
+		case 0x02425824:
+			// Check if write protected
+			if (MemoryStick_State() != PSP_MEMORYSTICK_STATE_INSERTED) {
+				return SCE_KERNEL_ERROR_ERRNO_DEVICE_NOT_FOUND;
+			}
 			if (Memory::IsValidAddress(outPtr) && outLen == 4) {
 				Memory::Write_U32(0, outPtr);
 				return 0;
@@ -1558,31 +1675,55 @@ static u32 sceIoDevctl(const char *name, int cmd, u32 argAddr, int argLen, u32 o
 	if (!strcmp(name, "fatms0:"))
 	{
 		switch (cmd) {
-		case 0x02415821:  // MScmRegisterMSInsertEjectCallback
-			{
-				// TODO: Verify how duplicates work / how many are allowed.
+		case 0x0240d81e:
+			// TODO: Invalidate MS driver file table cache (nop)
+			break;
+		case 0x02415821:
+			// MScmRegisterMSInsertEjectCallback
+			if (Memory::IsValidAddress(argAddr) && argLen >= 4) {
 				u32 cbId = Memory::Read_U32(argAddr);
-				if (memStickFatCallbacks.find(cbId) == memStickFatCallbacks.end()) {
-					memStickFatCallbacks.insert(cbId);
-					DEBUG_LOG(SCEIO, "sceIoDevCtl: Memstick FAT callback %i registered, notifying immediately.", cbId);
-					__KernelNotifyCallback(cbId, MemoryStick_FatState());
+				int type = -1;
+				kernelObjects.GetIDType(cbId, &type);
+
+				if (memStickFatCallbacks.size() < 32 && type == SCE_KERNEL_TMID_Callback) {
+					memStickFatCallbacks.push_back(cbId);
+					if (MemoryStick_State() == PSP_MEMORYSTICK_STATE_INSERTED) {
+						// Only fired immediately if the card is currently inserted.
+						// Values observed:
+						//  * 1 = Memory stick inserted
+						//  * 2 = Memory stick removed
+						DEBUG_LOG(SCEIO, "sceIoDevCtl: Memstick FAT callback %i registered, notifying immediately", cbId);
+						__KernelNotifyCallback(cbId, MemoryStick_FatState());
+					} else {
+						DEBUG_LOG(SCEIO, "sceIoDevCtl: Memstick FAT callback %i registered", cbId);
+					}
 					return 0;
 				} else {
-					return -1;
+					return SCE_KERNEL_ERROR_ERRNO_INVALID_ARGUMENT;
 				}
+			} else {
+				return SCE_KERNEL_ERROR_ERRNO_INVALID_ARGUMENT;
 			}
 			break;
-		case 0x02415822: 
-			{
-				// MScmUnregisterMSInsertEjectCallback
-				// TODO: Verify how duplicates work / how many are allowed.
+		case 0x02415822:
+			// MScmUnregisterMSInsertEjectCallback
+			if (Memory::IsValidAddress(argAddr) && argLen >= 4) {
 				u32 cbId = Memory::Read_U32(argAddr);
-				if (memStickFatCallbacks.find(cbId) != memStickFatCallbacks.end()) {
-					memStickFatCallbacks.erase(cbId);
+				size_t slot = (size_t)-1;
+				// We want to only remove one at a time.
+				for (size_t i = 0; i < memStickFatCallbacks.size(); ++i) {
+					if (memStickFatCallbacks[i] == cbId) {
+						slot = i;
+						break;
+					}
+				}
+
+				if (slot != (size_t)-1) {
+					memStickFatCallbacks.erase(memStickFatCallbacks.begin() + slot);
 					DEBUG_LOG(SCEIO, "sceIoDevCtl: Unregistered memstick FAT callback %i", cbId);
 					return 0;
 				} else {
-					return -1;
+					return SCE_KERNEL_ERROR_ERRNO_INVALID_ARGUMENT;
 				}
 			}
 			break;
@@ -1608,12 +1749,16 @@ static u32 sceIoDevctl(const char *name, int cmd, u32 argAddr, int argLen, u32 o
 				return SCE_KERNEL_ERROR_ERRNO_INVALID_ARGUMENT;
 			} else {
 				// Does not care about outLen, even if it's 0.
+				// Note: writes 1 when inserted, 0 when not inserted.
 				Memory::Write_U32(MemoryStick_FatState(), outPtr);
 				return hleDelayResult(0, "check fat state", cyclesToUs(23500));
 			}
 			break;
 		case 0x02425824:  
 			// Check if write protected
+			if (MemoryStick_State() != PSP_MEMORYSTICK_STATE_INSERTED) {
+				return SCE_KERNEL_ERROR_ERRNO_DEVICE_NOT_FOUND;
+			}
 			if (Memory::IsValidAddress(outPtr) && outLen == 4) {
 				Memory::Write_U32(0, outPtr);
 				return 0;
@@ -1623,8 +1768,11 @@ static u32 sceIoDevctl(const char *name, int cmd, u32 argAddr, int argLen, u32 o
 			}
 			break;
 		case 0x02425818:  
-			// // Get MS capacity (fatms0).
-			// Pretend we have a 2GB memory stick.
+			// Get MS capacity (fatms0).
+			if (MemoryStick_State() != PSP_MEMORYSTICK_STATE_INSERTED) {
+				return SCE_KERNEL_ERROR_ERRNO_DEVICE_NOT_FOUND;
+			}
+			// TODO: Pretend we have a 2GB memory stick?  Should we check MemoryStick_FreeSpace?
 			if (Memory::IsValidAddress(argAddr) && argLen >= 4) {  // NOTE: not outPtr
 				u32 pointer = Memory::Read_U32(argAddr);
 				u32 sectorSize = 0x200;
@@ -2418,42 +2566,42 @@ KernelObject *__KernelDirListingObject() {
 }
 
 const HLEFunction IoFileMgrForUser[] = {
-	{0XB29DDF9C, &WrapU_C<sceIoDopen>,                  "sceIoDopen",                  'i', "s"     },
-	{0XE3EB004C, &WrapU_IU<sceIoDread>,                 "sceIoDread",                  'i', "ix"    },
-	{0XEB092469, &WrapU_I<sceIoDclose>,                 "sceIoDclose",                 'i', "i"     },
-	{0XE95A012B, &WrapU_UUUUUU<sceIoIoctlAsync>,        "sceIoIoctlAsync",             'i', "ixpipi"},
-	{0X63632449, &WrapU_UUUUUU<sceIoIoctl>,             "sceIoIoctl",                  'i', "ixpipi"},
-	{0XACE946E8, &WrapU_CU<sceIoGetstat>,               "sceIoGetstat",                'i', "sx"    },
-	{0XB8A740F4, &WrapU_CUU<sceIoChstat>,               "sceIoChstat",                 'i', "sxx"   },
-	{0X55F4717D, &WrapU_C<sceIoChdir>,                  "sceIoChdir",                  'i', "s"     },
+	{0xB29DDF9C, &WrapU_C<sceIoDopen>,                  "sceIoDopen",                  'i', "s"     },
+	{0xE3EB004C, &WrapU_IU<sceIoDread>,                 "sceIoDread",                  'i', "ix"    },
+	{0xEB092469, &WrapU_I<sceIoDclose>,                 "sceIoDclose",                 'i', "i"     },
+	{0xE95A012B, &WrapU_UUUUUU<sceIoIoctlAsync>,        "sceIoIoctlAsync",             'i', "ixpipi"},
+	{0x63632449, &WrapU_UUUUUU<sceIoIoctl>,             "sceIoIoctl",                  'i', "ixpipi"},
+	{0xACE946E8, &WrapU_CU<sceIoGetstat>,               "sceIoGetstat",                'i', "sx"    },
+	{0xB8A740F4, &WrapU_CUU<sceIoChstat>,               "sceIoChstat",                 'i', "sxx"   },
+	{0x55F4717D, &WrapU_C<sceIoChdir>,                  "sceIoChdir",                  'i', "s"     },
 	{0X08BD7374, &WrapU_I<sceIoGetDevType>,             "sceIoGetDevType",             'x', "i"     },
-	{0XB2A628C1, &WrapU_UUUIUI<sceIoAssign>,            "sceIoAssign",                 'i', "sssixi"},
+	{0xB2A628C1, &WrapU_UUUIUI<sceIoAssign>,            "sceIoAssign",                 'i', "sssixi"},
 	{0XE8BC6571, &WrapU_I<sceIoCancel>,                 "sceIoCancel",                 'i', "i"     },
 	{0XB293727F, &WrapI_II<sceIoChangeAsyncPriority>,   "sceIoChangeAsyncPriority",    'i', "ix"    },
 	{0X810C4BC3, &WrapU_I<sceIoClose>,                  "sceIoClose",                  'i', "i"     },
 	{0XFF5940B6, &WrapI_I<sceIoCloseAsync>,             "sceIoCloseAsync",             'i', "i"     },
-	{0X54F5FB11, &WrapU_CIUIUI<sceIoDevctl>,            "sceIoDevctl",                 'i', "sxpipi"},
+	{0x54F5FB11, &WrapU_CIUIUI<sceIoDevctl>,            "sceIoDevctl",                 'i', "sxpipi"},
 	{0XCB05F8D6, &WrapU_IUU<sceIoGetAsyncStat>,         "sceIoGetAsyncStat",           'i', "iiP"   },
-	{0X27EB27B8, &WrapI64_II64I<sceIoLseek>,            "sceIoLseek",                  'I', "iIi"   },
-	{0X68963324, &WrapU_III<sceIoLseek32>,              "sceIoLseek32",                'i', "iii"   },
+	{0x27EB27B8, &WrapI64_II64I<sceIoLseek>,            "sceIoLseek",                  'I', "iIi"   },
+	{0x68963324, &WrapU_III<sceIoLseek32>,              "sceIoLseek32",                'i', "iii"   },
 	{0X1B385D8F, &WrapU_III<sceIoLseek32Async>,         "sceIoLseek32Async",           'i', "iii"   },
 	{0X71B19E77, &WrapU_II64I<sceIoLseekAsync>,         "sceIoLseekAsync",             'i', "iIi"   },
-	{0X109F50BC, &WrapU_CII<sceIoOpen>,                 "sceIoOpen",                   'i', "sii"   },
-	{0X89AA9906, &WrapU_CII<sceIoOpenAsync>,            "sceIoOpenAsync",              'i', "sii"   },
-	{0X06A70004, &WrapU_CI<sceIoMkdir>,                 "sceIoMkdir",                  'i', "si"    },
-	{0X3251EA56, &WrapU_IU<sceIoPollAsync>,             "sceIoPollAsync",              'i', "iP"    },
-	{0X6A638D83, &WrapU_IUI<sceIoRead>,                 "sceIoRead",                   'i', "ixi"   },
-	{0XA0B5A7C2, &WrapU_IUI<sceIoReadAsync>,            "sceIoReadAsync",              'i', "ixi"   },
-	{0XF27A9C51, &WrapU_C<sceIoRemove>,                 "sceIoRemove",                 'i', "s"     },
-	{0X779103A0, &WrapU_CC<sceIoRename>,                "sceIoRename",                 'i', "ss"    },
-	{0X1117C65F, &WrapU_C<sceIoRmdir>,                  "sceIoRmdir",                  'i', "s"     },
+	{0x109F50BC, &WrapU_CII<sceIoOpen>,                 "sceIoOpen",                   'i', "sii"   },
+	{0x89AA9906, &WrapU_CII<sceIoOpenAsync>,            "sceIoOpenAsync",              'i', "sii"   },
+	{0x06A70004, &WrapU_CI<sceIoMkdir>,                 "sceIoMkdir",                  'i', "si"    },
+	{0x3251EA56, &WrapU_IU<sceIoPollAsync>,             "sceIoPollAsync",              'i', "iP"    },
+	{0x6A638D83, &WrapU_IUI<sceIoRead>,                 "sceIoRead",                   'i', "ixi"   },
+	{0xA0B5A7C2, &WrapU_IUI<sceIoReadAsync>,            "sceIoReadAsync",              'i', "ixi"   },
+	{0xF27A9C51, &WrapU_C<sceIoRemove>,                 "sceIoRemove",                 'i', "s"     },
+	{0x779103A0, &WrapU_CC<sceIoRename>,                "sceIoRename",                 'i', "ss"    },
+	{0x1117C65F, &WrapU_C<sceIoRmdir>,                  "sceIoRmdir",                  'i', "s"     },
 	{0XA12A0514, &WrapU_IUU<sceIoSetAsyncCallback>,     "sceIoSetAsyncCallback",       'i', "ixx"   },
-	{0XAB96437F, &WrapU_CI<sceIoSync>,                  "sceIoSync",                   'i', "si"    },
-	{0X6D08A871, &WrapU_C<sceIoUnassign>,               "sceIoUnassign",               'i', "s"     },
-	{0X42EC03AC, &WrapU_IUI<sceIoWrite>,                "sceIoWrite",                  'i', "ixi"   },
-	{0X0FACAB19, &WrapU_IUI<sceIoWriteAsync>,           "sceIoWriteAsync",             'i', "ixi"   },
-	{0X35DBD746, &WrapI_IU<sceIoWaitAsyncCB>,           "sceIoWaitAsyncCB",            'i', "iP"    },
-	{0XE23EEC33, &WrapI_IU<sceIoWaitAsync>,             "sceIoWaitAsync",              'i', "iP"    },
+	{0xAB96437F, &WrapU_CI<sceIoSync>,                  "sceIoSync",                   'i', "si"    },
+	{0x6D08A871, &WrapU_C<sceIoUnassign>,               "sceIoUnassign",               'i', "s"     },
+	{0x42EC03AC, &WrapU_IUI<sceIoWrite>,                "sceIoWrite",                  'i', "ixi"   },
+	{0x0FACAB19, &WrapU_IUI<sceIoWriteAsync>,           "sceIoWriteAsync",             'i', "ixi"   },
+	{0x35DBD746, &WrapI_IU<sceIoWaitAsyncCB>,           "sceIoWaitAsyncCB",            'i', "iP"    },
+	{0xE23EEC33, &WrapI_IU<sceIoWaitAsync>,             "sceIoWaitAsync",              'i', "iP"    },
 	{0X5C2BE2CC, &WrapU_UIU<sceIoGetFdList>,            "sceIoGetFdList",              'i', "xip"   },
 };
 
@@ -2461,6 +2609,45 @@ void Register_IoFileMgrForUser() {
 	RegisterModule("IoFileMgrForUser", ARRAY_SIZE(IoFileMgrForUser), IoFileMgrForUser);
 }
 
+const HLEFunction IoFileMgrForKernel[] = {
+	{0XA905B705, nullptr,                               "sceIoCloseAll",               '?', ""        },
+	{0X411106BA, nullptr,                               "sceIoGetThreadCwd",           '?', ""        },
+	{0XCB0A151F, nullptr,                               "sceIoChangeThreadCwd",        '?', ""        },
+	{0X8E982A74, nullptr,                               "sceIoAddDrv",                 '?', ""        },
+	{0XC7F35804, nullptr,                               "sceIoDelDrv",                 '?', ""        },
+	{0X3C54E908, nullptr,                               "sceIoReopen",                 '?', ""        },
+	{0xB29DDF9C, &WrapU_C<sceIoDopen>,                  "sceIoDopen",                  'i', "s",      HLE_KERNEL_SYSCALL },
+	{0xE3EB004C, &WrapU_IU<sceIoDread>,                 "sceIoDread",                  'i', "ix",     HLE_KERNEL_SYSCALL },
+	{0xEB092469, &WrapU_I<sceIoDclose>,                 "sceIoDclose",                 'i', "i",      HLE_KERNEL_SYSCALL },
+	{0X109F50BC, &WrapU_CII<sceIoOpen>,                 "sceIoOpen",                   'i', "sii",    HLE_KERNEL_SYSCALL },
+	{0x6A638D83, &WrapU_IUI<sceIoRead>,                 "sceIoRead",                   'i', "ixi",    HLE_KERNEL_SYSCALL },
+	{0x42EC03AC, &WrapU_IUI<sceIoWrite>,                "sceIoWrite",                  'i', "ixi",    HLE_KERNEL_SYSCALL },
+	{0x68963324, &WrapU_III<sceIoLseek32>,              "sceIoLseek32",                'i', "iii",    HLE_KERNEL_SYSCALL },
+	{0x27EB27B8, &WrapI64_II64I<sceIoLseek>,            "sceIoLseek",                  'I', "iIi",    HLE_KERNEL_SYSCALL },
+	{0x810C4BC3, &WrapU_I<sceIoClose>,                  "sceIoClose",                  'i', "i",      HLE_KERNEL_SYSCALL },
+	{0x779103A0, &WrapU_CC<sceIoRename>,                "sceIoRename",                 'i', "ss",     HLE_KERNEL_SYSCALL },
+	{0xF27A9C51, &WrapU_C<sceIoRemove>,                 "sceIoRemove",                 'i', "s",      HLE_KERNEL_SYSCALL },
+	{0x55F4717D, &WrapU_C<sceIoChdir>,                  "sceIoChdir",                  'i', "s",      HLE_KERNEL_SYSCALL },
+	{0x06A70004, &WrapU_CI<sceIoMkdir>,                 "sceIoMkdir",                  'i', "si",     HLE_KERNEL_SYSCALL },
+	{0x1117C65F, &WrapU_C<sceIoRmdir>,                  "sceIoRmdir",                  'i', "s",      HLE_KERNEL_SYSCALL },
+	{0x54F5FB11, &WrapU_CIUIUI<sceIoDevctl>,            "sceIoDevctl",                 'i', "sxpipi", HLE_KERNEL_SYSCALL },
+	{0x63632449, &WrapU_UUUUUU<sceIoIoctl>,             "sceIoIoctl",                  'i', "ixpipi", HLE_KERNEL_SYSCALL },
+	{0xAB96437F, &WrapU_CI<sceIoSync>,                  "sceIoSync",                   'i', "si",     HLE_KERNEL_SYSCALL },
+	{0xB2A628C1, &WrapU_UUUIUI<sceIoAssign>,            "sceIoAssign",                 'i', "sssixi", HLE_KERNEL_SYSCALL },
+	{0x6D08A871, &WrapU_C<sceIoUnassign>,               "sceIoUnassign",               'i', "s",      HLE_KERNEL_SYSCALL },
+	{0xACE946E8, &WrapU_CU<sceIoGetstat>,               "sceIoGetstat",                'i', "sx",     HLE_KERNEL_SYSCALL },
+	{0xB8A740F4, &WrapU_CUU<sceIoChstat>,               "sceIoChstat",                 'i', "sxx",    HLE_KERNEL_SYSCALL },
+	{0xA0B5A7C2, &WrapU_IUI<sceIoReadAsync>,            "sceIoReadAsync",              'i', "ixi",    HLE_KERNEL_SYSCALL },
+	{0x3251EA56, &WrapU_IU<sceIoPollAsync>,             "sceIoPollAsync",              'i', "iP",     HLE_KERNEL_SYSCALL },
+	{0xE23EEC33, &WrapI_IU<sceIoWaitAsync>,             "sceIoWaitAsync",              'i', "iP",     HLE_KERNEL_SYSCALL },
+	{0x35DBD746, &WrapI_IU<sceIoWaitAsyncCB>,           "sceIoWaitAsyncCB",            'i', "iP",     HLE_KERNEL_SYSCALL },
+	{0xBD17474F, nullptr,                               "IoFileMgrForKernel_BD17474F", '?', ""        },
+	{0x76DA16E3, nullptr,                               "IoFileMgrForKernel_76DA16E3", '?', ""        },
+};
+
+void Register_IoFileMgrForKernel() {
+	RegisterModule("IoFileMgrForKernel", ARRAY_SIZE(IoFileMgrForKernel), IoFileMgrForKernel);
+}
 
 const HLEFunction StdioForUser[] = {
 	{0X172D316E, &WrapU_V<sceKernelStdin>,              "sceKernelStdin",              'i', ""      },
@@ -2478,4 +2665,19 @@ const HLEFunction StdioForUser[] = {
 
 void Register_StdioForUser() {
 	RegisterModule("StdioForUser", ARRAY_SIZE(StdioForUser), StdioForUser);
+}
+
+const HLEFunction StdioForKernel[] = {
+	{0X98220F3E, nullptr,                                            "sceKernelStdoutReopen",                   '?', ""   },
+	{0XFB5380C5, nullptr,                                            "sceKernelStderrReopen",                   '?', ""   },
+	{0XCAB439DF, nullptr,                                            "printf",                                  '?', ""   },
+	{0X2CCF071A, nullptr,                                            "fdprintf",                                '?', ""   },
+	{0XD97C8CB9, nullptr,                                            "puts",                                    '?', ""   },
+	{0X172D316E, nullptr,                                            "sceKernelStdin",                          '?', ""   },
+	{0XA6BAB2E9, nullptr,                                            "sceKernelStdout",                         '?', ""   },
+	{0XF78BA90A, nullptr,                                            "sceKernelStderr",                         '?', ""   },
+};
+
+void Register_StdioForKernel() {
+	RegisterModule("StdioForKernel", ARRAY_SIZE(StdioForKernel), StdioForKernel);
 }

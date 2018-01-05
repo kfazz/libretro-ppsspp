@@ -124,13 +124,29 @@ inline float bern2deriv(float x) { return 3 * (2 - 3 * x) * x; }
 inline float bern3deriv(float x) { return 3 * x * x; }
 
 // http://en.wikipedia.org/wiki/Bernstein_polynomial
-static Vec3Packedf Bernstein3D(const Vec3Packedf& p0, const Vec3Packedf& p1, const Vec3Packedf& p2, const Vec3Packedf& p3, float x) {
+static Math3D::Vec2f Bernstein3D(const Math3D::Vec2f& p0, const Math3D::Vec2f& p1, const Math3D::Vec2f& p2, const Math3D::Vec2f& p3, float x) {
 	if (x == 0) return p0;
 	else if (x == 1) return p3;
 	return p0 * bern0(x) + p1 * bern1(x) + p2 * bern2(x) + p3 * bern3(x);
 }
 
-static Vec3Packedf Bernstein3DDerivative(const Vec3Packedf& p0, const Vec3Packedf& p1, const Vec3Packedf& p2, const Vec3Packedf& p3, float x) {
+static Vec3f Bernstein3D(const Vec3f& p0, const Vec3f& p1, const Vec3f& p2, const Vec3f& p3, float x) {
+	if (x == 0) return p0;
+	else if (x == 1) return p3;
+	return p0 * bern0(x) + p1 * bern1(x) + p2 * bern2(x) + p3 * bern3(x);
+}
+
+static Vec4f Bernstein3D(const Vec4f& p0, const Vec4f& p1, const Vec4f& p2, const Vec4f& p3, float x) {
+	if (x == 0) return p0;
+	else if (x == 1) return p3;
+	return p0 * bern0(x) + p1 * bern1(x) + p2 * bern2(x) + p3 * bern3(x);
+}
+
+static Vec4f Bernstein3D(const u32& p0, const u32& p1, const u32& p2, const u32& p3, float x) {
+	return Bernstein3D(Vec4f::FromRGBA(p0), Vec4f::FromRGBA(p1), Vec4f::FromRGBA(p2), Vec4f::FromRGBA(p3), x);
+}
+
+static Vec3f Bernstein3DDerivative(const Vec3f& p0, const Vec3f& p1, const Vec3f& p2, const Vec3f& p3, float x) {
 	return p0 * bern0deriv(x) + p1 * bern1deriv(x) + p2 * bern2deriv(x) + p3 * bern3deriv(x);
 }
 
@@ -307,8 +323,13 @@ static void SplinePatchFullQuality(u8 *&dest, u16 *indices, int &count, const Sp
 	int patch_div_s = (spatch.count_u - 3) * spatch.tess_u;
 	int patch_div_t = (spatch.count_v - 3) * spatch.tess_v;
 	if (quality > 1) {
-		patch_div_s /= quality;
-		patch_div_t /= quality;
+		// Don't cut below 2, though.
+		if (patch_div_s > 2) {
+			patch_div_s /= quality;
+		}
+		if (patch_div_t > 2) {
+			patch_div_t /= quality;
+		}
 	}
 
 	// Downsample until it fits, in case crazy tesselation factors are sent.
@@ -317,8 +338,8 @@ static void SplinePatchFullQuality(u8 *&dest, u16 *indices, int &count, const Sp
 		patch_div_t /= 2;
 	}
 
-	if (patch_div_s < 2) patch_div_s = 2;
-	if (patch_div_t < 2) patch_div_t = 2;
+	if (patch_div_s < 1) patch_div_s = 1;
+	if (patch_div_t < 1) patch_div_t = 1;
 
 	// First compute all the vertices and put them in an array
 	SimpleVertex *&vertices = (SimpleVertex*&)dest;
@@ -612,6 +633,32 @@ static void _BezierPatchLowQuality(u8 *&dest, u16 *&indices, int &count, int tes
 	}
 }
 
+template <typename T>
+struct PrecomputedCurves {
+	PrecomputedCurves(int count) {
+		horiz1 = (T *)AllocateAlignedMemory(count * 4 * sizeof(T), 16);
+		horiz2 = horiz1 + count * 1;
+		horiz3 = horiz1 + count * 2;
+		horiz4 = horiz1 + count * 3;
+	}
+	~PrecomputedCurves() {
+		FreeAlignedMemory(horiz1);
+	}
+
+	T Bernstein3D(int u, float bv) {
+		return ::Bernstein3D(horiz1[u], horiz2[u], horiz3[u], horiz4[u], bv);
+	}
+
+	T Bernstein3DDerivative(int u, float bv) {
+		return ::Bernstein3DDerivative(horiz1[u], horiz2[u], horiz3[u], horiz4[u], bv);
+	}
+
+	T *horiz1;
+	T *horiz2;
+	T *horiz3;
+	T *horiz4;
+};
+
 static void _BezierPatchHighQuality(u8 *&dest, u16 *&indices, int &count, int tess_u, int tess_v, const BezierPatch &patch, u32 origVertType, int maxVertices) {
 	const float third = 1.0f / 3.0f;
 
@@ -624,31 +671,41 @@ static void _BezierPatchHighQuality(u8 *&dest, u16 *&indices, int &count, int te
 	// First compute all the vertices and put them in an array
 	SimpleVertex *&vertices = (SimpleVertex*&)dest;
 
-	Vec3Packedf *horiz = new Vec3Packedf[(tess_u + 1) * 4];
-	Vec3Packedf *horiz2 = horiz + (tess_u + 1) * 1;
-	Vec3Packedf *horiz3 = horiz + (tess_u + 1) * 2;
-	Vec3Packedf *horiz4 = horiz + (tess_u + 1) * 3;
+	PrecomputedCurves<Vec3f> prepos(tess_u + 1);
+	PrecomputedCurves<Vec4f> precol(tess_u + 1);
+	PrecomputedCurves<Math3D::Vec2f> pretex(tess_u + 1);
+	PrecomputedCurves<Vec3f> prederivU(tess_u + 1);
 
-	Vec3Packedf *derivU1 = new Vec3Packedf[(tess_u + 1) * 4];
-	Vec3Packedf *derivU2 = derivU1 + (tess_u + 1) * 1;
-	Vec3Packedf *derivU3 = derivU1 + (tess_u + 1) * 2;
-	Vec3Packedf *derivU4 = derivU1 + (tess_u + 1) * 3;
-
-	bool computeNormals = patch.computeNormals;
+	const bool computeNormals = patch.computeNormals;
+	const bool sampleColors = (origVertType & GE_VTYPE_COL_MASK) != 0;
+	const bool sampleTexcoords = (origVertType & GE_VTYPE_TC_MASK) != 0;
 
 	// Precompute the horizontal curves to we only have to evaluate the vertical ones.
 	for (int i = 0; i < tess_u + 1; i++) {
 		float u = ((float)i / (float)tess_u);
-		horiz[i] = Bernstein3D(patch.points[0]->pos, patch.points[1]->pos, patch.points[2]->pos, patch.points[3]->pos, u);
-		horiz2[i] = Bernstein3D(patch.points[4]->pos, patch.points[5]->pos, patch.points[6]->pos, patch.points[7]->pos, u);
-		horiz3[i] = Bernstein3D(patch.points[8]->pos, patch.points[9]->pos, patch.points[10]->pos, patch.points[11]->pos, u);
-		horiz4[i] = Bernstein3D(patch.points[12]->pos, patch.points[13]->pos, patch.points[14]->pos, patch.points[15]->pos, u);
+		prepos.horiz1[i] = Bernstein3D(patch.points[0]->pos, patch.points[1]->pos, patch.points[2]->pos, patch.points[3]->pos, u);
+		prepos.horiz2[i] = Bernstein3D(patch.points[4]->pos, patch.points[5]->pos, patch.points[6]->pos, patch.points[7]->pos, u);
+		prepos.horiz3[i] = Bernstein3D(patch.points[8]->pos, patch.points[9]->pos, patch.points[10]->pos, patch.points[11]->pos, u);
+		prepos.horiz4[i] = Bernstein3D(patch.points[12]->pos, patch.points[13]->pos, patch.points[14]->pos, patch.points[15]->pos, u);
+
+		if (sampleColors) {
+			precol.horiz1[i] = Bernstein3D(patch.points[0]->color_32, patch.points[1]->color_32, patch.points[2]->color_32, patch.points[3]->color_32, u);
+			precol.horiz2[i] = Bernstein3D(patch.points[4]->color_32, patch.points[5]->color_32, patch.points[6]->color_32, patch.points[7]->color_32, u);
+			precol.horiz3[i] = Bernstein3D(patch.points[8]->color_32, patch.points[9]->color_32, patch.points[10]->color_32, patch.points[11]->color_32, u);
+			precol.horiz4[i] = Bernstein3D(patch.points[12]->color_32, patch.points[13]->color_32, patch.points[14]->color_32, patch.points[15]->color_32, u);
+		}
+		if (sampleTexcoords) {
+			pretex.horiz1[i] = Bernstein3D(Math3D::Vec2f(patch.points[0]->uv), Math3D::Vec2f(patch.points[1]->uv), Math3D::Vec2f(patch.points[2]->uv), Math3D::Vec2f(patch.points[3]->uv), u);
+			pretex.horiz2[i] = Bernstein3D(Math3D::Vec2f(patch.points[4]->uv), Math3D::Vec2f(patch.points[5]->uv), Math3D::Vec2f(patch.points[6]->uv), Math3D::Vec2f(patch.points[7]->uv), u);
+			pretex.horiz3[i] = Bernstein3D(Math3D::Vec2f(patch.points[8]->uv), Math3D::Vec2f(patch.points[9]->uv), Math3D::Vec2f(patch.points[10]->uv), Math3D::Vec2f(patch.points[11]->uv), u);
+			pretex.horiz4[i] = Bernstein3D(Math3D::Vec2f(patch.points[12]->uv), Math3D::Vec2f(patch.points[13]->uv), Math3D::Vec2f(patch.points[14]->uv), Math3D::Vec2f(patch.points[15]->uv), u);
+		}
 
 		if (computeNormals) {
-			derivU1[i] = Bernstein3DDerivative(patch.points[0]->pos, patch.points[1]->pos, patch.points[2]->pos, patch.points[3]->pos, u);
-			derivU2[i] = Bernstein3DDerivative(patch.points[4]->pos, patch.points[5]->pos, patch.points[6]->pos, patch.points[7]->pos, u);
-			derivU3[i] = Bernstein3DDerivative(patch.points[8]->pos, patch.points[9]->pos, patch.points[10]->pos, patch.points[11]->pos, u);
-			derivU4[i] = Bernstein3DDerivative(patch.points[12]->pos, patch.points[13]->pos, patch.points[14]->pos, patch.points[15]->pos, u);
+			prederivU.horiz1[i] = Bernstein3DDerivative(patch.points[0]->pos, patch.points[1]->pos, patch.points[2]->pos, patch.points[3]->pos, u);
+			prederivU.horiz2[i] = Bernstein3DDerivative(patch.points[4]->pos, patch.points[5]->pos, patch.points[6]->pos, patch.points[7]->pos, u);
+			prederivU.horiz3[i] = Bernstein3DDerivative(patch.points[8]->pos, patch.points[9]->pos, patch.points[10]->pos, patch.points[11]->pos, u);
+			prederivU.horiz4[i] = Bernstein3DDerivative(patch.points[12]->pos, patch.points[13]->pos, patch.points[14]->pos, patch.points[15]->pos, u);
 		}
 	}
 
@@ -659,51 +716,39 @@ static void _BezierPatchHighQuality(u8 *&dest, u16 *&indices, int &count, int te
 			float v = ((float)tile_v / (float)tess_v);
 			float bv = v;
 
-			// TODO: Should be able to precompute the four curves per U, then just Bernstein per V. Will benefit large tesselation factors.
-			const Vec3Packedf &pos1 = horiz[tile_u];
-			const Vec3Packedf &pos2 = horiz2[tile_u];
-			const Vec3Packedf &pos3 = horiz3[tile_u];
-			const Vec3Packedf &pos4 = horiz4[tile_u];
-
 			SimpleVertex &vert = vertices[tile_v * (tess_u + 1) + tile_u];
 
 			if (computeNormals) {
-				const Vec3Packedf &derivU1_ = derivU1[tile_u];
-				const Vec3Packedf &derivU2_ = derivU2[tile_u];
-				const Vec3Packedf &derivU3_ = derivU3[tile_u];
-				const Vec3Packedf &derivU4_ = derivU4[tile_u];
-
-				Vec3Packedf derivU = Bernstein3D(derivU1_, derivU2_, derivU3_, derivU4_, bv);
-				Vec3Packedf derivV = Bernstein3DDerivative(pos1, pos2, pos3, pos4, bv);
+				const Vec3f derivU = prederivU.Bernstein3D(tile_u, bv);
+				const Vec3f derivV = prepos.Bernstein3DDerivative(tile_u, bv);
 
 				vert.nrm = Cross(derivU, derivV).Normalized();
 				if (patch.patchFacing)
 					vert.nrm *= -1.0f;
-			}
-			else {
+			} else {
 				vert.nrm.SetZero();
 			}
 
-			vert.pos = Bernstein3D(pos1, pos2, pos3, pos4, bv);
+			vert.pos = prepos.Bernstein3D(tile_u, bv);
 
-			if ((origVertType & GE_VTYPE_TC_MASK) == 0) {
+			if (!sampleTexcoords) {
 				// Generate texcoord
 				vert.uv[0] = u + patch.u_index * third;
 				vert.uv[1] = v + patch.v_index * third;
 			} else {
 				// Sample UV from control points
-				patch.sampleTexUV(u, v, vert.uv[0], vert.uv[1]);
+				const Math3D::Vec2f res = pretex.Bernstein3D(tile_u, bv);
+				vert.uv[0] = res.x;
+				vert.uv[1] = res.y;
 			} 
 
-			if (origVertType & GE_VTYPE_COL_MASK) {
-				patch.sampleColor(u, v, vert.color);
+			if (sampleColors) {
+				vert.color_32 = precol.Bernstein3D(tile_u, bv).ToRGBA();
 			} else {
 				memcpy(vert.color, patch.points[0]->color, 4);
 			}
 		}
 	}
-	delete[] derivU1;
-	delete[] horiz;
 
 	GEPatchPrimType prim_type = patch.primType;
 	// Combine the vertices into triangles.
@@ -736,24 +781,30 @@ void TesselateBezierPatch(u8 *&dest, u16 *&indices, int &count, int tess_u, int 
 	}
 }
 
+// This maps GEPatchPrimType to GEPrimitiveType.
+const GEPrimitiveType primType[] = { GE_PRIM_TRIANGLES, GE_PRIM_LINES, GE_PRIM_POINTS, GE_PRIM_POINTS };
 
-const GEPrimitiveType primType[] = { GE_PRIM_TRIANGLES, GE_PRIM_LINES, GE_PRIM_POINTS };
-
-void DrawEngineCommon::SubmitSpline(const void *control_points, const void *indices, int tess_u, int tess_v, int count_u, int count_v, int type_u, int type_v, GEPatchPrimType prim_type, bool computeNormals, bool patchFacing, u32 vertType) {
+void DrawEngineCommon::SubmitSpline(const void *control_points, const void *indices, int tess_u, int tess_v, int count_u, int count_v, int type_u, int type_v, GEPatchPrimType prim_type, bool computeNormals, bool patchFacing, u32 vertType, int *bytesRead) {
 	PROFILE_THIS_SCOPE("spline");
 	DispatchFlush();
-
-	// TODO: Verify correct functionality with < 4.
-	if (count_u < 4 || count_v < 4)
-		return;
 
 	u16 index_lower_bound = 0;
 	u16 index_upper_bound = count_u * count_v - 1;
 	bool indices_16bit = (vertType & GE_VTYPE_IDX_MASK) == GE_VTYPE_IDX_16BIT;
-	const u8* indices8 = (const u8*)indices;
-	const u16* indices16 = (const u16*)indices;
+	bool indices_32bit = (vertType & GE_VTYPE_IDX_MASK) == GE_VTYPE_IDX_32BIT;
+	const u8 *indices8 = (const u8 *)indices;
+	const u16 *indices16 = (const u16 *)indices;
+	const u32 *indices32 = (const u32 *)indices;
 	if (indices)
-		GetIndexBounds(indices, count_u*count_v, vertType, &index_lower_bound, &index_upper_bound);
+		GetIndexBounds(indices, count_u * count_v, vertType, &index_lower_bound, &index_upper_bound);
+
+	VertexDecoder *origVDecoder = GetVertexDecoder((vertType & 0xFFFFFF) | (gstate.getUVGenMode() << 24));
+	*bytesRead = count_u * count_v * origVDecoder->VertexSize();
+
+	// Real hardware seems to draw nothing when given < 4 either U or V.
+	if (count_u < 4 || count_v < 4) {
+		return;
+	}
 
 	// Simplify away bones and morph before proceeding
 	SimpleVertex *simplified_control_points = (SimpleVertex *)(decoded + 65536 * 12);
@@ -774,10 +825,19 @@ void DrawEngineCommon::SubmitSpline(const void *control_points, const void *indi
 
 	// Make an array of pointers to the control points, to get rid of indices.
 	for (int idx = 0; idx < count_u * count_v; idx++) {
-		if (indices)
-			points[idx] = simplified_control_points + (indices_16bit ? indices16[idx] : indices8[idx]);
-		else
+		if (indices) {
+			u32 ind;
+			if (indices_32bit) {
+				ind = indices32[idx];
+			} else if (indices_16bit) {
+				ind = indices16[idx];
+			} else {
+				ind = indices8[idx];
+			}
+			points[idx] = simplified_control_points + ind;
+		} else {
 			points[idx] = simplified_control_points + idx;
+		}
 	}
 
 	int count = 0;
@@ -813,8 +873,8 @@ void DrawEngineCommon::SubmitSpline(const void *control_points, const void *indi
 		gstate_c.uv.vOff = 0;
 	}
 
-	int bytesRead;
-	DispatchSubmitPrim(splineBuffer, quadIndices_, primType[prim_type], count, vertTypeWithIndex16, &bytesRead);
+	int generatedBytesRead;
+	DispatchSubmitPrim(splineBuffer, quadIndices_, primType[prim_type], count, vertTypeWithIndex16, &generatedBytesRead);
 
 	DispatchFlush();
 
@@ -823,22 +883,29 @@ void DrawEngineCommon::SubmitSpline(const void *control_points, const void *indi
 	}
 }
 
-void DrawEngineCommon::SubmitBezier(const void *control_points, const void *indices, int tess_u, int tess_v, int count_u, int count_v, GEPatchPrimType prim_type, bool computeNormals, bool patchFacing, u32 vertType) {
+void DrawEngineCommon::SubmitBezier(const void *control_points, const void *indices, int tess_u, int tess_v, int count_u, int count_v, GEPatchPrimType prim_type, bool computeNormals, bool patchFacing, u32 vertType, int *bytesRead) {
 	PROFILE_THIS_SCOPE("bezier");
 
 	DispatchFlush();
 
-	// TODO: Verify correct functionality with < 4.
-	if (count_u < 4 || count_v < 4)
-		return;
-
 	u16 index_lower_bound = 0;
 	u16 index_upper_bound = count_u * count_v - 1;
 	bool indices_16bit = (vertType & GE_VTYPE_IDX_MASK) == GE_VTYPE_IDX_16BIT;
-	const u8* indices8 = (const u8*)indices;
-	const u16* indices16 = (const u16*)indices;
+	bool indices_32bit = (vertType & GE_VTYPE_IDX_MASK) == GE_VTYPE_IDX_32BIT;
+	const u8 *indices8 = (const u8 *)indices;
+	const u16 *indices16 = (const u16 *)indices;
+	const u32 *indices32 = (const u32 *)indices;
 	if (indices)
 		GetIndexBounds(indices, count_u*count_v, vertType, &index_lower_bound, &index_upper_bound);
+
+	VertexDecoder *origVDecoder = GetVertexDecoder((vertType & 0xFFFFFF) | (gstate.getUVGenMode() << 24));
+	*bytesRead = count_u * count_v * origVDecoder->VertexSize();
+
+	// Real hardware seems to draw nothing when given < 4 either U or V.
+	// This would result in num_patches_u / num_patches_v being 0.
+	if (count_u < 4 || count_v < 4) {
+		return;
+	}
 
 	// Simplify away bones and morph before proceeding
 	// There are normally not a lot of control points so just splitting decoded should be reasonably safe, although not great.
@@ -858,16 +925,25 @@ void DrawEngineCommon::SubmitBezier(const void *control_points, const void *indi
 	// Bezier patches share less control points than spline patches. Otherwise they are pretty much the same (except bezier don't support the open/close thing)
 	int num_patches_u = (count_u - 1) / 3;
 	int num_patches_v = (count_v - 1) / 3;
-	BezierPatch* patches = new BezierPatch[num_patches_u * num_patches_v];
+	BezierPatch *patches = new BezierPatch[num_patches_u * num_patches_v];
 	for (int patch_u = 0; patch_u < num_patches_u; patch_u++) {
 		for (int patch_v = 0; patch_v < num_patches_v; patch_v++) {
 			BezierPatch& patch = patches[patch_u + patch_v * num_patches_u];
 			for (int point = 0; point < 16; ++point) {
 				int idx = (patch_u * 3 + point % 4) + (patch_v * 3 + point / 4) * count_u;
-				if (indices)
-					patch.points[point] = simplified_control_points + (indices_16bit ? indices16[idx] : indices8[idx]);
-				else
+				if (indices) {
+					u32 ind;
+					if (indices_32bit) {
+						ind = indices32[idx];
+					} else if (indices_16bit) {
+						ind = indices16[idx];
+					} else {
+						ind = indices8[idx];
+					}
+					patch.points[point] = simplified_control_points + ind;
+				} else {
 					patch.points[point] = simplified_control_points + idx;
+				}
 			}
 			patch.u_index = patch_u * 3;
 			patch.v_index = patch_v * 3;
@@ -881,18 +957,21 @@ void DrawEngineCommon::SubmitBezier(const void *control_points, const void *indi
 	int count = 0;
 	u8 *dest = splineBuffer;
 
-	// Simple approximation of the real tesselation factor.
 	// We shouldn't really split up into separate 4x4 patches, instead we should do something that works
 	// like the splines, so we subdivide across the whole "mega-patch".
-	if (num_patches_u == 0) num_patches_u = 1;
-	if (num_patches_v == 0) num_patches_v = 1;
-	if (tess_u < 4) tess_u = 4;
-	if (tess_v < 4) tess_v = 4;
+
+	// If specified as 0, uses 1.
+	if (tess_u < 1) {
+		tess_u = 1;
+	}
+	if (tess_v < 1) {
+		tess_v = 1;
+	}
 
 	u16 *inds = quadIndices_;
 	int maxVertices = SPLINE_BUFFER_SIZE / vertexSize;
 	for (int patch_idx = 0; patch_idx < num_patches_u*num_patches_v; ++patch_idx) {
-		BezierPatch& patch = patches[patch_idx];
+		const BezierPatch &patch = patches[patch_idx];
 		TesselateBezierPatch(dest, inds, count, tess_u, tess_v, patch, origVertType, maxVertices);
 	}
 	delete[] patches;
@@ -909,8 +988,8 @@ void DrawEngineCommon::SubmitBezier(const void *control_points, const void *indi
 		gstate_c.uv.vOff = 0;
 	}
 
-	int bytesRead;
-	DispatchSubmitPrim(splineBuffer, quadIndices_, primType[prim_type], count, vertTypeWithIndex16, &bytesRead);
+	int generatedBytesRead;
+	DispatchSubmitPrim(splineBuffer, quadIndices_, primType[prim_type], count, vertTypeWithIndex16, &generatedBytesRead);
 
 	DispatchFlush();
 

@@ -15,6 +15,8 @@
 // Official git repository and contact information can be found at
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
+#pragma once
+
 #include "Common/CommonTypes.h"
 #include "Common/Log.h"
 
@@ -62,7 +64,8 @@ namespace Reporting
 	bool IsSupported();
 
 	// Set the current enabled state of the reporting system and desired reporting server host.
-	void Enable(bool flag, std::string host);
+	// Returns if anything was changed.
+	bool Enable(bool flag, std::string host);
 
 	// Use the default reporting setting (per compiled settings) of host and enabled state.
 	void EnableDefault();
@@ -74,8 +77,23 @@ namespace Reporting
 	void ReportMessageFormatted(const char *message, const char *formatted);
 
 	// Report the compatibility of the current game / configuration.
-	void ReportCompatibility(const char *compat, int graphics, int speed, int gameplay);
+	void ReportCompatibility(const char *compat, int graphics, int speed, int gameplay, const std::string &screenshotFilename);
 
 	// Returns true if that identifier has not been logged yet.
 	bool ShouldLogOnce(const char *identifier);
+
+	enum class Status {
+		WORKING,
+		BUSY,
+		FAILING,
+	};
+
+	// Whether server requests appear to be working.
+	Status GetStatus();
+
+	// Return the currently active host (or blank if not active.)
+	std::string ServerHost();
+
+	// Return the current game id.
+	std::string CurrentGameID();
 }

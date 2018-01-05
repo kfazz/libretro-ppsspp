@@ -33,8 +33,10 @@
 
 #pragma once
 
+#include <map>
+
 #include "Common/CommonTypes.h"
-#include "Core/MIPS/JitCommon/NativeJit.h"
+#include "Core/MIPS/JitCommon/JitCommon.h"
 
 typedef int (* ReplaceFunc)();
 

@@ -48,6 +48,14 @@ bool RamCachingFileLoader::Exists() {
 	return exists_ == 1;
 }
 
+bool RamCachingFileLoader::ExistsFast() {
+	if (exists_ == -1) {
+		lock_guard guard(backendMutex_);
+		return backend_->ExistsFast();
+	}
+	return exists_ == 1;
+}
+
 bool RamCachingFileLoader::IsDirectory() {
 	if (isDirectory_ == -1) {
 		lock_guard guard(backendMutex_);
@@ -69,34 +77,39 @@ void RamCachingFileLoader::Seek(s64 absolutePos) {
 	filepos_ = absolutePos;
 }
 
-size_t RamCachingFileLoader::ReadAt(s64 absolutePos, size_t bytes, void *data) {
+size_t RamCachingFileLoader::ReadAt(s64 absolutePos, size_t bytes, void *data, Flags flags) {
 	size_t readSize = 0;
-	if (cache_ == nullptr) {
+	if (cache_ == nullptr || (flags & Flags::HINT_UNCACHED) != 0) {
 		lock_guard guard(backendMutex_);
-		readSize = backend_->ReadAt(absolutePos, bytes, data);
+		readSize = backend_->ReadAt(absolutePos, bytes, data, flags);
 	} else {
 		readSize = ReadFromCache(absolutePos, bytes, data);
 		// While in case the cache size is too small for the entire read.
 		while (readSize < bytes) {
-			SaveIntoCache(absolutePos + readSize, bytes - readSize);
-			readSize += ReadFromCache(absolutePos + readSize, bytes - readSize, (u8 *)data + readSize);
+			SaveIntoCache(absolutePos + readSize, bytes - readSize, flags);
+			size_t bytesFromCache = ReadFromCache(absolutePos + readSize, bytes - readSize, (u8 *)data + readSize);
+			readSize += bytesFromCache;
+			if (bytesFromCache == 0) {
+			// We can't read any more.
+				break;
+			}
 		}
-	}
 
-	StartReadAhead(absolutePos + readSize);
+		StartReadAhead(absolutePos + readSize);
+	}
 
 	filepos_ = absolutePos + readSize;
 	return readSize;
 }
 
 void RamCachingFileLoader::InitCache() {
-	cache_ = (u8 *)malloc(filesize_);
+	lock_guard guard(blocksMutex_);
+	u32 blockCount = (u32)((filesize_ + BLOCK_SIZE - 1) >> BLOCK_SHIFT);
+	// Overallocate for the last block.
+	cache_ = (u8 *)malloc((size_t)blockCount << BLOCK_SHIFT);
 	if (cache_ == nullptr) {
 		return;
 	}
-
-	lock_guard guard(blocksMutex_);
-	u32 blockCount = (u32)((filesize_ + BLOCK_SIZE - 1) >> BLOCK_SHIFT);
 	aheadRemaining_ = blockCount;
 	blocks_.resize(blockCount);
 }
@@ -133,6 +146,15 @@ size_t RamCachingFileLoader::ReadFromCache(s64 pos, size_t bytes, void *data) {
 	size_t offset = (size_t)(pos - (cacheStartPos << BLOCK_SHIFT));
 	u8 *p = (u8 *)data;
 
+	// Clamp bytes to what's actually available.
+	if (pos + (s64)bytes > filesize_) {
+		// Should've been caught above, but just in case.
+		if (pos >= filesize_) {
+			return 0;
+		}
+		bytes = filesize_ - pos;
+	}
+
 	lock_guard guard(blocksMutex_);
 	for (s64 i = cacheStartPos; i <= cacheEndPos; ++i) {
 		if (blocks_[i] == 0) {
@@ -150,7 +172,7 @@ size_t RamCachingFileLoader::ReadFromCache(s64 pos, size_t bytes, void *data) {
 	return readSize;
 }
 
-void RamCachingFileLoader::SaveIntoCache(s64 pos, size_t bytes) {
+void RamCachingFileLoader::SaveIntoCache(s64 pos, size_t bytes, Flags flags) {
 	s64 cacheStartPos = pos >> BLOCK_SHIFT;
 	s64 cacheEndPos = (pos + bytes - 1) >> BLOCK_SHIFT;
 	if ((size_t)cacheEndPos >= blocks_.size()) {
@@ -172,15 +194,17 @@ void RamCachingFileLoader::SaveIntoCache(s64 pos, size_t bytes) {
 
 	backendMutex_.lock();
 	s64 cacheFilePos = cacheStartPos << BLOCK_SHIFT;
-	backend_->ReadAt(cacheFilePos, blocksToRead << BLOCK_SHIFT, &cache_[cacheFilePos]);
+	size_t bytesRead = backend_->ReadAt(cacheFilePos, blocksToRead << BLOCK_SHIFT, &cache_[cacheFilePos], flags);
 	backendMutex_.unlock();
 
+	// In case there was an error, let's not mark blocks that failed to read as read.
+	u32 blocksActuallyRead = (u32)((bytesRead + BLOCK_SIZE - 1) >> BLOCK_SHIFT);
 	{
 		lock_guard guard(blocksMutex_);
 
 		// In case they were simultaneously read.
 		u32 blocksRead = 0;
-		for (size_t i = 0; i < blocksToRead; ++i) {
+		for (size_t i = 0; i < blocksActuallyRead; ++i) {
 			if (blocks_[cacheStartPos + i] == 0) {
 				blocks_[cacheStartPos + i] = 1;
 				++blocksRead;
@@ -223,7 +247,7 @@ void RamCachingFileLoader::StartReadAhead(s64 pos) {
 
 			for (u32 i = cacheStartPos; i <= cacheEndPos; ++i) {
 				if (blocks_[i] == 0) {
-					SaveIntoCache(i << BLOCK_SHIFT, BLOCK_SIZE * BLOCK_READAHEAD);
+					SaveIntoCache((u64)i << BLOCK_SHIFT, BLOCK_SIZE * BLOCK_READAHEAD, Flags::NONE);
 					break;
 				}
 			}

@@ -40,7 +40,7 @@
 #include "HLE/sceUtility.h"
 
 #ifndef USING_QT_UI
-extern const char *PPSSPP_GIT_VERSION; 
+extern const char *PPSSPP_GIT_VERSION;
 #endif
 
 // TODO: Find a better place for this.
@@ -282,9 +282,20 @@ static int DefaultNumWorkers() {
 	return cpu_info.num_cores;
 }
 
-static bool DefaultJit() {
+// TODO: Default to IRJit on iOS when it's done.
+static int DefaultCpuCore() {
 #ifdef IOS
-	return iosCanUseJit;
+	return iosCanUseJit ? CPU_CORE_JIT : CPU_CORE_INTERPRETER;
+#elif defined(ARM) || defined(ARM64) || defined(_M_IX86) || defined(_M_X64)
+	return CPU_CORE_JIT;
+#else
+	return CPU_CORE_INTERPRETER;
+#endif
+}
+
+static bool DefaultCodeGen() {
+#ifdef IOS
+	return iosCanUseJit ? true : false;
 #elif defined(ARM) || defined(ARM64) || defined(_M_IX86) || defined(_M_X64)
 	return true;
 #else
@@ -316,6 +327,9 @@ static ConfigSetting generalSettings[] = {
 	ConfigSetting("CwCheatRefreshRate", &g_Config.iCwCheatRefreshRate, 77, true, true),
 
 	ConfigSetting("ScreenshotsAsPNG", &g_Config.bScreenshotsAsPNG, false, true, true),
+	ConfigSetting("UseFFV1", &g_Config.bUseFFV1, false),
+	ConfigSetting("DumpFrames", &g_Config.bDumpFrames, false),
+	ConfigSetting("DumpAudio", &g_Config.bDumpAudio, false),
 	ConfigSetting("StateSlot", &g_Config.iCurrentStateSlot, 0, true, true),
 	ConfigSetting("RewindFlipFrequency", &g_Config.iRewindFlipFrequency, 0, true, true),
 
@@ -328,6 +342,7 @@ static ConfigSetting generalSettings[] = {
 	ConfigSetting("ReportingHost", &g_Config.sReportHost, "default"),
 	ConfigSetting("AutoSaveSymbolMap", &g_Config.bAutoSaveSymbolMap, false, true, true),
 	ConfigSetting("CacheFullIsoInRam", &g_Config.bCacheFullIsoInRam, false, true, true),
+	ConfigSetting("RemoteISOPort", &g_Config.iRemoteISOPort, 0, true, false),
 
 #ifdef ANDROID
 	ConfigSetting("ScreenRotation", &g_Config.iScreenRotation, 1),
@@ -345,6 +360,9 @@ static ConfigSetting generalSettings[] = {
 	ConfigSetting("PauseWhenMinimized", &g_Config.bPauseWhenMinimized, false, true, true),
 	ConfigSetting("DumpDecryptedEboots", &g_Config.bDumpDecryptedEboot, false, true, true),
 	ConfigSetting("FullscreenOnDoubleclick", &g_Config.bFullscreenOnDoubleclick, true, false, false),
+
+	ReportedConfigSetting("MemStickInserted", &g_Config.bMemStickInserted, true, true, true),
+
 	ConfigSetting(false),
 };
 
@@ -353,7 +371,7 @@ static bool DefaultSasThread() {
 }
 
 static ConfigSetting cpuSettings[] = {
-	ReportedConfigSetting("Jit", &g_Config.bJit, &DefaultJit, true, true),
+	ReportedConfigSetting("CPUCore", &g_Config.iCpuCore, &DefaultCpuCore, true, true),
 	ReportedConfigSetting("SeparateCPUThread", &g_Config.bSeparateCPUThread, false, true, true),
 	ReportedConfigSetting("SeparateSASThread", &g_Config.bSeparateSASThread, &DefaultSasThread, true, true),
 	ReportedConfigSetting("SeparateIOThread", &g_Config.bSeparateIOThread, true, true, true),
@@ -445,8 +463,8 @@ static ConfigSetting graphicsSettings[] = {
 	ReportedConfigSetting("HighQualityDepth", &g_Config.bHighQualityDepth, true, true, true),
 	ReportedConfigSetting("FrameSkip", &g_Config.iFrameSkip, 0, true, true),
 	ReportedConfigSetting("AutoFrameSkip", &g_Config.bAutoFrameSkip, false, true, true),
-	ReportedConfigSetting("FrameRate", &g_Config.iFpsLimit, 0, true, true),
-#if defined(_WIN32) && !defined(__LIBRETRO__)
+	ConfigSetting("FrameRate", &g_Config.iFpsLimit, 0, true, true),
+#ifdef _WIN32
 	ConfigSetting("FrameSkipUnthrottle", &g_Config.bFrameSkipUnthrottle, false, true, true),
 	ConfigSetting("RestartRequired", &g_Config.bRestartRequired, false, false),
 #else
@@ -454,16 +472,16 @@ static ConfigSetting graphicsSettings[] = {
 #endif
 	ReportedConfigSetting("ForceMaxEmulatedFPS", &g_Config.iForceMaxEmulatedFPS, 60, true, true),
 
-	// TODO: Hm, on fast mobile GPUs we should definitely default to at least 4...
+	// TODO: Hm, on fast mobile GPUs we should definitely default to at least 4 (setting = 2)...
 #ifdef MOBILE_DEVICE
 	ConfigSetting("AnisotropyLevel", &g_Config.iAnisotropyLevel, 0, true, true),
 #else
-	ConfigSetting("AnisotropyLevel", &g_Config.iAnisotropyLevel, 8, true, true),
+	ConfigSetting("AnisotropyLevel", &g_Config.iAnisotropyLevel, 4, true, true),
 #endif
 	ReportedConfigSetting("VertexCache", &g_Config.bVertexCache, true, true, true),
 	ReportedConfigSetting("TextureBackoffCache", &g_Config.bTextureBackoffCache, false, true, true),
 	ReportedConfigSetting("TextureSecondaryCache", &g_Config.bTextureSecondaryCache, false, true, true),
-	ReportedConfigSetting("VertexDecJit", &g_Config.bVertexDecoderJit, &DefaultJit, false),
+	ReportedConfigSetting("VertexDecJit", &g_Config.bVertexDecoderJit, &DefaultCodeGen, false),
 
 #ifndef MOBILE_DEVICE
 	ConfigSetting("FullScreen", &g_Config.bFullScreen, false),
@@ -477,8 +495,9 @@ static ConfigSetting graphicsSettings[] = {
 	ConfigSetting("ImmersiveMode", &g_Config.bImmersiveMode, false, true, true),
 
 	ReportedConfigSetting("TrueColor", &g_Config.bTrueColor, true, true, true),
-
 	ReportedConfigSetting("MipMap", &g_Config.bMipMap, true, true, true),
+	ReportedConfigSetting("ReplaceTextures", &g_Config.bReplaceTextures, true, true, true),
+	ReportedConfigSetting("SaveNewTextures", &g_Config.bSaveNewTextures, false, true, true),
 
 	ReportedConfigSetting("TexScalingLevel", &g_Config.iTexScalingLevel, 1, true, true),
 	ReportedConfigSetting("TexScalingType", &g_Config.iTexScalingType, 0, true, true),
@@ -498,7 +517,8 @@ static ConfigSetting graphicsSettings[] = {
 	ReportedConfigSetting("FragmentTestCache", &g_Config.bFragmentTestCache, true, true, true),
 
 	ConfigSetting("GfxDebugOutput", &g_Config.bGfxDebugOutput, false, false, false),
-	ConfigSetting(false), 
+
+	ConfigSetting(false),
 };
 
 static ConfigSetting soundSettings[] = {
@@ -654,6 +674,7 @@ static ConfigSetting controlSettings[] = {
 static ConfigSetting networkSettings[] = {
 	ConfigSetting("EnableWlan", &g_Config.bEnableWlan, false, true, true),
 	ConfigSetting("EnableAdhocServer", &g_Config.bEnableAdhocServer, false, true, true),
+
 	ConfigSetting(false),
 };
 
@@ -725,7 +746,7 @@ static ConfigSetting debuggerSettings[] = {
 };
 
 static ConfigSetting speedHackSettings[] = {
-	ReportedConfigSetting("PrescaleUV", &g_Config.bPrescaleUV, false, true, true),
+	ReportedConfigSetting("PrescaleUVCoords", &g_Config.bPrescaleUV, true, true, true),
 	ReportedConfigSetting("DisableAlphaTest", &g_Config.bDisableAlphaTest, false, true, true),
 
 	ConfigSetting(false),
@@ -862,6 +883,7 @@ void Config::Load(const char *iniFileName, const char *controllerIniFilename) {
 		vPinnedPaths.push_back(it->second);
 	}
 
+	// This caps the exponent 4 (so 16x.)
 	if (iAnisotropyLevel > 4) {
 		iAnisotropyLevel = 4;
 	}
@@ -907,7 +929,7 @@ void Config::Load(const char *iniFileName, const char *controllerIniFilename) {
 		fcombo4X /= screen_width;
 		fcombo4Y /= screen_height;
 	}
-	
+
 	const char *gitVer = PPSSPP_GIT_VERSION;
 	Version installed(gitVer);
 	Version upgrade(upgradeVersion);
@@ -936,7 +958,7 @@ void Config::Load(const char *iniFileName, const char *controllerIniFilename) {
 	bSaveSettings = true;
 
 	LoadStandardControllerIni();
-	
+
 	//so this is all the way down here to overwrite the controller settings
 	//sadly it won't benefit from all the "version conversion" going on up-above
 	//but these configs shouldn't contain older versions anyhow
@@ -956,19 +978,19 @@ void Config::Load(const char *iniFileName, const char *controllerIniFilename) {
 	}
 
 	// Override ppsspp.ini JIT value to prevent crashing
-	if (!DefaultJit() && g_Config.bJit) {
+	if (DefaultCpuCore() != CPU_CORE_JIT && g_Config.iCpuCore == CPU_CORE_JIT) {
 		jitForcedOff = true;
-		g_Config.bJit = false;
+		g_Config.iCpuCore = CPU_CORE_INTERPRETER;
 	}
 }
 
 void Config::Save() {
 	if (jitForcedOff) {
 		// if JIT has been forced off, we don't want to screw up the user's ppsspp.ini
-		g_Config.bJit = true;
+		g_Config.iCpuCore = CPU_CORE_JIT;
 	}
 	if (iniFilename_.size() && g_Config.bSaveSettings) {
-		
+
 		saveGameConfig(gameId_);
 
 		CleanRecent();
@@ -1034,7 +1056,7 @@ void Config::Save() {
 	}
 	if (jitForcedOff) {
 		// force JIT off again just in case Config::Save() is called without exiting PPSSPP
-		g_Config.bJit = false;
+		g_Config.iCpuCore = CPU_CORE_INTERPRETER;
 	}
 }
 
@@ -1057,6 +1079,11 @@ void Config::DownloadCompletedCallback(http::Download &download) {
 
 	JsonReader reader(data.c_str(), data.size());
 	const json_value *root = reader.root();
+	if (!root) {
+		ERROR_LOG(LOADER, "Failed to parse json");
+		return;
+	}
+
 	std::string version = root->getString("version", "");
 
 	const char *gitVer = PPSSPP_GIT_VERSION;
@@ -1119,7 +1146,7 @@ void Config::CleanRecent() {
 	std::vector<std::string> cleanedRecent;
 	for (size_t i = 0; i < recentIsos.size(); i++) {
 		FileLoader *loader = ConstructFileLoader(recentIsos[i]);
-		if (loader->Exists()) {
+		if (loader->ExistsFast()) {
 			// Make sure we don't have any redundant items.
 			auto duplicate = std::find(cleanedRecent.begin(), cleanedRecent.end(), recentIsos[i]);
 			if (duplicate == cleanedRecent.end()) {

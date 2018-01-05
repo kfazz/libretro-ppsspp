@@ -70,6 +70,7 @@ static int delayedResultEvent = -1;
 static int hleAfterSyscall = HLE_AFTER_NOTHING;
 static const char *hleAfterSyscallReschedReason;
 static const HLEFunction *latestSyscall = nullptr;
+static int idleOp;
 
 void hleDelayResultFinish(u64 userdata, int cycleslate)
 {
@@ -93,6 +94,7 @@ void HLEInit()
 {
 	RegisterAllModules();
 	delayedResultEvent = CoreTiming::RegisterEvent("HLEDelayedResult", hleDelayResultFinish);
+	idleOp = GetSyscallOp("FakeSysCalls", NID_IDLE);
 }
 
 void HLEDoState(PointerWrap &p)
@@ -347,15 +349,17 @@ u64 hleDelayResult(u64 result, const char *reason, int usec)
 	return result;
 }
 
-void hleEatCycles(int cycles)
-{
+void hleEatCycles(int cycles) {
 	// Maybe this should Idle, at least for larger delays?  Could that cause issues?
 	currentMIPS->downcount -= cycles;
 }
 
-void hleEatMicro(int usec)
-{
+void hleEatMicro(int usec) {
 	hleEatCycles((int) usToCycles(usec));
+}
+
+bool hleIsKernelMode() {
+	return latestSyscall && (latestSyscall->flags & HLE_KERNEL_SYSCALL) != 0;
 }
 
 const static u32 deadbeefRegs[12] = {0xDEADBEEF, 0xDEADBEEF, 0xDEADBEEF, 0xDEADBEEF, 0xDEADBEEF, 0xDEADBEEF, 0xDEADBEEF, 0xDEADBEEF, 0xDEADBEEF, 0xDEADBEEF, 0xDEADBEEF, 0xDEADBEEF};
@@ -405,7 +409,7 @@ inline void hleFinishSyscall(const HLEFunction &info)
 	hleAfterSyscallReschedReason = 0;
 }
 
-inline void updateSyscallStats(int modulenum, int funcnum, double total)
+static void updateSyscallStats(int modulenum, int funcnum, double total)
 {
 	const char *name = moduleDB[modulenum].funcTable[funcnum].name;
 	// Ignore this one, especially for msInSyscalls (although that ignores CoreTiming events.)
@@ -454,11 +458,9 @@ inline void CallSyscallWithFlags(const HLEFunction *info)
 	}
 
 	if ((flags & HLE_NOT_DISPATCH_SUSPENDED) && !__KernelIsDispatchEnabled()) {
-		DEBUG_LOG(HLE, "%s: dispatch suspended", info->name);
-		RETURN(SCE_KERNEL_ERROR_CAN_NOT_WAIT);
+		RETURN(hleLogDebug(HLE, SCE_KERNEL_ERROR_CAN_NOT_WAIT, "dispatch suspended"));
 	} else if ((flags & HLE_NOT_IN_INTERRUPT) && __IsInInterrupt()) {
-		DEBUG_LOG(HLE, "%s: in interrupt", info->name);
-		RETURN(SCE_KERNEL_ERROR_ILLEGAL_CONTEXT);
+		RETURN(hleLogDebug(HLE, SCE_KERNEL_ERROR_ILLEGAL_CONTEXT, "in interrupt"));
 	} else {
 		info->func();
 	}
@@ -540,9 +542,8 @@ void CallSyscall(MIPSOpcode op)
 		return;
 	}
 
-	if (info->func)
-	{
-		if (op == GetSyscallOp("FakeSysCalls", NID_IDLE))
+	if (info->func) {
+		if (op == idleOp)
 			info->func();
 		else if (info->flags != 0)
 			CallSyscallWithFlags(info);
@@ -676,31 +677,32 @@ void hleDoLogInternal(LogTypes::LOG_TYPE t, LogTypes::LOG_LEVELS level, u64 res,
 
 	const char *fmt;
 	if (retmask == 'x') {
-		fmt = "%08llx=%s(%s)%s";
+		fmt = "%s%08llx=%s(%s)%s";
 		// Truncate the high bits of the result (from any sign extension.)
 		res = (u32)res;
 	} else if (retmask == 'i' || retmask == 'I') {
-		fmt = "%lld=%s(%s)%s";
+		fmt = "%s%lld=%s(%s)%s";
 	} else if (retmask == 'f') {
 		// TODO: For now, floats are just shown as bits.
-		fmt = "%08x=%s(%s)%s";
+		fmt = "%s%08x=%s(%s)%s";
 	} else {
 		_assert_msg_(HLE, false, "Invalid return format: %c", retmask);
-		fmt = "%08llx=%s(%s)%s";
+		fmt = "%s%08llx=%s(%s)%s";
 	}
 
-	GenericLog(level, t, file, line, fmt, res, latestSyscall->name, formatted_args, formatted_reason);
+	const char *kernelFlag = (latestSyscall->flags & HLE_KERNEL_SYSCALL) != 0 ? "K " : "";
+	GenericLog(level, t, file, line, fmt, kernelFlag, res, latestSyscall->name, formatted_args, formatted_reason);
 
 	if (reportTag != nullptr) {
 		// A blank string means always log, not just once.
 		if (reportTag[0] == '\0' || Reporting::ShouldLogOnce(reportTag)) {
 			// Here we want the original key, so that different args, etc. group together.
-			std::string key = std::string("%08x=") + latestSyscall->name + "(%s)";
+			std::string key = std::string(kernelFlag) + std::string("%08x=") + latestSyscall->name + "(%s)";
 			if (reason != nullptr)
 				key += std::string(": ") + reason;
 
 			char formatted_message[8192];
-			snprintf(formatted_message, sizeof(formatted_message), fmt, res, latestSyscall->name, formatted_args, formatted_reason);
+			snprintf(formatted_message, sizeof(formatted_message), fmt, kernelFlag, res, latestSyscall->name, formatted_args, formatted_reason);
 			Reporting::ReportMessageFormatted(key.c_str(), formatted_message);
 		}
 	}

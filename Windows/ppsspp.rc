@@ -19,17 +19,17 @@ LANGUAGE LANG_NEUTRAL, SUBLANG_DEFAULT
 // TEXTINCLUDE
 //
 
-1 TEXTINCLUDE 
+1 TEXTINCLUDE
 BEGIN
     "resource.h\0"
 END
 
-2 TEXTINCLUDE 
+2 TEXTINCLUDE
 BEGIN
     "\0"
 END
 
-3 TEXTINCLUDE 
+3 TEXTINCLUDE
 BEGIN
     "\r\n"
     "\0"
@@ -187,6 +187,7 @@ BEGIN
     PUSHBUTTON      "Level -",IDC_GEDBG_TEXLEVELDOWN,24,192,40,14
     PUSHBUTTON      "Level +",IDC_GEDBG_TEXLEVELUP,84,192,40,14
     CONTROL         "",IDC_GEDBG_FBTABS,"SysTabControl32",TCS_BUTTONS | TCS_FOCUSNEVER,384,192,110,12
+    PUSHBUTTON      "Break on Target...",IDC_GEDBG_BREAKTARGET,394,211,100,14
 END
 
 
@@ -265,7 +266,7 @@ BEGIN
     CONTROL         "",IDC_TABDATATYPE,"SysTabControl32",TCS_BUTTONS,0,1,205,15
 END
 
-IDD_BREAKPOINT DIALOGEX 0, 0, 236, 89
+IDD_BREAKPOINT DIALOGEX 0, 0, 236, 109
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Breakpoint"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
@@ -281,10 +282,12 @@ BEGIN
     CONTROL         "On change",IDC_BREAKPOINT_ONCHANGE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,170,34,50,10
     LTEXT           "Condition",IDC_STATIC,7,51,31,8
     EDITTEXT        IDC_BREAKPOINT_CONDITION,41,49,187,14,ES_AUTOHSCROLL
-    CONTROL         "Enabled",IDC_BREAKPOINT_ENABLED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,41,71,41,10
-    CONTROL         "Log",IDC_BREAKPOINT_LOG,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,96,71,27,10
-    DEFPUSHBUTTON   "OK",IDC_BREAKPOINT_OK,144,68,41,14
-    PUSHBUTTON      "Cancel",IDC_BREAKPOINT_CANCEL,186,68,42,14
+    LTEXT           "Log fmt",IDC_STATIC,7,71,31,8
+    EDITTEXT        IDC_BREAKPOINT_LOG_FORMAT,41,69,187,14,ES_AUTOHSCROLL
+    CONTROL         "Break",IDC_BREAKPOINT_ENABLED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,41,91,41,10
+    CONTROL         "Log",IDC_BREAKPOINT_LOG,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,96,91,27,10
+    DEFPUSHBUTTON   "OK",IDC_BREAKPOINT_OK,144,88,41,14
+    PUSHBUTTON      "Cancel",IDC_BREAKPOINT_CANCEL,186,88,42,14
 END
 
 IDD_DUMPMEMORY DIALOGEX 0, 0, 230, 85
@@ -398,9 +401,17 @@ BEGIN
             MENUITEM "&5",                                  ID_FILE_SAVESTATE_SLOT_5
         END
         MENUITEM "Load State",                              ID_FILE_QUICKLOADSTATE
-        MENUITEM "Save State",                              ID_FILE_QUICKSAVESTATE 
+        MENUITEM "Save State",                              ID_FILE_QUICKSAVESTATE
         MENUITEM "Load State File...",                      ID_FILE_LOADSTATEFILE
         MENUITEM "Save State File...",                      ID_FILE_SAVESTATEFILE
+
+        POPUP "Record"
+        BEGIN
+            MENUITEM "Record Display",                      ID_FILE_DUMPFRAMES
+            MENUITEM "Use Lossless Video Codec (FFV1)",     ID_FILE_USEFFV1
+            MENUITEM SEPARATOR
+            MENUITEM "Record Audio",                        ID_FILE_DUMPAUDIO
+        END
         MENUITEM SEPARATOR
         MENUITEM "Exit",                                    ID_FILE_EXIT
     END
@@ -481,6 +492,7 @@ BEGIN
         BEGIN
             MENUITEM "Direct3D9" ID_OPTIONS_DIRECT3D9
             MENUITEM "OpenGL" ID_OPTIONS_OPENGL
+            MENUITEM "Vulkan" ID_OPTIONS_VULKAN
         END
 
         POPUP "Rendering Mode"
@@ -623,6 +635,17 @@ BEGIN
         MENUITEM "Go to Displaylist PC",       ID_GEDBG_GOTOPC
         MENUITEM "Go to Address...",           ID_GEDBG_GOTOADDR
         MENUITEM "Go to in Memory View",       ID_DISASM_GOTOINMEMORYVIEW
+    END
+    POPUP "stateoptions"
+    BEGIN
+        MENUITEM "Change...",                  ID_REGLIST_CHANGE
+        MENUITEM SEPARATOR
+        MENUITEM "Copy Value (Hex)",           ID_DISASM_COPYINSTRUCTIONHEX
+        MENUITEM "Copy Value (Formatted)",     ID_DISASM_COPYINSTRUCTIONDISASM
+        MENUITEM "Copy Entire Tab (Formatted)",ID_GEDBG_COPYALL
+        MENUITEM SEPARATOR
+        MENUITEM "Toggle Breakpoint",          ID_DISASM_TOGGLEBREAKPOINT
+        MENUITEM "Add Watch",                  ID_GEDBG_WATCH
     END
 END
 

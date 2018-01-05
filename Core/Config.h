@@ -33,6 +33,12 @@ const int PSP_DEFAULT_FIRMWARE = 150;
 static const s8 VOLUME_OFF = 0;
 static const s8 VOLUME_MAX = 10;
 
+enum CPUCore {
+	CPU_CORE_INTERPRETER = 0,
+	CPU_CORE_JIT = 1,
+	CPU_CORE_IRJIT = 2,
+};
+
 enum {
 	ROTATION_AUTO = 0,
 	ROTATION_LOCKED_HORIZONTAL = 1,
@@ -50,10 +56,14 @@ enum BufferFilter {
 enum class GPUBackend {
 	OPENGL = 0,
 	DIRECT3D9 = 1,
+	DIRECT3D11 = 2,
+	VULKAN = 3,
 };
 enum {
 	GPU_BACKEND_OPENGL = (int)GPUBackend::OPENGL,
 	GPU_BACKEND_DIRECT3D9 = (int)GPUBackend::DIRECT3D9,
+	GPU_BACKEND_DIRECT3D11 = (int)GPUBackend::DIRECT3D11,
+	GPU_BACKEND_VULKAN = (int)GPUBackend::VULKAN,
 };
 
 enum AudioBackendType {
@@ -94,6 +104,9 @@ public:
 	// General
 	int iNumWorkerThreads;
 	bool bScreenshotsAsPNG;
+	bool bUseFFV1;
+	bool bDumpFrames;
+	bool bDumpAudio;
 	bool bEnableLogging;
 	bool bDumpDecryptedEboot;
 	bool bFullscreenOnDoubleclick;
@@ -111,11 +124,12 @@ public:
 #if !defined(MOBILE_DEVICE)
 	bool bPauseExitsEmulator;
 #endif
+	bool bPS3Controller;
 
 	// Core
 	bool bIgnoreBadMemAccess;
 	bool bFastMemory;
-	bool bJit;
+	int iCpuCore;
 	bool bCheckForNewVersion;
 	bool bForceLagSync;
 	bool bFuncReplacements;
@@ -128,6 +142,8 @@ public:
 	int iLockedCPUSpeed;
 	bool bAutoSaveSymbolMap;
 	bool bCacheFullIsoInRam;
+	int iRemoteISOPort;
+	bool bMemStickInserted;
 
 	int iScreenRotation;  // The rotation angle of the PPSSPP UI. Only supported on Android and possibly other mobile platforms.
 	int iInternalScreenRotation;  // The internal screen rotation angle. Useful for vertical SHMUPs and similar.
@@ -176,6 +192,8 @@ public:
 	int bHighQualityDepth;
 	bool bTrueColor;
 	bool bMipMap;
+	bool bReplaceTextures;
+	bool bSaveNewTextures;
 	int iTexScalingLevel; // 1 = off, 2 = 2x, ..., 5 = 5x
 	int iTexScalingType; // 0 = xBRZ, 1 = Hybrid
 	bool bTexDeposterize;
@@ -221,7 +239,7 @@ public:
 	//considers this orientation to be equal to no movement of the analog stick.
 	float fTiltBaseX, fTiltBaseY;
 	//whether the x axes and y axes should invert directions (left becomes right, top becomes bottom.)
-	bool bInvertTiltX, bInvertTiltY; 
+	bool bInvertTiltX, bInvertTiltY;
 	//the sensitivity of the tilt in the x direction
 	int iTiltSensitivityX;
 	//the sensitivity of the tilt in the Y direction
@@ -316,7 +334,7 @@ public:
 	bool bShowComboKey2;
 	bool bShowComboKey3;
 	bool bShowComboKey4;
-	
+
 	// Combo_key mapping. These are bitfields.
 	int iCombokey0;
 	int iCombokey1;
@@ -345,9 +363,9 @@ public:
 	// proper options when good enough.
 	// PrescaleUV:
 	//   * Applies UV scale/offset when decoding verts. Get rid of some work in the vertex shader,
-	//     saves a uniform upload and is a prerequisite for future optimized hybrid 
+	//     saves a uniform upload and is a prerequisite for future optimized hybrid
 	//     (SW skinning, HW transform) skinning.
-	//   * Still has major problems so off by default - need to store tex scale/offset per DeferredDrawCall, 
+	//   * Still has major problems so off by default - need to store tex scale/offset per DeferredDrawCall,
 	//     which currently isn't done so if texscale/offset isn't static (like in Tekken 6) things go wrong.
 	bool bPrescaleUV;
 	bool bDisableAlphaTest;  // Helps PowerVR immensely, breaks some graphics
@@ -410,7 +428,7 @@ public:
 	bool bShowFrameProfiler;
 
 	std::string currentDirectory;
-	std::string externalDirectory; 
+	std::string externalDirectory;
 	std::string memStickDirectory;
 	std::string flash0Directory;
 	std::string internalDataDirectory;
@@ -424,7 +442,7 @@ public:
 	void Load(const char *iniFileName = nullptr, const char *controllerIniFilename = nullptr);
 	void Save();
 	void RestoreDefaults();
-	
+
 	//per game config managment, should maybe be in it's own class
 	void changeGameSpecific(const std::string &gameId = "");
 	bool createGameConfig(const std::string &game_id);
@@ -458,7 +476,7 @@ public:
 
 protected:
 	void LoadStandardControllerIni();
-	
+
 private:
 	std::string gameId_;
 	std::string iniFilename_;

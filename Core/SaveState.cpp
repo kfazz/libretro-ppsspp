@@ -20,7 +20,6 @@
 
 #include "base/mutex.h"
 #include "base/timeutil.h"
-#include "base/NativeApp.h"
 #include "i18n/i18n.h"
 
 #include "Common/FileUtil.h"
@@ -41,9 +40,9 @@
 #include "Core/HLE/sceKernel.h"
 #include "Core/MemMap.h"
 #include "Core/MIPS/MIPS.h"
+#include "Core/MIPS/JitCommon/JitBlockCache.h"
 #include "HW/MemoryStick.h"
 #include "GPU/GPUState.h"
-#include "UI/OnScreenDisplay.h"
 
 namespace SaveState
 {
@@ -227,10 +226,10 @@ namespace SaveState
 		auto savedReplacements = SaveAndClearReplacements();
 		if (MIPSComp::jit && p.mode == p.MODE_WRITE)
 		{
-			auto blockCache = MIPSComp::jit->GetBlockCache();
-			auto savedBlocks = blockCache->SaveAndClearEmuHackOps();
+			std::vector<u32> savedBlocks;
+			savedBlocks = MIPSComp::jit->SaveAndClearEmuHackOps();
 			Memory::DoState(p);
-			blockCache->RestoreSavedEmuHackOps(savedBlocks);
+			MIPSComp::jit->RestoreSavedEmuHackOps(savedBlocks);
 		}
 		else
 			Memory::DoState(p);
@@ -374,11 +373,7 @@ namespace SaveState
 
 	void NextSlot()
 	{
-		I18NCategory *sy = GetI18NCategory("System");
 		g_Config.iCurrentStateSlot = (g_Config.iCurrentStateSlot + 1) % NUM_SLOTS;
-		std::string msg = StringFromFormat("%s: %d", sy->T("Savestate Slot"), g_Config.iCurrentStateSlot + 1);
-		osm.Show(msg);
-		NativeMessageReceived("slotchanged", "");
 	}
 
 	void LoadSlot(const std::string &gameFilename, int slot, Callback callback, void *cbUserData)
@@ -388,9 +383,8 @@ namespace SaveState
 			Load(fn, callback, cbUserData);
 		} else {
 			I18NCategory *sy = GetI18NCategory("System");
-			osm.Show(sy->T("Failed to load state. Error in the file system."), 2.0);
 			if (callback)
-				callback(false, cbUserData);
+				callback(false, sy->T("Failed to load state. Error in the file system."), cbUserData);
 		}
 	}
 
@@ -399,7 +393,7 @@ namespace SaveState
 		std::string fn = GenerateSaveSlotFilename(gameFilename, slot, STATE_EXTENSION);
 		std::string shot = GenerateSaveSlotFilename(gameFilename, slot, SCREENSHOT_EXTENSION);
 		if (!fn.empty()) {
-			auto renameCallback = [=](bool status, void *data) {
+			auto renameCallback = [=](bool status, const std::string &message, void *data) {
 				if (status) {
 					if (File::Exists(fn)) {
 						File::Delete(fn);
@@ -407,17 +401,16 @@ namespace SaveState
 					File::Rename(fn + ".tmp", fn);
 				}
 				if (callback) {
-					callback(status, data);
+					callback(status, message, data);
 				}
 			};
 			// Let's also create a screenshot.
 			SaveScreenshot(shot, Callback(), 0);
 			Save(fn + ".tmp", renameCallback, cbUserData);
 		} else {
-			I18NCategory *sc = GetI18NCategory("Screen");
-			osm.Show("Failed to save state. Error in the file system.", 2.0);
+			I18NCategory *sy = GetI18NCategory("System");
 			if (callback)
-				callback(false, cbUserData);
+				callback(false, sy->T("Failed to save state. Error in the file system."), cbUserData);
 		}
 	}
 
@@ -563,6 +556,7 @@ namespace SaveState
 			Operation &op = operations[i];
 			CChunkFileReader::Error result;
 			bool callbackResult;
+			std::string callbackMessage;
 			std::string reason;
 
 			I18NCategory *sc = GetI18NCategory("Screen");
@@ -579,16 +573,16 @@ namespace SaveState
 				INFO_LOG(COMMON, "Loading state from %s", op.filename.c_str());
 				result = CChunkFileReader::Load(op.filename, PPSSPP_GIT_VERSION, state, &reason);
 				if (result == CChunkFileReader::ERROR_NONE) {
-					osm.Show(sc->T("Loaded State"), 2.0);
+					callbackMessage = sc->T("Loaded State");
 					callbackResult = true;
 					hasLoadedState = true;
 				} else if (result == CChunkFileReader::ERROR_BROKEN_STATE) {
 					HandleFailure();
-					osm.Show(i18nLoadFailure, 2.0);
+					callbackMessage = i18nLoadFailure;
 					ERROR_LOG(COMMON, "Load state failure: %s", reason.c_str());
 					callbackResult = false;
 				} else {
-					osm.Show(sc->T(reason.c_str(), i18nLoadFailure), 2.0);
+					callbackMessage = sc->T(reason.c_str(), i18nLoadFailure);
 					callbackResult = false;
 				}
 				break;
@@ -597,52 +591,56 @@ namespace SaveState
 				INFO_LOG(COMMON, "Saving state to %s", op.filename.c_str());
 				result = CChunkFileReader::Save(op.filename, g_paramSFO.GetValueString("TITLE"), PPSSPP_GIT_VERSION, state);
 				if (result == CChunkFileReader::ERROR_NONE) {
-
-					osm.Show(sc->T("Saved State"), 2.0);
+					callbackMessage = sc->T("Saved State");
 					callbackResult = true;
 				} else if (result == CChunkFileReader::ERROR_BROKEN_STATE) {
 					HandleFailure();
-					osm.Show(i18nSaveFailure, 2.0);
+					callbackMessage = i18nSaveFailure;
 					ERROR_LOG(COMMON, "Save state failure: %s", reason.c_str());
 					callbackResult = false;
 				} else {
-					osm.Show(i18nSaveFailure, 2.0);
+					callbackMessage = i18nSaveFailure;
 					callbackResult = false;
 				}
 				break;
 
 			case SAVESTATE_VERIFY:
-				INFO_LOG(COMMON, "Verifying save state system");
 				callbackResult = CChunkFileReader::Verify(state) == CChunkFileReader::ERROR_NONE;
+				if (callbackResult) {
+					INFO_LOG(COMMON, "Verified save state system");
+				} else {
+					ERROR_LOG(COMMON, "Save state system verification failed");
+				}
 				break;
 
 			case SAVESTATE_REWIND:
 				INFO_LOG(COMMON, "Rewinding to recent savestate snapshot");
 				result = rewindStates.Restore();
 				if (result == CChunkFileReader::ERROR_NONE) {
-					osm.Show(sc->T("Loaded State"), 2.0);
+					callbackMessage = sc->T("Loaded State");
 					callbackResult = true;
 					hasLoadedState = true;
 				} else if (result == CChunkFileReader::ERROR_BROKEN_STATE) {
 					// Cripes.  Good news is, we might have more.  Let's try those too, better than a reset.
 					if (HandleFailure()) {
 						// Well, we did rewind, even if too much...
-						osm.Show(sc->T("Loaded State"), 2.0);
+						callbackMessage = sc->T("Loaded State");
 						callbackResult = true;
 						hasLoadedState = true;
 					} else {
-						osm.Show(i18nLoadFailure, 2.0);
+						callbackMessage = i18nLoadFailure;
 						callbackResult = false;
 					}
 				} else {
-					osm.Show(i18nLoadFailure, 2.0);
+					callbackMessage = i18nLoadFailure;
 					callbackResult = false;
 				}
 				break;
 
 			case SAVESTATE_SAVE_SCREENSHOT:
 #ifndef __LIBRETRO__
-				if (!TakeGameScreenshot(op.filename.c_str(), SCREENSHOT_JPG, SCREENSHOT_RENDER)) {
+				callbackResult = TakeGameScreenshot(op.filename.c_str(), SCREENSHOT_JPG, SCREENSHOT_RENDER);
+				if (!callbackResult) {
 					ERROR_LOG(COMMON, "Failed to take a screenshot for the savestate! %s", op.filename.c_str());
 				}
 #endif
@@ -655,7 +653,7 @@ namespace SaveState
 			}
 
 			if (op.callback)
-				op.callback(callbackResult, op.cbUserData);
+				op.callback(callbackResult, callbackMessage, op.cbUserData);
 		}
 		if (operations.size()) {
 			// Avoid triggering frame skipping due to slowdown

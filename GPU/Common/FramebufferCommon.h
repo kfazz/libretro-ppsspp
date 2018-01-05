@@ -51,6 +51,8 @@ namespace DX9 {
 	struct FBO_DX9;
 }
 
+class VulkanFBO;
+
 struct VirtualFramebuffer {
 	int last_frame_used;
 	int last_frame_attached;
@@ -60,6 +62,7 @@ struct VirtualFramebuffer {
 	u32 clutUpdatedBytes;
 	bool memoryUpdated;
 	bool depthUpdated;
+	bool firstFrameSaved;
 
 	u32 fb_address;
 	u32 z_address;
@@ -85,16 +88,20 @@ struct VirtualFramebuffer {
 	int lastFrameNewSize;
 
 	GEBufferFormat format;  // virtual, right now they are all RGBA8888
+
 	// TODO: Handle fbo and colorDepth better.
 	u8 colorDepth;
 	union {
 		FBO *fbo;
 		DX9::FBO_DX9 *fbo_dx9;
+		VulkanFBO *fbo_vk;
 	};
 
 	u16 drawnWidth;
 	u16 drawnHeight;
 	GEBufferFormat drawnFormat;
+	u16 safeWidth;
+	u16 safeHeight;
 
 	bool dirtyAfterDisplay;
 	bool reallyDirtyAfterDisplay;  // takes frame skipping into account
@@ -154,7 +161,8 @@ public:
 			// that come from elsewhere than gstate.
 			FramebufferHeuristicParams inputs;
 			GetFramebufferHeuristicInputs(&inputs, gstate);
-			return DoSetRenderFrameBuffer(inputs, skipDrawReason);
+			VirtualFramebuffer *vfb = DoSetRenderFrameBuffer(inputs, skipDrawReason);
+			return vfb;
 		}
 	}
 	virtual void RebindFramebuffer() = 0;
@@ -171,7 +179,6 @@ public:
 
 	virtual void ReadFramebufferToMemory(VirtualFramebuffer *vfb, bool sync, int x, int y, int w, int h) = 0;
 	virtual void DownloadFramebufferForClut(u32 fb_address, u32 loadBytes) = 0;
-	virtual void MakePixelTexture(const u8 *srcPixels, GEBufferFormat srcPixelFormat, int srcStride, int width, int height) = 0;
 	virtual void DrawPixels(VirtualFramebuffer *vfb, int dstX, int dstY, const u8 *srcPixels, GEBufferFormat srcPixelFormat, int srcStride, int width, int height) = 0;
 	virtual void DrawFramebufferToOutput(const u8 *srcPixels, GEBufferFormat srcPixelFormat, int srcStride, bool applyPostShader) = 0;
 
@@ -220,6 +227,7 @@ public:
 		}
 	}
 	void SetRenderSize(VirtualFramebuffer *vfb);
+	void SetSafeSize(u16 w, u16 h);
 
 protected:
 	void UpdateSize();
@@ -237,7 +245,7 @@ protected:
 	static bool MaskedEqual(u32 addr1, u32 addr2);
 
 	virtual void DestroyFramebuf(VirtualFramebuffer *vfb) = 0;
-	virtual void ResizeFramebufFBO(VirtualFramebuffer *vfb, u16 w, u16 h, bool force = false) = 0;
+	virtual void ResizeFramebufFBO(VirtualFramebuffer *vfb, u16 w, u16 h, bool force = false, bool skipCopy = false) = 0;
 	virtual void NotifyRenderFramebufferCreated(VirtualFramebuffer *vfb) = 0;
 	virtual void NotifyRenderFramebufferSwitched(VirtualFramebuffer *prevVfb, VirtualFramebuffer *vfb, bool isClearingDepth) = 0;
 	virtual void NotifyRenderFramebufferUpdated(VirtualFramebuffer *vfb, bool vfbFormatChanged) = 0;
@@ -245,6 +253,7 @@ protected:
 	void ShowScreenResolution();
 
 	bool ShouldDownloadFramebuffer(const VirtualFramebuffer *vfb) const;
+	void DownloadFramebufferOnSwitch(VirtualFramebuffer *vfb);
 	void FindTransferFramebuffers(VirtualFramebuffer *&dstBuffer, VirtualFramebuffer *&srcBuffer, u32 dstBasePtr, int dstStride, int &dstX, int &dstY, u32 srcBasePtr, int srcStride, int &srcX, int &srcY, int &srcWidth, int &srcHeight, int &dstWidth, int &dstHeight, int bpp) const;
 	VirtualFramebuffer *FindDownloadTempBuffer(VirtualFramebuffer *vfb);
 	virtual bool CreateDownloadTempBuffer(VirtualFramebuffer *nvfb) = 0;

@@ -23,6 +23,7 @@ public:
 	CWCheatEngine();
 	std::vector<std::string> GetCodesList();
 	void CreateCodeList();
+	void CreateCheatFile();
 	void Exit();
 	void Run();
 	std::vector<int> GetNextCode();
@@ -32,7 +33,7 @@ private:
 	void InvalidateICache(u32 addr, int size);
 	void SkipCodes(int count);
 	void SkipAllCodes();
-	bool cheatsOn, exit2, cheatEnabled;
+	bool exit2, cheatEnabled;
 	int GetAddress(int value);
 	std::vector<std::string> codeNameList;
 

@@ -60,7 +60,7 @@ public class NativeActivity extends Activity implements SurfaceHolder.Callback {
 	// Allows us to skip a lot of initialization on secondary calls to onCreate.
 	private static boolean initialized = false;
 
-	// Change this to false to switch to C++ EGL.
+	// False to use C++ EGL, queried from C++ after NativeApp.init.
 	private static boolean javaGL = true;
 
 	// Graphics and audio interfaces for EGL (javaGL = false)
@@ -266,9 +266,13 @@ public class NativeActivity extends Activity implements SurfaceHolder.Callback {
 		String languageRegion = Locale.getDefault().getLanguage() + "_" + Locale.getDefault().getCountry();
 
 		NativeApp.audioConfig(optimalFramesPerBuffer, optimalSampleRate);
-		NativeApp.init(model, deviceType, languageRegion, apkFilePath, dataDir, externalStorageDir, libraryDir, cacheDir, shortcutParam, Build.VERSION.SDK_INT, javaGL);
+		NativeApp.init(model, deviceType, languageRegion, apkFilePath, dataDir, externalStorageDir, libraryDir, cacheDir, shortcutParam, Build.VERSION.SDK_INT, Build.BOARD);
+
+		// Allow C++ to tell us to use JavaGL or not.
+		javaGL = "true".equalsIgnoreCase(NativeApp.queryConfig("androidJavaGL"));
 
 		sendInitialGrants();
+		PowerSaveModeReceiver.initAndSend(this);
 
 		// OK, config should be initialized, we can query for screen rotation.
 		if (Build.VERSION.SDK_INT >= 9) {
@@ -396,7 +400,6 @@ public class NativeActivity extends Activity implements SurfaceHolder.Callback {
 		sz.y = NativeApp.getDesiredBackbufferHeight();
 	}
 
-    @SuppressWarnings("deprecation")
 	@Override
     public void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
@@ -580,11 +583,11 @@ public class NativeActivity extends Activity implements SurfaceHolder.Callback {
     	Log.i(TAG, "onStop - do nothing special");
     }
 
-    @Override
+	@Override
 	protected void onDestroy() {
 		super.onDestroy();
-	    if (javaGL) {
-	      	Log.i(TAG, "onDestroy");
+		if (javaGL) {
+			Log.i(TAG, "onDestroy");
 			mGLSurfaceView.onDestroy();
 			nativeRenderer.onDestroyed();
 			NativeApp.audioShutdown();
@@ -593,8 +596,8 @@ public class NativeActivity extends Activity implements SurfaceHolder.Callback {
 			audioFocusChangeListener = null;
 			audioManager = null;
 			unregisterCallbacks();
-	    }
-		if (shuttingDown) {
+		}
+		if (shuttingDown || isFinishing()) {
 			NativeApp.shutdown();
 		}
 	}
@@ -958,7 +961,7 @@ public class NativeActivity extends Activity implements SurfaceHolder.Callback {
     		.setPositiveButton(defaultAction, new DialogInterface.OnClickListener(){
     			@Override
     			public void onClick(DialogInterface d, int which) {
-    	    		NativeApp.sendMessage("inputbox_completed", input.getText().toString());
+    	    		NativeApp.sendMessage("inputbox_completed", title + ":" + input.getText().toString());
     				d.dismiss();
     			}
     		})

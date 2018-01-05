@@ -19,8 +19,10 @@
 #pragma once
 
 #include "Common/Common.h"
+#include "Core/MIPS/MIPS.h"
 
 struct JitBlock;
+class JitBlockCache;
 
 namespace MIPSComp {
 
@@ -75,6 +77,7 @@ namespace MIPSComp {
 		int downcountAmount;
 		int numInstructions;
 		bool compiling;	// TODO: get rid of this in favor of using analysis results to determine end of block
+		bool hadBreakpoints;
 		JitBlock *curBlock;
 
 		u8 hasSetRounding;
@@ -203,4 +206,6 @@ namespace MIPSComp {
 		bool continueJumps;
 		int continueMaxInstructions;
 	};
+
 }
+

@@ -22,7 +22,7 @@
 
 #include "GPU/GPUCommon.h"
 #include "GPU/Directx9/FramebufferDX9.h"
-#include "GPU/Directx9/TransformPipelineDX9.h"
+#include "GPU/Directx9/DrawEngineDX9.h"
 #include "GPU/Directx9/TextureCacheDX9.h"
 #include "GPU/Directx9/DepalettizeShaderDX9.h"
 #include "GPU/Directx9/helper/dx_fbo.h"
@@ -33,10 +33,10 @@ namespace DX9 {
 class ShaderManagerDX9;
 class LinkedShaderDX9;
 
-class DIRECTX9_GPU : public GPUCommon {
+class GPU_DX9 : public GPUCommon {
 public:
-	DIRECTX9_GPU();
-	~DIRECTX9_GPU();
+	GPU_DX9(GraphicsContext *gfxCtx);
+	~GPU_DX9();
 	void CheckGPUFeatures();
 	void InitClear() override;
 	void PreExecuteOp(u32 op, u32 diff) override;
@@ -46,7 +46,7 @@ public:
 	void SetDisplayFramebuffer(u32 framebuf, u32 stride, GEBufferFormat format) override;
 	void CopyDisplayToOutput() override;
 	void BeginFrame() override;
-	void UpdateStats() override;
+	void GetStats(char *buffer, size_t bufsize) override;
 	void InvalidateCache(u32 addr, int size, GPUInvalidationType type) override;
 	void NotifyVideoUpload(u32 addr, int size, int width, int format) override;
 	bool PerformMemoryCopy(u32 dest, u32 src, int size) override;
@@ -56,6 +56,7 @@ public:
 	bool PerformStencilUpload(u32 dest, int size) override;
 	void ClearCacheNextFrame() override;
 	void DeviceLost() override;  // Only happens on Android. Drop all textures and shaders.
+	void DeviceRestore() override;
 
 	void DumpNextFrame() override;
 	void DoState(PointerWrap &p) override;
@@ -73,20 +74,20 @@ public:
 		primaryInfo = reportingPrimaryInfo_;
 		fullInfo = reportingFullInfo_;
 	}
-	std::vector<FramebufferInfo> GetFramebufferList();
+	std::vector<FramebufferInfo> GetFramebufferList() override;
 
-	bool GetCurrentFramebuffer(GPUDebugBuffer &buffer);
-	bool GetCurrentDepthbuffer(GPUDebugBuffer &buffer);
-	bool GetCurrentStencilbuffer(GPUDebugBuffer &buffer);
-	bool GetCurrentTexture(GPUDebugBuffer &buffer, int level);
+	bool GetCurrentFramebuffer(GPUDebugBuffer &buffer, int maxRes = -1) override;
+	bool GetCurrentDepthbuffer(GPUDebugBuffer &buffer) override;
+	bool GetCurrentStencilbuffer(GPUDebugBuffer &buffer) override;
+	bool GetCurrentTexture(GPUDebugBuffer &buffer, int level) override;
 	bool GetCurrentClut(GPUDebugBuffer &buffer) override;
 	static bool GetDisplayFramebuffer(GPUDebugBuffer &buffer);
-	bool GetCurrentSimpleVertices(int count, std::vector<GPUDebugVertex> &vertices, std::vector<u16> &indices);
+	bool GetCurrentSimpleVertices(int count, std::vector<GPUDebugVertex> &vertices, std::vector<u16> &indices) override;
 
-	typedef void (DIRECTX9_GPU::*CmdFunc)(u32 op, u32 diff);
+	typedef void (GPU_DX9::*CmdFunc)(u32 op, u32 diff);
 	struct CommandInfo {
 		u8 flags;
-		DIRECTX9_GPU::CmdFunc func;
+		GPU_DX9::CmdFunc func;
 	};
 
 	void Execute_Generic(u32 op, u32 diff);
@@ -160,7 +161,7 @@ private:
 	void UpdateCmdInfo();
 
 	void Flush() {
-		transformDraw_.Flush();
+		drawEngine_.Flush();
 	}
 	void DoBlockTransfer(u32 skipDrawReason);
 	void ApplyDrawState(int prim);
@@ -177,7 +178,7 @@ private:
 	FramebufferManagerDX9 framebufferManager_;
 	TextureCacheDX9 textureCache_;
 	DepalShaderCacheDX9 depalShaderCache_;
-	TransformDrawEngineDX9 transformDraw_;
+	DrawEngineDX9 drawEngine_;
 	ShaderManagerDX9 *shaderManager_;
 
 	static CommandInfo cmdInfo_[256];
@@ -187,8 +188,10 @@ private:
 
 	std::string reportingPrimaryInfo_;
 	std::string reportingFullInfo_;
+
+	GraphicsContext *gfxCtx_;
 };
 
 }  // namespace DX9
 
-typedef DX9::DIRECTX9_GPU DIRECTX9_GPU;
+typedef DX9::GPU_DX9 DIRECTX9_GPU;

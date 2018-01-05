@@ -25,7 +25,7 @@
 #include "Core/Core.h"
 #include "Core/Config.h"
 #include "Core/CwCheat.h"
-#include "Core/MIPS/JitCommon/NativeJit.h"
+#include "Core/MIPS/JitCommon/JitCommon.h"
 
 #include "UI/OnScreenDisplay.h"
 #include "UI/ui_atlas.h"
@@ -40,10 +40,36 @@ static bool enableAll = false;
 static std::vector<std::string> cheatList;
 static CWCheatEngine *cheatEngine2;
 static std::deque<bool> bEnableCheat;
+static std::string gamePath_;
+
+
+CwCheatScreen::CwCheatScreen(std::string gamePath)
+	: UIDialogScreenWithBackground() {
+	gamePath_ = gamePath;
+}
 
 void CwCheatScreen::CreateCodeList() {
+	GameInfo *info = g_gameInfoCache->GetInfo(NULL, gamePath_, 0);
+	if (info && info->paramSFOLoaded) {
+		gameTitle = info->paramSFO.GetValueString("DISC_ID");
+	}
+	std::size_t lslash = gamePath_.find_last_of("/");
+	std::size_t lastdot = gamePath_.find_last_of(".");
+	std::string extension = gamePath_.substr(lastdot + 1);
+	for (size_t i = 0; i < extension.size(); i++) {
+		extension[i] = tolower(extension[i]);
+	}
+	if ((extension != "iso" && extension != "cso" && extension != "pbp") || gameTitle == "") {
+		if (extension == "elf") {
+			gameTitle = "ELF000000";
+		} else {
+			gameTitle = gamePath_.substr(lslash + 1);
+		}
+	}
 	cheatEngine2 = new CWCheatEngine();
+	cheatEngine2->CreateCheatFile();
 	cheatList = cheatEngine2->GetCodesList();
+
 	bEnableCheat.clear();
 	formattedList_.clear();
 	for (size_t i = 0; i < cheatList.size(); i++) {
@@ -146,59 +172,20 @@ UI::EventReturn CwCheatScreen::OnAddCheat(UI::EventParams &params) {
 }
 
 UI::EventReturn CwCheatScreen::OnEditCheatFile(UI::EventParams &params) {
-	std::string cheatFile;
 	g_Config.bReloadCheats = true;
 	if (MIPSComp::jit) {
 		MIPSComp::jit->ClearCache();
 	}
 	screenManager()->finishDialog(this, DR_OK);
-#ifdef _WIN32
-	cheatFile = activeCheatFile;
-	// Can't rely on a .txt file extension to auto-open in the right editor,
-	// so let's find notepad
-	wchar_t notepad_path[MAX_PATH + 1];
-	GetSystemDirectory(notepad_path, MAX_PATH);
-	wcscat(notepad_path, L"\\notepad.exe");
-
-	wchar_t cheat_path[MAX_PATH + 1] = {0};
-	wcsncpy(cheat_path, ConvertUTF8ToWString(cheatFile).c_str(), MAX_PATH);
-	// Flip any slashes...
-	for (size_t i = 0; i < wcslen(cheat_path); i++) {
-		if (cheat_path[i] == '/')
-			cheat_path[i] = '\\';
-	}
-
-	// One for the space, one for the null.
-	wchar_t command_line[MAX_PATH * 2 + 1 + 1];
-	wsprintf(command_line, L"%s %s", notepad_path, cheat_path);
-
-	STARTUPINFO si;
-	memset(&si, 0, sizeof(si));
-	si.cb = sizeof(si);
-	si.wShowWindow = SW_SHOW;
-	PROCESS_INFORMATION pi;
-	memset(&pi, 0, sizeof(pi));
-	UINT retval = CreateProcess(0, command_line, 0, 0, 0, 0, 0, 0, &si, &pi);
-	if (!retval) {
-		ERROR_LOG(COMMON, "Failed creating notepad process");
-	}
-#elif !defined(MOBILE_DEVICE)
-#if defined(__APPLE__)
-	cheatFile = "open ";
-#else
-	cheatFile = "xdg-open ";
-#endif
-	cheatFile.append(activeCheatFile);
-	NOTICE_LOG(BOOT, "Launching %s", cheatFile.c_str());
-	int retval = system(cheatFile.c_str());
-	if (retval != 0) {
-		ERROR_LOG(COMMON, "Failed to launch cheat file");
-	}
-#endif
+	File::openIniFile(activeCheatFile);
 	return UI::EVENT_DONE;
 }
 
 UI::EventReturn CwCheatScreen::OnImportCheat(UI::EventParams &params) {
+	if (gameTitle.length() != 9) {
+		WARN_LOG(COMMON, "CWCHEAT: Incorrect ID(%s) - can't import cheats.", gameTitle.c_str());
+		return UI::EVENT_DONE;
+	}
 	std::string line;
 	std::vector<std::string> title;
 	bool finished = false, skip = false;

@@ -106,8 +106,7 @@ inline int RoundUp4(int x) {
 }
 
 // Reads decoded vertex formats in a convenient way. For software transform and debugging.
-class VertexReader
-{
+class VertexReader {
 public:
 	VertexReader(u8 *base, const DecVtxFormat &decFmt, int vtype) : base_(base), data_(base), decFmt_(decFmt), vtype_(vtype) {}
 
@@ -485,6 +484,7 @@ public:
 
 	void Step_TcU8Prescale() const;
 	void Step_TcU16Prescale() const;
+	void Step_TcU16DoublePrescale() const;
 	void Step_TcFloatPrescale() const;
 
 	void Step_TcU16Double() const;
@@ -494,6 +494,18 @@ public:
 	void Step_TcU16ThroughToFloat() const;
 	void Step_TcU16ThroughDoubleToFloat() const;
 	void Step_TcFloatThrough() const;
+
+	void Step_TcU8Morph() const;
+	void Step_TcU16Morph() const;
+	void Step_TcU16DoubleMorph() const;
+	void Step_TcU8MorphToFloat() const;
+	void Step_TcU16MorphToFloat() const;
+	void Step_TcU16DoubleMorphToFloat() const;
+	void Step_TcFloatMorph() const;
+	void Step_TcU8PrescaleMorph() const;
+	void Step_TcU16PrescaleMorph() const;
+	void Step_TcU16DoublePrescaleMorph() const;
+	void Step_TcFloatPrescaleMorph() const;
 
 	void Step_ColorInvalid() const;
 	void Step_Color4444() const;
@@ -627,6 +639,14 @@ public:
 	void Jit_TcU8Prescale();
 	void Jit_TcU16Prescale();
 	void Jit_TcFloatPrescale();
+
+	void Jit_TcAnyMorph(int bits);
+	void Jit_TcU8MorphToFloat();
+	void Jit_TcU16MorphToFloat();
+	void Jit_TcFloatMorph();
+	void Jit_TcU8PrescaleMorph();
+	void Jit_TcU16PrescaleMorph();
+	void Jit_TcFloatPrescaleMorph();
 
 	void Jit_TcU16Double();
 	void Jit_TcU16ThroughDouble();

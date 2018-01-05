@@ -22,6 +22,7 @@
 #include "Core/Dialog/PSPOskDialog.h"
 #include "Core/Util/PPGeDraw.h"
 #include "Core/HLE/sceCtrl.h"
+#include "Core/HLE/sceDisplay.h"
 #include "Core/HLE/sceUtility.h"
 #include "Core/Config.h"
 #include "Core/Reporting.h"
@@ -160,12 +161,13 @@ void PSPOskDialog::ConvertUCS2ToUTF8(std::string& _string, const PSPPointer<u16_
 		return;
 	}
 
-	char stringBuffer[2048];
+	const size_t maxLength = 2047;
+	char stringBuffer[maxLength + 1];
 	char *string = stringBuffer;
 
-	auto input = em_address;
+	u16_le *input = &em_address[0];
 	int c;
-	while ((c = *input++) != 0)
+	while ((c = *input++) != 0 && string < stringBuffer + maxLength)
 	{
 		if (c < 0x80)
 			*string++ = c;
@@ -189,21 +191,15 @@ void GetWideStringFromPSPPointer(std::wstring& _string, const PSPPointer<u16_le>
 		_string = L"";
 		return;
 	}
-	const size_t maxLength = 2048;
 
-	wchar_t stringBuffer[maxLength];
+	const size_t maxLength = 2047;
+	wchar_t stringBuffer[maxLength + 1];
 	wchar_t *string = stringBuffer;
 
-	auto input = em_address;
+	u16_le *input = &em_address[0];
 	int c;
-	u32 count = 0;
-	while ((c = *input++) != 0)
-	{
-		if ( !(++count >= maxLength) )
-			*string++ = c;
-		else
-			break;
-	}
+	while ((c = *input++) != 0 && string < stringBuffer + maxLength)
+		*string++ = c;
 	*string++ = '\0';
 	_string = stringBuffer;
 }
@@ -746,7 +742,7 @@ void PSPOskDialog::RenderKeyboard()
 
 				if(isCombinated == true)
 				{
-					float animStep = (float)(gpuStats.numVBlanks % 40) / 20.0f;
+					float animStep = (float)(__DisplayGetNumVblanks() % 40) / 20.0f;
 					// Fade in and out the next character so they know it's not part of the string yet.
 					u32 alpha = (0.5f - (cosf(animStep * M_PI) / 2.0f)) * 128 + 127;
 					color = CalcFadedColor((alpha << 24) | 0xFFFFFF);

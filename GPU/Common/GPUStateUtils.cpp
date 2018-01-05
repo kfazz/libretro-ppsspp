@@ -544,6 +544,7 @@ float FromScaledDepth(float z) {
 void ConvertViewportAndScissor(bool useBufferedRendering, float renderWidth, float renderHeight, int bufferWidth, int bufferHeight, ViewportAndScissor &out) {
 	bool throughmode = gstate.isModeThrough();
 	out.dirtyProj = false;
+	out.dirtyDepth = false;
 
 	float renderWidthFactor, renderHeightFactor;
 	float renderX = 0.0f, renderY = 0.0f;
@@ -640,31 +641,33 @@ void ConvertViewportAndScissor(bool useBufferedRendering, float renderWidth, flo
 		float hScale = 1.0f;
 		float yOffset = 0.0f;
 
-		// If we're within the bounds, we want clipping the viewport way.  So leave it be.
-		if (left < 0.0f || right > renderWidth) {
-			float overageLeft = std::max(-left, 0.0f);
-			float overageRight = std::max(right - renderWidth, 0.0f);
-			// Our center drifted by the difference in overages.
-			float drift = overageRight - overageLeft;
+		if (!gstate_c.Supports(GPU_SUPPORTS_LARGE_VIEWPORTS)) {
+			// If we're within the bounds, we want clipping the viewport way.  So leave it be.
+			if (left < 0.0f || right > renderWidth) {
+				float overageLeft = std::max(-left, 0.0f);
+				float overageRight = std::max(right - renderWidth, 0.0f);
+				// Our center drifted by the difference in overages.
+				float drift = overageRight - overageLeft;
 
-			left += overageLeft;
-			right -= overageRight;
+				left += overageLeft;
+				right -= overageRight;
 
-			wScale = vpWidth / (right - left);
-			xOffset = drift / (right - left);
-		}
+				wScale = vpWidth / (right - left);
+				xOffset = drift / (right - left);
+			}
 
-		if (top < 0.0f || bottom > renderHeight) {
-			float overageTop = std::max(-top, 0.0f);
-			float overageBottom = std::max(bottom - renderHeight, 0.0f);
-			// Our center drifted by the difference in overages.
-			float drift = overageBottom - overageTop;
+			if (top < 0.0f || bottom > renderHeight) {
+				float overageTop = std::max(-top, 0.0f);
+				float overageBottom = std::max(bottom - renderHeight, 0.0f);
+				// Our center drifted by the difference in overages.
+				float drift = overageBottom - overageTop;
 
-			top += overageTop;
-			bottom -= overageBottom;
+				top += overageTop;
+				bottom -= overageBottom;
 
-			hScale = vpHeight / (bottom - top);
-			yOffset = drift / (bottom - top);
+				hScale = vpHeight / (bottom - top);
+				yOffset = drift / (bottom - top);
+			}
 		}
 
 		out.viewportX = left + displayOffsetX;
@@ -1201,19 +1204,22 @@ static void ConvertStencilFunc5551(GenericStencilFuncState &state) {
 	const u8 maskedRef = state.testRef & state.testMask;
 	const u8 usedRef = (state.testRef & 0x80) != 0 ? 0xFF : 0x00;
 
-	auto rewriteFunc = [&](GEComparison func, u8 ref, u8 mask = 0xFF) {
+	auto rewriteFunc = [&](GEComparison func, u8 ref) {
 		// We can only safely rewrite if it doesn't use the ref, or if the ref is the same.
 		if (!usesRef || usedRef == ref) {
 			state.testFunc = func;
 			state.testRef = ref;
-			state.testMask = mask;
+			state.testMask = 0xFF;
 		}
 	};
-	auto rewriteRef = [&]() {
+	auto rewriteRef = [&](bool always) {
+		state.testFunc = always ? GE_COMP_ALWAYS : GE_COMP_NEVER;
 		if (usesRef) {
 			// Rewrite the ref (for REPLACE) to 0x00 or 0xFF (the "best" values) if safe.
 			// This will only be called if the test doesn't need the ref.
 			state.testRef = usedRef;
+			// Nuke the mask as well, since this is always/never, just for consistency.
+			state.testMask = 0xFF;
 		}
 	};
 
@@ -1223,7 +1229,7 @@ static void ConvertStencilFunc5551(GenericStencilFuncState &state) {
 	case GE_COMP_NEVER:
 	case GE_COMP_ALWAYS:
 		// Fine as is.
-		rewriteRef();
+		rewriteRef(state.testFunc == GE_COMP_ALWAYS);
 		break;
 	case GE_COMP_EQUAL: // maskedRef == maskedBuffer
 		if (maskedRef == 0) {
@@ -1234,8 +1240,7 @@ static void ConvertStencilFunc5551(GenericStencilFuncState &state) {
 			rewriteFunc(GE_COMP_NOTEQUAL, 0);
 		} else {
 			// This should never pass, regardless of buffer value.  Only 0 and 255 are directly equal.
-			state.testFunc = GE_COMP_NEVER;
-			rewriteRef();
+			rewriteRef(false);
 		}
 		break;
 	case GE_COMP_NOTEQUAL: // maskedRef != maskedBuffer
@@ -1247,15 +1252,13 @@ static void ConvertStencilFunc5551(GenericStencilFuncState &state) {
 			rewriteFunc(GE_COMP_EQUAL, 0);
 		} else {
 			// Every other value evaluates as not equal, always.
-			state.testFunc = GE_COMP_ALWAYS;
-			rewriteRef();
+			rewriteRef(true);
 		}
 		break;
 	case GE_COMP_LESS: // maskedRef < maskedBuffer
 		if (maskedRef == (0xFF & state.testMask) && state.testMask != 0) {
 			// No possible value is less than 255.
-			state.testFunc = GE_COMP_NEVER;
-			rewriteRef();
+			rewriteRef(false);
 		} else {
 			// "0 < (0 or 255)" and "254 < (0 or 255)" can only work for non zero.
 			rewriteFunc(GE_COMP_NOTEQUAL, 0);
@@ -1264,8 +1267,7 @@ static void ConvertStencilFunc5551(GenericStencilFuncState &state) {
 	case GE_COMP_LEQUAL: // maskedRef <= maskedBuffer
 		if (maskedRef == 0) {
 			// 0 is <= every possible value.
-			state.testFunc = GE_COMP_ALWAYS;
-			rewriteRef();
+			rewriteRef(true);
 		} else {
 			// "1 <= (0 or 255)" and "255 <= (0 or 255)" simply mean, anything but zero.
 			rewriteFunc(GE_COMP_NOTEQUAL, 0);
@@ -1277,15 +1279,13 @@ static void ConvertStencilFunc5551(GenericStencilFuncState &state) {
 			rewriteFunc(GE_COMP_EQUAL, 0);
 		} else {
 			// 0 is never greater than any possible value.
-			state.testFunc = GE_COMP_NEVER;
-			rewriteRef();
+			rewriteRef(false);
 		}
 		break;
 	case GE_COMP_GEQUAL: // maskedRef >= maskedBuffer
 		if (maskedRef == (0xFF & state.testMask) && state.testMask != 0) {
 			// 255 is >= every possible value.
-			state.testFunc = GE_COMP_ALWAYS;
-			rewriteRef();
+			rewriteRef(true);
 		} else {
 			// "0 >= (0 or 255)" and "254 >= "(0 or 255)" are the same, equal to zero.
 			rewriteFunc(GE_COMP_EQUAL, 0);

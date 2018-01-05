@@ -1,5 +1,4 @@
 #include "i18n/i18n.h"
-#include "UI/OnScreenDisplay.h"
 #include "Common/StringUtils.h"
 #include "Common/ChunkFile.h"
 #include "Common/FileUtil.h"
@@ -7,11 +6,12 @@
 #include "Core/CoreParameter.h"
 #include "Core/CwCheat.h"
 #include "Core/Config.h"
+#include "Core/Host.h"
 #include "Core/MIPS/MIPS.h"
 #include "Core/ELF/ParamSFO.h"
 #include "Core/System.h"
 #include "Core/HLE/sceCtrl.h"
-#include "Core/MIPS/JitCommon/NativeJit.h"
+#include "Core/MIPS/JitCommon/JitCommon.h"
 
 #if defined(_WIN32) && !defined(__MINGW32__)
 #include "util/text/utf8.h"
@@ -39,20 +39,8 @@ static void __CheatStart() {
 
 	gameTitle = g_paramSFO.GetValueString("DISC_ID");
 
-	activeCheatFile = GetSysDirectory(DIRECTORY_CHEATS) + gameTitle + ".ini";
-	File::CreateFullPath(GetSysDirectory(DIRECTORY_CHEATS));
-
-	if (!File::Exists(activeCheatFile)) {
-		FILE *f = File::OpenCFile(activeCheatFile, "wb");
-		if (f) {
-			fwrite("\xEF\xBB\xBF", 1, 3, f);
-			fclose(f);
-		}
-		if (!File::Exists(activeCheatFile)) {
-			I18NCategory *err = GetI18NCategory("Error");
-			osm.Show(err->T("Unable to create cheat file, disk may be full"));
-		}
-
+	if (gameTitle != "") { //this only generates ini files on boot, let's leave homebrew ini file for UI
+		cheatEngine->CreateCheatFile();
 	}
 
 	cheatEngine = new CWCheatEngine();
@@ -151,6 +139,24 @@ static inline std::vector<std::string> makeCodeParts(const std::vector<std::stri
 		}
 	}
 	return finalList;
+}
+
+void CWCheatEngine::CreateCheatFile() {
+	activeCheatFile = GetSysDirectory(DIRECTORY_CHEATS) + gameTitle + ".ini";
+	File::CreateFullPath(GetSysDirectory(DIRECTORY_CHEATS));
+
+	if (!File::Exists(activeCheatFile)) {
+		FILE *f = File::OpenCFile(activeCheatFile, "wb");
+		if (f) {
+			fwrite("\xEF\xBB\xBF\n", 1, 4, f);
+			fclose(f);
+		}
+		if (!File::Exists(activeCheatFile)) {
+			I18NCategory *err = GetI18NCategory("Error");
+			host->NotifyUserMessage(err->T("Unable to create cheat file, disk may be full"));
+		}
+
+	}
 }
 
 void CWCheatEngine::CreateCodeList() { //Creates code list to be used in function GetNextCode
@@ -595,6 +601,7 @@ void CWCheatEngine::Run() {
 					bool is8Bit = (arg >> 28) == 0x2;
 					addr = GetAddress(comm & 0x0FFFFFFF);
 					if (Memory::IsValidAddress(addr)) {
+						InvalidateICache(addr, 4);
 						int memoryValue = is8Bit ? Memory::Read_U8(addr) : Memory::Read_U16(addr);
 						int testValue = arg & (is8Bit ? 0xFF : 0xFFFF);
 						bool executeNextLines = false;
@@ -714,6 +721,7 @@ void CWCheatEngine::Run() {
 					bool is8Bit = (comm >> 24) == 0xE1;
 					addr = GetAddress(arg & 0x0FFFFFFF);
 					if (Memory::IsValidAddress(addr)) {
+						InvalidateICache(addr, 4);
 						int memoryValue = is8Bit ? Memory::Read_U8(addr) : Memory::Read_U16(addr);
 						int testValue = comm & (is8Bit ? 0xFF : 0xFFFF);
 						bool executeNextLines = false;

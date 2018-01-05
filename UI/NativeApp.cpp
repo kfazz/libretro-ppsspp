@@ -230,6 +230,13 @@ std::string NativeQueryConfig(std::string query) {
 		return std::string(temp);
 	} else if (query == "force44khz") {
 		return std::string("0");
+	} else if (query == "androidJavaGL") {
+		// If we're using Vulkan, we say no... need C++ to use Vulkan.
+		if (GetGPUBackend() == GPUBackend::VULKAN) {
+			return "false";
+		}
+		// Otherwise, some devices prefer the Java init so play it safe.
+		return "true";
 	} else {
 		return "";
 	}
@@ -377,7 +384,6 @@ void NativeInit(int argc, const char *argv[], const char *savegame_dir, const ch
 	const char *fileToLog = 0;
 	const char *stateToLoad = 0;
 
-	bool gfxLog = false;
 	// Parse command line
 	LogTypes::LOG_LEVELS logLevel = LogTypes::LINFO;
 	for (int i = 1; i < argc; i++) {
@@ -388,15 +394,21 @@ void NativeInit(int argc, const char *argv[], const char *savegame_dir, const ch
 				// Note that you must also change the max log level in Log.h.
 				logLevel = LogTypes::LDEBUG;
 				break;
-			case 'g':
-				gfxLog = true;
+			case 'v':
+				// Enable verbose logging
+				// Note that you must also change the max log level in Log.h.
+				logLevel = LogTypes::LVERBOSE;
 				break;
 			case 'j':
-				g_Config.bJit = true;
+				g_Config.iCpuCore = CPU_CORE_JIT;
 				g_Config.bSaveSettings = false;
 				break;
 			case 'i':
-				g_Config.bJit = false;
+				g_Config.iCpuCore = CPU_CORE_INTERPRETER;
+				g_Config.bSaveSettings = false;
+				break;
+			case 'r':
+				g_Config.iCpuCore = CPU_CORE_IRJIT;
 				g_Config.bSaveSettings = false;
 				break;
 			case '-':
@@ -404,6 +416,8 @@ void NativeInit(int argc, const char *argv[], const char *savegame_dir, const ch
 					fileToLog = argv[i] + strlen("--log=");
 				if (!strncmp(argv[i], "--state=", strlen("--state=")) && strlen(argv[i]) > strlen("--state="))
 					stateToLoad = argv[i] + strlen("--state=");
+				if (!strncmp(argv[1], "--PS3", strlen("--PS3")))
+					g_Config.bPS3Controller = true;
 #if !defined(MOBILE_DEVICE)
 				if (!strncmp(argv[i], "--escape-exit", strlen("--escape-exit")))
 					g_Config.bPauseExitsEmulator = true;
@@ -444,21 +458,16 @@ void NativeInit(int argc, const char *argv[], const char *savegame_dir, const ch
 #endif
 	}
 
-	for (int i = 0; i < LogTypes::NUMBER_OF_LOGS; i++)
-	{
+	for (int i = 0; i < LogTypes::NUMBER_OF_LOGS; i++) {
 		LogTypes::LOG_TYPE type = (LogTypes::LOG_TYPE)i;
 		logman->SetEnable(type, true);
-		logman->SetLogLevel(type, gfxLog && i == LogTypes::G3D ? LogTypes::LDEBUG : logLevel);
+		logman->SetLogLevel(type, logLevel);
 #ifdef ANDROID
 		logman->AddListener(type, logger);
 #endif
 	}
 #endif
-	// Special hack for G3D as it's very spammy. Need to make a flag for this.
-	if (!gfxLog) {
-		logman->SetLogLevel(LogTypes::G3D, LogTypes::LERROR);
-		logman->SetLogLevel(LogTypes::SCEGE, LogTypes::LERROR);
-	}
+
 	// Allow the lang directory to be overridden for testing purposes (e.g. Android, where it's hard to 
 	// test new languages without recompiling the entire app, which is a hassle).
 	const std::string langOverridePath = g_Config.memStickDirectory + "PSP/SYSTEM/lang/";
@@ -485,8 +494,13 @@ void NativeInit(int argc, const char *argv[], const char *savegame_dir, const ch
 	}
 #endif
 
-	if (!boot_filename.empty() && stateToLoad != NULL)
-		SaveState::Load(stateToLoad);
+	if (!boot_filename.empty() && stateToLoad != NULL) {
+		SaveState::Load(stateToLoad, [](bool status, const std::string &message, void *) {
+			if (!message.empty()) {
+				osm.Show(message, 2.0);
+			}
+		});
+	}
 
 	screenManager = new ScreenManager();
 	if (skipLogo) {
@@ -611,7 +625,9 @@ void NativeShutdownGraphics() {
 	delete g_gameInfoCache;
 	g_gameInfoCache = nullptr;
 
-	uiTexture->Release();
+	if (uiTexture->Release()) {
+		uiTexture = nullptr;
+	}
 
 	delete uiContext;
 	uiContext = NULL;
@@ -619,7 +635,10 @@ void NativeShutdownGraphics() {
 	ui_draw2d.Shutdown();
 	ui_draw2d_front.Shutdown();
 
-	thin3d->Release();
+	// TODO: Reconsider this annoying ref counting stuff.
+	if (thin3d->Release()) {
+		thin3d = nullptr;
+	}
 }
 
 void TakeScreenshot() {
@@ -698,13 +717,20 @@ void NativeRender(GraphicsContext *graphicsContext) {
 
 	// Apply the UIContext bounds as a 2D transformation matrix.
 	Matrix4x4 ortho;
-	if (GetGPUBackend() == GPUBackend::DIRECT3D9) {
+	switch (GetGPUBackend()) {
+	case GPUBackend::VULKAN:
+		ortho.setOrthoD3D(0.0f, xres, 0, yres, -1.0f, 1.0f);
+		break;
+	case GPUBackend::DIRECT3D9:
+	case GPUBackend::DIRECT3D11:
 		ortho.setOrthoD3D(0.0f, xres, yres, 0.0f, -1.0f, 1.0f);
 		Matrix4x4 translation;
 		translation.setTranslation(Vec3(-0.5f, -0.5f, 0.0f));
 		ortho = translation * ortho;
-	} else {
+		break;
+	case GPUBackend::OPENGL:
 		ortho.setOrtho(0.0f, xres, yres, 0.0f, -1.0f, 1.0f);
+		break;
 	}
 
 	ui_draw2d.SetDrawMatrix(ortho);
@@ -715,7 +741,9 @@ void NativeRender(GraphicsContext *graphicsContext) {
 		screenManager->getUIContext()->Text()->OncePerFrame();
 	}
 
-	DrawDownloadsOverlay(*screenManager->getUIContext());
+	// At this point, the vulkan context has been "ended" already, no more drawing can be done in this frame.
+	// TODO: Integrate the download overlay with the screen system
+	// DrawDownloadsOverlay(*screenManager->getUIContext());
 
 	if (g_TakeScreenshot) {
 		TakeScreenshot();
@@ -748,6 +776,20 @@ void HandleGlobalMessage(const std::string &msg, const std::string &value) {
 			g_Config.sNickName = inputboxValue[1];
 		inputboxValue.clear();
 	}
+	if (msg == "savestate_displayslot") {
+		I18NCategory *sy = GetI18NCategory("System");
+		std::string msg = StringFromFormat("%s: %d", sy->T("Savestate Slot"), SaveState::GetCurrentSlot() + 1);
+		// Show for the same duration as the preview.
+		osm.Show(msg, 2.0f, 0xFFFFFF, -1, true, "savestate_slot");
+	}
+	if (msg == "core_powerSaving") {
+		if (value != "false") {
+			I18NCategory *sy = GetI18NCategory("System");
+			osm.Show(sy->T("WARNING: Battery save mode is on"), 2.0f, 0xFFFFFF, -1, true, "core_powerSaving");
+		}
+
+		Core_SetPowerSaving(value != "false");
+	}
 }
 
 void NativeUpdate(InputState &input) {
@@ -766,11 +808,16 @@ void NativeUpdate(InputState &input) {
 	screenManager->update(input);
 }
 
-void NativeDeviceRestore() {
+void NativeDeviceLost() {
 	if (g_gameInfoCache)
 		g_gameInfoCache->Clear();
 	screenManager->deviceLost();
+	gl_lost();
+}
 
+void NativeDeviceRestore() {
+	NativeDeviceLost();
+	screenManager->deviceRestore();
 	if (GetGPUBackend() == GPUBackend::OPENGL) {
 		gl_restore();
 	}

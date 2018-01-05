@@ -2,6 +2,7 @@
 #include "base/stringutil.h"
 #include "thin3d/thin3d.h"
 #include "util/hash/hash.h"
+#include "util/text/wrap_text.h"
 #include "util/text/utf8.h"
 #include "gfx_es2/draw_text.h"
 
@@ -11,6 +12,23 @@
 #include <QtGui/QFontMetrics>
 #include <QtOpenGL/QGLWidget>
 #endif
+
+class TextDrawerWordWrapper : public WordWrapper {
+public:
+	TextDrawerWordWrapper(TextDrawer *drawer, const char *str, float maxW) : WordWrapper(str, maxW), drawer_(drawer) {
+	}
+
+protected:
+	float MeasureWidth(const char *str, size_t bytes) override;
+
+	TextDrawer *drawer_;
+};
+
+float TextDrawerWordWrapper::MeasureWidth(const char *str, size_t bytes) {
+	float w, h;
+	drawer_->MeasureString(str, bytes, &w, &h);
+	return w;
+}
 
 #if defined(_WIN32) && !defined(USING_QT_UI)
 
@@ -55,12 +73,17 @@ TextDrawer::TextDrawer(Thin3DContext *thin3d) : thin3d_(thin3d), ctx_(NULL) {
 }
 
 TextDrawer::~TextDrawer() {
-	for (auto iter = cache_.begin(); iter != cache_.end(); ++iter) {
-		if (iter->second->texture)
-			iter->second->texture->Release();
-		delete iter->second;
+	for (auto iter : cache_) {
+		if (iter.second->texture)
+			iter.second->texture->Release();
+		delete iter.second;
 	}
 	cache_.clear();
+
+	for (auto iter : sizeCache_) {
+		delete iter.second;
+	}
+	sizeCache_.clear();
 
 	for (auto iter = fontMap_.begin(); iter != fontMap_.end(); ++iter) {
 		DeleteObject(iter->second->hFont);
@@ -75,13 +98,7 @@ TextDrawer::~TextDrawer() {
 }
 
 uint32_t TextDrawer::SetFont(const char *fontName, int size, int flags) {
-	std::wstring fname;
-	if (fontName) 
-		fname = ConvertUTF8ToWString(fontName);
-	else
-		fname = L"Tahoma";
-
-	uint32_t fontHash = hash::Fletcher((const uint8_t *)fontName, strlen(fontName));
+	uint32_t fontHash = fontName ? hash::Fletcher((const uint8_t *)fontName, strlen(fontName)) : 0;
 	fontHash ^= size;
 	fontHash ^= flags << 10;
 	
@@ -90,7 +107,13 @@ uint32_t TextDrawer::SetFont(const char *fontName, int size, int flags) {
 		fontHash_ = fontHash;
 		return fontHash;
 	}
-	
+
+	std::wstring fname;
+	if (fontName)
+		fname = ConvertUTF8ToWString(fontName);
+	else
+		fname = L"Tahoma";
+
 	TextDrawerFontContext *font = new TextDrawerFontContext();
 
 	float textScale = 1.0f;
@@ -114,16 +137,81 @@ void TextDrawer::SetFont(uint32_t fontHandle) {
 }
 
 void TextDrawer::MeasureString(const char *str, float *w, float *h) {
+	MeasureString(str, strlen(str), w, h);
+}
+
+void TextDrawer::MeasureString(const char *str, size_t len, float *w, float *h) {
+	uint32_t stringHash = hash::Fletcher((const uint8_t *)str, len);
+	uint32_t entryHash = stringHash ^ fontHash_;
+
+	TextMeasureEntry *entry;
+	auto iter = sizeCache_.find(entryHash);
+	if (iter != sizeCache_.end()) {
+		entry = iter->second;
+	} else {
+		auto iter = fontMap_.find(fontHash_);
+		if (iter != fontMap_.end()) {
+			SelectObject(ctx_->hDC, iter->second->hFont);
+		}
+
+		SIZE size;
+		std::wstring wstr = ConvertUTF8ToWString(ReplaceAll(std::string(str, len), "\n", "\r\n"));
+		GetTextExtentPoint32(ctx_->hDC, wstr.c_str(), (int)wstr.size(), &size);
+
+		entry = new TextMeasureEntry();
+		entry->width = size.cx;
+		entry->height = size.cy;
+		sizeCache_[entryHash] = entry;
+	}
+
+	entry->lastUsedFrame = frameCount_;
+	*w = entry->width * fontScaleX_;
+	*h = entry->height * fontScaleY_;
+}
+
+void TextDrawer::MeasureStringRect(const char *str, size_t len, const Bounds &bounds, float *w, float *h, int align) {
 	auto iter = fontMap_.find(fontHash_);
 	if (iter != fontMap_.end()) {
 		SelectObject(ctx_->hDC, iter->second->hFont);
 	}
 
-	SIZE size;
-	std::wstring wstr = ConvertUTF8ToWString(ReplaceAll(str, "\n", "\r\n"));
-	GetTextExtentPoint32(ctx_->hDC, wstr.c_str(), (int)wstr.size(), &size);
-	*w = size.cx * fontScaleX_;
-	*h = size.cy * fontScaleY_;
+	std::string toMeasure = std::string(str, len);
+	if (align & FLAG_WRAP_TEXT) {
+		bool rotated = (align & (ROTATE_90DEG_LEFT | ROTATE_90DEG_RIGHT)) != 0;
+		WrapString(toMeasure, toMeasure.c_str(), rotated ? bounds.h : bounds.w);
+	}
+
+	std::vector<std::string> lines;
+	SplitString(toMeasure, '\n', lines);
+	float total_w = 0.0f;
+	float total_h = 0.0f;
+	for (size_t i = 0; i < lines.size(); i++) {
+		uint32_t stringHash = hash::Fletcher((const uint8_t *)&lines[i][0], lines[i].length());
+		uint32_t entryHash = stringHash ^ fontHash_;
+
+		TextMeasureEntry *entry;
+		auto iter = sizeCache_.find(entryHash);
+		if (iter != sizeCache_.end()) {
+			entry = iter->second;
+		} else {
+			SIZE size;
+			std::wstring wstr = ConvertUTF8ToWString(lines[i].length() == 0 ? " " : lines[i]);
+			GetTextExtentPoint32(ctx_->hDC, wstr.c_str(), (int)wstr.size(), &size);
+
+			entry = new TextMeasureEntry();
+			entry->width = size.cx;
+			entry->height = size.cy;
+			sizeCache_[entryHash] = entry;
+		}
+		entry->lastUsedFrame = frameCount_;
+
+		if (total_w < entry->width * fontScaleX_) {
+			total_w = entry->width * fontScaleX_;
+		}
+		total_h += entry->height * fontScaleY_;
+	}
+	*w = total_w;
+	*h = total_h;
 }
 
 void TextDrawer::DrawString(DrawBuffer &target, const char *str, float x, float y, uint32_t color, int align) {
@@ -131,8 +219,8 @@ void TextDrawer::DrawString(DrawBuffer &target, const char *str, float x, float 
 		return;
 
 	uint32_t stringHash = hash::Fletcher((const uint8_t *)str, strlen(str));
-	uint32_t entryHash = stringHash ^ fontHash_;
-	
+	uint32_t entryHash = stringHash ^ fontHash_ ^ (align << 24);
+
 	target.Flush(true);
 
 	TextStringEntry *entry;
@@ -155,8 +243,11 @@ void TextDrawer::DrawString(DrawBuffer &target, const char *str, float x, float 
 		SetBkColor(ctx_->hDC, 0);
 		SetTextAlign(ctx_->hDC, TA_TOP);
 
+		// This matters for multi-line text - DT_CENTER is horizontal only.
+		UINT dtAlign = (align & ALIGN_HCENTER) == 0 ? DT_LEFT : DT_CENTER;
+
 		RECT textRect = {0};
-		DrawTextExW(ctx_->hDC, (LPWSTR)wstr.c_str(), (int)wstr.size(), &textRect, DT_HIDEPREFIX|DT_TOP|DT_LEFT|DT_CALCRECT, 0);
+		DrawTextExW(ctx_->hDC, (LPWSTR)wstr.c_str(), (int)wstr.size(), &textRect, DT_HIDEPREFIX|DT_TOP|dtAlign|DT_CALCRECT, 0);
 		size.cx = textRect.right;
 		size.cy = textRect.bottom;
 
@@ -166,7 +257,7 @@ void TextDrawer::DrawString(DrawBuffer &target, const char *str, float x, float 
 		rc.bottom = size.cy + 4;
 		FillRect(ctx_->hDC, &rc, (HBRUSH)GetStockObject(BLACK_BRUSH));
 		//ExtTextOut(ctx_->hDC, 0, 0, ETO_OPAQUE | ETO_CLIPPED, NULL, wstr.c_str(), (int)wstr.size(), NULL);
-		DrawTextExW(ctx_->hDC, (LPWSTR)wstr.c_str(), (int)wstr.size(), &rc, DT_HIDEPREFIX|DT_TOP|DT_LEFT, 0);
+		DrawTextExW(ctx_->hDC, (LPWSTR)wstr.c_str(), (int)wstr.size(), &rc, DT_HIDEPREFIX|DT_TOP|dtAlign, 0);
 
 		if (size.cx > MAX_TEXT_WIDTH)
 			size.cx = MAX_TEXT_WIDTH;
@@ -214,11 +305,17 @@ TextDrawer::TextDrawer(Thin3DContext *thin3d) : thin3d_(thin3d), ctx_(NULL) {
 }
 
 TextDrawer::~TextDrawer() {
-	for (auto iter = cache_.begin(); iter != cache_.end(); ++iter) {
-		iter->second->texture->Release();
-		delete iter->second;
+	for (auto iter : cache_) {
+		if (iter.second->texture)
+			iter.second->texture->Release();
+		delete iter.second;
 	}
 	cache_.clear();
+
+	for (auto iter : sizeCache_) {
+		delete iter.second;
+	}
+	sizeCache_.clear();
 }
 
 uint32_t TextDrawer::SetFont(const char *fontName, int size, int flags) {
@@ -250,10 +347,33 @@ void TextDrawer::SetFont(uint32_t fontHandle) {
 }
 
 void TextDrawer::MeasureString(const char *str, float *w, float *h) {
+	MeasureString(str, strlen(str), w, h);
+}
+
+void TextDrawer::MeasureString(const char *str, size_t len, float *w, float *h) {
 #ifdef USING_QT_UI
 	QFont* font = fontMap_.find(fontHash_)->second;
 	QFontMetrics fm(*font);
-	QSize size = fm.size(0, QString::fromUtf8(str));
+	QSize size = fm.size(0, QString::fromUtf8(str, (int)len));
+	*w = (float)size.width() * fontScaleX_;
+	*h = (float)size.height() * fontScaleY_;
+#else
+	*w = 0;
+	*h = 0;
+#endif
+}
+
+void TextDrawer::MeasureStringRect(const char *str, size_t len, const Bounds &bounds, float *w, float *h, int align) {
+	std::string toMeasure = std::string(str, len);
+	if (align & FLAG_WRAP_TEXT) {
+		bool rotated = (align & (ROTATE_90DEG_LEFT | ROTATE_90DEG_RIGHT)) != 0;
+		WrapString(toMeasure, toMeasure.c_str(), rotated ? bounds.h : bounds.w);
+	}
+
+#ifdef USING_QT_UI
+	QFont* font = fontMap_.find(fontHash_)->second;
+	QFontMetrics fm(*font);
+	QSize size = fm.size(0, QString::fromUtf8(toMeasure.c_str(), (int)toMeasure.size()));
 	*w = (float)size.width() * fontScaleX_;
 	*h = (float)size.height() * fontScaleY_;
 #else
@@ -268,7 +388,7 @@ void TextDrawer::DrawString(DrawBuffer &target, const char *str, float x, float 
 
 #ifdef USING_QT_UI
 	uint32_t stringHash = hash::Fletcher((const uint8_t *)str, strlen(str));
-	uint32_t entryHash = stringHash ^ fontHash_;
+	uint32_t entryHash = stringHash ^ fontHash_ ^ (align << 24);
 	
 	target.Flush(true);
 
@@ -293,6 +413,7 @@ void TextDrawer::DrawString(DrawBuffer &target, const char *str, float x, float 
 		painter.begin(&image);
 		painter.setFont(*font);
 		painter.setPen(color);
+		// TODO: Involve ALIGN_HCENTER (bounds etc.)
 		painter.drawText(image.rect(), Qt::AlignTop | Qt::AlignLeft, QString::fromUtf8(str).replace("&&", "&"));
 		painter.end();
 
@@ -325,9 +446,14 @@ void TextDrawer::DrawString(DrawBuffer &target, const char *str, float x, float 
 
 #endif
 
+void TextDrawer::WrapString(std::string &out, const char *str, float maxW) {
+	TextDrawerWordWrapper wrapper(this, str, maxW);
+	out = wrapper.Wrapped();
+}
+
 void TextDrawer::SetFontScale(float xscale, float yscale) {
 	fontScaleX_ = xscale;
-	fontScaleY_ = xscale;
+	fontScaleY_ = yscale;
 }
 
 void TextDrawer::DrawStringRect(DrawBuffer &target, const char *str, const Bounds &bounds, uint32_t color, int align) {
@@ -344,7 +470,13 @@ void TextDrawer::DrawStringRect(DrawBuffer &target, const char *str, const Bound
 		y = bounds.y2();
 	}
 
-	DrawString(target, str, x, y, color, align);
+	std::string toDraw = str;
+	if (align & FLAG_WRAP_TEXT) {
+		bool rotated = (align & (ROTATE_90DEG_LEFT | ROTATE_90DEG_RIGHT)) != 0;
+		WrapString(toDraw, str, rotated ? bounds.h : bounds.w);
+	}
+
+	DrawString(target, toDraw.c_str(), x, y, color, align);
 }
 
 void TextDrawer::OncePerFrame() {
@@ -357,6 +489,15 @@ void TextDrawer::OncePerFrame() {
 					iter->second->texture->Release();
 				delete iter->second;
 				cache_.erase(iter++);
+			} else {
+				iter++;
+			}
+		}
+
+		for (auto iter = sizeCache_.begin(); iter != sizeCache_.end(); ) {
+			if (frameCount_ - iter->second->lastUsedFrame > 100) {
+				delete iter->second;
+				sizeCache_.erase(iter++);
 			} else {
 				iter++;
 			}

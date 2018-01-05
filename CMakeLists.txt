@@ -6,6 +6,9 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR}/CMakeTests)
 
 add_definitions(-DPPSSPP)
 
+# None of these platforms support Vulkan yet.
+add_definitions(-DNO_VULKAN)
+
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
 	set(_ARCH_64 1)
 	add_definitions(-D_ARCH_64=1)
@@ -29,6 +32,20 @@ if(CMAKE_SYSTEM_PROCESSOR)
 		set(MIPS ON)
 	endif()
 endif()
+
+# Using ccache greatly improves the speed of our CI builds, let's enable for all.
+# Without this, our CI can't use ccache for clang, for some reason.
+find_program(CCACHE_FOUND ccache)
+if(CCACHE_FOUND)
+	set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ccache)
+	set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ccache)
+
+	# ccache uses -I when compiling without preprocessor, which makes clang complain.
+	if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+		set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Qunused-arguments -fcolor-diagnostics")
+		set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Qunused-arguments -fcolor-diagnostics")
+	endif()
+endif(CCACHE_FOUND)
 
 # Remove soon?
 set(USE_FFMPEG ON)
@@ -303,8 +320,7 @@ endmacro()
 set(CommonExtra)
 if(ARM)
 	set(CommonExtra ${CommonExtra}
-		Common/ArmCPUDetect.cpp
-		Common/ArmThunk.cpp)
+		Common/ArmCPUDetect.cpp)
 if(ARMV7)
 	set(CommonExtra ${CommonExtra}
 		Common/ColorConvNEON.cpp)
@@ -877,6 +893,7 @@ set(NativeAppSource
 	UI/GamepadEmu.cpp
 	UI/OnScreenDisplay.cpp
 	UI/ControlMappingScreen.cpp
+	UI/RemoteISOScreen.cpp
 	UI/ReportScreen.cpp
 	UI/SavedataScreen.cpp
 	UI/Store.cpp
@@ -979,12 +996,16 @@ add_library(native STATIC
 	ext/native/math/lin/vec3.h
 	ext/native/math/math_util.cpp
 	ext/native/math/math_util.h
-	ext/native/net/http_server.cpp
-	ext/native/net/http_server.h
 	ext/native/net/http_client.cpp
 	ext/native/net/http_client.h
+	ext/native/net/http_headers.cpp
+	ext/native/net/http_headers.h
+	ext/native/net/http_server.cpp
+	ext/native/net/http_server.h
 	ext/native/net/resolve.cpp
 	ext/native/net/resolve.h
+	ext/native/net/sinks.cpp
+	ext/native/net/sinks.h
 	ext/native/net/url.cpp
 	ext/native/net/url.h
 	ext/native/profiler/profiler.cpp
@@ -992,6 +1013,8 @@ add_library(native STATIC
 	ext/native/thin3d/thin3d.cpp
 	ext/native/thin3d/thin3d.h
 	ext/native/thin3d/thin3d_gl.cpp
+	ext/native/thread/executor.cpp
+	ext/native/thread/executor.h
 	ext/native/thread/prioritizedworkqueue.cpp
 	ext/native/thread/prioritizedworkqueue.h
 	ext/native/thread/threadutil.cpp
@@ -1019,6 +1042,8 @@ add_library(native STATIC
 	ext/native/util/text/utf8.cpp
 	ext/native/util/text/parsers.h
 	ext/native/util/text/parsers.cpp
+	ext/native/util/text/wrap_text.h
+	ext/native/util/text/wrap_text.cpp
 	ext/native/util/const_map.h
 	ext/native/ext/jpge/jpgd.cpp
 	ext/native/ext/jpge/jpgd.h
@@ -1075,6 +1100,27 @@ include_directories(ext/xxhash)
 
 set(CoreExtra)
 set(CoreExtraLibs)
+
+set(CoreExtra ${CoreExtra}
+	Core/MIPS/IR/IRCompALU.cpp
+	Core/MIPS/IR/IRCompBranch.cpp
+	Core/MIPS/IR/IRCompFPU.cpp
+	Core/MIPS/IR/IRCompLoadStore.cpp
+	Core/MIPS/IR/IRCompVFPU.cpp
+	Core/MIPS/IR/IRFrontend.cpp
+	Core/MIPS/IR/IRFrontend.h
+	Core/MIPS/IR/IRInst.cpp
+	Core/MIPS/IR/IRInst.h
+	Core/MIPS/IR/IRInterpreter.cpp
+	Core/MIPS/IR/IRInterpreter.h
+	Core/MIPS/IR/IRJit.cpp
+	Core/MIPS/IR/IRJit.h
+	Core/MIPS/IR/IRPassSimplify.cpp
+	Core/MIPS/IR/IRPassSimplify.h
+	Core/MIPS/IR/IRRegCache.cpp
+	Core/MIPS/IR/IRRegCache.h
+	)
+
 if(ARM)
 	set(CoreExtra ${CoreExtra}
 		Core/MIPS/ARM/ArmAsm.cpp
@@ -1142,6 +1188,14 @@ else()
 		Core/MIPS/fake/FakeJit.h
 		GPU/Common/VertexDecoderFake.cpp
 		ext/disarm.cpp)
+endif()
+
+if (NOT MOBILE_DEVICE)
+	set(CoreExtra ${CoreExtra}
+		Core/AVIDump.cpp
+		Core/AVIDump.h
+		Core/WaveFile.cpp
+		Core/WaveFile.h)
 endif()
 
 if(ARMV7)
@@ -1386,7 +1440,6 @@ add_library(${CoreLibName} ${CoreLinkType}
 	Core/FileLoaders/RetryingFileLoader.h
 	Core/MIPS/JitCommon/JitCommon.cpp
 	Core/MIPS/JitCommon/JitCommon.h
-	Core/MIPS/JitCommon/NativeJit.h
 	Core/MIPS/JitCommon/JitBlockCache.cpp
 	Core/MIPS/JitCommon/JitBlockCache.h
 	Core/MIPS/JitCommon/JitState.cpp
@@ -1429,6 +1482,8 @@ add_library(${CoreLibName} ${CoreLinkType}
 	Core/Screenshot.h
 	Core/System.cpp
 	Core/System.h
+	Core/TextureReplacer.cpp
+	Core/TextureReplacer.h
 	Core/Util/AudioFormat.cpp
 	Core/Util/AudioFormat.h
 	Core/Util/GameManager.cpp
@@ -1502,8 +1557,8 @@ add_library(GPU OBJECT
 	GPU/GLES/DepalettizeShader.h
 	GPU/GLES/FBO.cpp
 	GPU/GLES/FBO.h
-	GPU/GLES/GLES_GPU.cpp
-	GPU/GLES/GLES_GPU.h
+	GPU/GLES/GPU_GLES.cpp
+	GPU/GLES/GPU_GLES.h
 	GPU/GLES/GLStateCache.cpp
 	GPU/GLES/GLStateCache.h
 	GPU/GLES/FragmentShaderGenerator.cpp
@@ -1521,8 +1576,8 @@ add_library(GPU OBJECT
 	GPU/GLES/TextureCache.h
 	GPU/GLES/TextureScaler.cpp
 	GPU/GLES/TextureScaler.h
-	GPU/GLES/TransformPipeline.cpp
-	GPU/GLES/TransformPipeline.h
+	GPU/GLES/DrawEngineGLES.cpp
+	GPU/GLES/DrawEngineGLES.h
 	GPU/GLES/VertexShaderGenerator.cpp
 	GPU/GLES/VertexShaderGenerator.h
 	GPU/GPUInterface.h
@@ -1638,7 +1693,6 @@ set(LinkCommon ${CoreLibName} ${CMAKE_THREAD_LIBS_INIT} ${nativeExtraLibs})
 if(HEADLESS)
 	add_executable(PPSSPPHeadless
 		headless/Headless.cpp
-		UI/OnScreenDisplay.cpp
 		headless/StubHost.h
 		headless/Compare.cpp
 		headless/Compare.h)
@@ -1657,7 +1711,6 @@ if(UNITTEST)
 		unittest/JitHarness.cpp
 		Core/MIPS/ARM/ArmRegCache.cpp
 		Core/MIPS/ARM/ArmRegCacheFPU.cpp
-		UI/OnScreenDisplay.cpp
 	)
 	target_link_libraries(unitTest
 		${COCOA_LIBRARY} ${LinkCommon} Common)

@@ -19,6 +19,7 @@
 
 #include <vector>
 #include "base/functional.h"
+#include "base/mutex.h"
 #include "ui/view.h"
 #include "ui/ui_screen.h"
 
@@ -64,7 +65,6 @@ protected:
 
 private:
 	int pspBtn_;
-	bool replace_;
 	std::function<void(KeyDef)> callback_;
 	bool mapped_;  // Prevent double registrations
 };
@@ -81,4 +81,6 @@ protected:
 
 	UI::TextView *lastKeyEvent_;
 	UI::TextView *lastLastKeyEvent_;
+
+	recursive_mutex eventLock_;
 };

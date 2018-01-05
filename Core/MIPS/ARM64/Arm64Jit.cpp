@@ -174,7 +174,7 @@ void Arm64Jit::CompileDelaySlot(int flags) {
 
 	js.inDelaySlot = true;
 	MIPSOpcode op = GetOffsetInstruction(1);
-	MIPSCompileOp(op);
+	MIPSCompileOp(op, this);
 	js.inDelaySlot = false;
 
 	if (flags & DELAYSLOT_FLUSH)
@@ -191,10 +191,14 @@ void Arm64Jit::Compile(u32 em_address) {
 		ClearCache();
 	}
 
+	BeginWrite();
+
 	int block_num = blocks.AllocateBlock(em_address);
 	JitBlock *b = blocks.GetBlock(block_num);
 	DoJit(em_address, b);
 	blocks.FinalizeBlock(block_num, jo.enableBlocklink);
+
+	EndWrite();
 
 	bool cleanSlate = false;
 
@@ -262,13 +266,13 @@ const u8 *Arm64Jit::DoJit(u32 em_address, JitBlock *b) {
 		const u8 *backJump = GetCodePtr();
 		MOVI2R(SCRATCH1, js.blockStart);
 		B((const void *)outerLoopPCInSCRATCH1);
-		b->checkedEntry = GetCodePtr();
+		b->checkedEntry = (u8 *)GetCodePtr();
 		B(CC_LT, backJump);
 	} else if (jo.useForwardJump) {
-		b->checkedEntry = GetCodePtr();
+		b->checkedEntry = (u8 *)GetCodePtr();
 		bail = B(CC_LT);
 	} else if (jo.enableBlocklink) {
-		b->checkedEntry = GetCodePtr();
+		b->checkedEntry = (u8 *)GetCodePtr();
 		MOVI2R(SCRATCH1, js.blockStart);
 		FixupBranch skip = B(CC_GE);
 		B((const void *)outerLoopPCInSCRATCH1);
@@ -284,8 +288,6 @@ const u8 *Arm64Jit::DoJit(u32 em_address, JitBlock *b) {
 	gpr.Start(analysis);
 	fpr.Start(analysis);
 
-	int partialFlushOffset = 0;
-
 	js.numInstructions = 0;
 	while (js.compiling) {
 		gpr.SetCompilerPC(GetCompilerPC());  // Let it know for log messages
@@ -293,7 +295,7 @@ const u8 *Arm64Jit::DoJit(u32 em_address, JitBlock *b) {
 	
 		js.downcountAmount += MIPSGetInstructionCycleEstimate(inst);
 
-		MIPSCompileOp(inst);
+		MIPSCompileOp(inst, this);
 	
 		js.compilerPC += 4;
 		js.numInstructions++;
@@ -395,6 +397,38 @@ void Arm64Jit::Comp_RunBlock(MIPSOpcode op) {
 	ERROR_LOG(JIT, "Comp_RunBlock should never be reached!");
 }
 
+void Arm64Jit::LinkBlock(u8 *exitPoint, const u8 *checkedEntry) {
+	if (PlatformIsWXExclusive()) {
+		ProtectMemoryPages(exitPoint, 32, MEM_PROT_READ | MEM_PROT_WRITE);
+	}
+	ARM64XEmitter emit(exitPoint);
+	emit.B(checkedEntry);
+	// TODO: Write stuff after.
+	emit.FlushIcache();
+	if (PlatformIsWXExclusive()) {
+		ProtectMemoryPages(exitPoint, 32, MEM_PROT_READ | MEM_PROT_EXEC);
+	}
+}
+
+void Arm64Jit::UnlinkBlock(u8 *checkedEntry, u32 originalAddress) {
+	// Send anyone who tries to run this block back to the dispatcher.
+	// Not entirely ideal, but .. works.
+	// Spurious entrances from previously linked blocks can only come through checkedEntry
+	if (PlatformIsWXExclusive()) {
+		ProtectMemoryPages(checkedEntry, 16, MEM_PROT_READ | MEM_PROT_WRITE);
+	}
+
+	ARM64XEmitter emit(checkedEntry);
+	emit.MOVI2R(SCRATCH1, originalAddress);
+	emit.STR(INDEX_UNSIGNED, SCRATCH1, CTXREG, offsetof(MIPSState, pc));
+	emit.B(MIPSComp::jit->GetDispatcher());
+	emit.FlushIcache();
+
+	if (PlatformIsWXExclusive()) {
+		ProtectMemoryPages(checkedEntry, 16, MEM_PROT_READ | MEM_PROT_EXEC);
+	}
+}
+
 bool Arm64Jit::ReplaceJalTo(u32 dest) {
 #ifdef ARM64
 	const ReplacementTableEntry *entry = nullptr;
@@ -449,14 +483,14 @@ void Arm64Jit::Comp_ReplacementFunc(MIPSOpcode op)
 	}
 
 	if (entry->flags & REPFLAG_DISABLED) {
-		MIPSCompileOp(Memory::Read_Instruction(GetCompilerPC(), true));
+		MIPSCompileOp(Memory::Read_Instruction(GetCompilerPC(), true), this);
 	} else if (entry->jitReplaceFunc) {
 		MIPSReplaceFunc repl = entry->jitReplaceFunc;
 		int cycles = (this->*repl)();
 
 		if (entry->flags & (REPFLAG_HOOKENTER | REPFLAG_HOOKEXIT)) {
 			// Compile the original instruction at this address.  We ignore cycles for hooks.
-			MIPSCompileOp(Memory::Read_Instruction(GetCompilerPC(), true));
+			MIPSCompileOp(Memory::Read_Instruction(GetCompilerPC(), true), this);
 		} else {
 			FlushAll();
 			// Flushed, so R1 is safe.
@@ -480,7 +514,7 @@ void Arm64Jit::Comp_ReplacementFunc(MIPSOpcode op)
 			// Compile the original instruction at this address.  We ignore cycles for hooks.
 			ApplyRoundingMode();
 			LoadStaticRegisters();
-			MIPSCompileOp(Memory::Read_Instruction(GetCompilerPC(), true));
+			MIPSCompileOp(Memory::Read_Instruction(GetCompilerPC(), true), this);
 		} else {
 			ApplyRoundingMode();
 			LoadStaticRegisters();
@@ -618,4 +652,14 @@ void Arm64Jit::WriteSyscallExit() {
 
 void Arm64Jit::Comp_DoNothing(MIPSOpcode op) { }
 
+MIPSOpcode Arm64Jit::GetOriginalOp(MIPSOpcode op) {
+	JitBlockCache *bc = GetBlockCache();
+	int block_num = bc->GetBlockNumberFromEmuHackOp(op, true);
+	if (block_num >= 0) {
+		return bc->GetOriginalFirstOp(block_num);
+	} else {
+		return op;
+	}
 }
+
+}  // namespace

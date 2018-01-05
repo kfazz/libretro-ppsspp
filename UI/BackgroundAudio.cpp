@@ -56,6 +56,10 @@ public:
 				raw_bytes_per_frame_ = temp & 0xFFFF;
 				Nothing = temp >> 16;
 
+				// Not currently used, but part of the format.
+				(void)avgBytesPerSec;
+				(void)Nothing;
+
 				if (codec == PSP_CODEC_AT3) {
 					// The first two bytes are actually not a useful part of the extradata.
 					// We already read 16 bytes, so make sure there's enough left.
@@ -206,6 +210,9 @@ int PlayBackgroundAudio() {
 	// last changed... (to prevent crazy amount of reads when skipping through a list)
 	if (!at3Reader && bgGamePath.size() && (time_now_d() - gameLastChanged > 0.5)) {
 		// Grab some audio from the current game and play it.
+		if (!g_gameInfoCache)
+			return 0;  // race condition?
+
 		GameInfo *gameInfo = g_gameInfoCache->GetInfo(NULL, bgGamePath, GAMEINFO_WANTSND);
 		if (!gameInfo)
 			return 0;

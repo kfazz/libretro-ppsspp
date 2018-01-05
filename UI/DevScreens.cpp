@@ -34,7 +34,7 @@
 #include "Core/System.h"
 #include "Core/CoreParameter.h"
 #include "Core/MIPS/MIPSTables.h"
-#include "Core/MIPS/JitCommon/NativeJit.h"
+#include "Core/MIPS/JitCommon/JitBlockCache.h"
 #include "Core/MIPS/JitCommon/JitCommon.h"
 #include "GPU/GPUInterface.h"
 #include "GPU/GPUState.h"
@@ -466,6 +466,14 @@ void SystemInfoScreen::CreateViews() {
 				eglExtensions->Add(new TextView(exts[i]))->SetFocusable(true);
 			}
 		}
+	} else if (g_Config.iGPUBackend == GPU_BACKEND_VULKAN) {
+		tabHolder->AddTab("Vulkan Features", oglExtensionsScroll);
+
+		oglExtensions->Add(new ItemHeader("Vulkan Features"));
+		std::vector<std::string> features = thin3d->GetFeatureList();
+		for (auto &feature : features) {
+			oglExtensions->Add(new TextView(feature))->SetFocusable(true);
+		}
 	}
 }
 
@@ -661,6 +669,8 @@ UI::EventReturn JitCompareScreen::OnAddressChange(UI::EventParams &e) {
 		return UI::EVENT_DONE;
 	}
 	JitBlockCache *blockCache = MIPSComp::jit->GetBlockCache();
+	if (!blockCache)
+		return UI::EVENT_DONE;
 	u32 addr;
 	if (blockAddr_->GetText().size() > 8)
 		return UI::EVENT_DONE;
@@ -723,6 +733,9 @@ UI::EventReturn JitCompareScreen::OnBlockAddress(UI::EventParams &e) {
 	}
 
 	JitBlockCache *blockCache = MIPSComp::jit->GetBlockCache();
+	if (!blockCache)
+		return UI::EVENT_DONE;
+
 	if (Memory::IsValidAddress(e.a)) {
 		currentBlock_ = blockCache->GetBlockNumberFromStartAddress(e.a);
 	} else {
@@ -738,6 +751,9 @@ UI::EventReturn JitCompareScreen::OnRandomBlock(UI::EventParams &e) {
 	}
 
 	JitBlockCache *blockCache = MIPSComp::jit->GetBlockCache();
+	if (!blockCache)
+		return UI::EVENT_DONE;
+
 	int numBlocks = blockCache->GetNumBlocks();
 	if (numBlocks > 0) {
 		currentBlock_ = rand() % numBlocks;
@@ -761,6 +777,9 @@ void JitCompareScreen::OnRandomBlock(int flag) {
 		return;
 	}
 	JitBlockCache *blockCache = MIPSComp::jit->GetBlockCache();
+	if (!blockCache)
+		return;
+
 	int numBlocks = blockCache->GetNumBlocks();
 	if (numBlocks > 0) {
 		bool anyWanted = false;
@@ -789,6 +808,8 @@ UI::EventReturn JitCompareScreen::OnCurrentBlock(UI::EventParams &e) {
 		return UI::EVENT_DONE;
 	}
 	JitBlockCache *blockCache = MIPSComp::jit->GetBlockCache();
+	if (!blockCache)
+		return UI::EVENT_DONE;
 	std::vector<int> blockNum;
 	blockCache->GetBlockNumbersFromAddress(currentMIPS->pc, &blockNum);
 	if (blockNum.size() > 0) {

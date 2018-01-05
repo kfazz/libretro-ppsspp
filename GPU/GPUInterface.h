@@ -248,7 +248,7 @@ public:
 	virtual void CopyDisplayToOutput() = 0;
 
 	// Tells the GPU to update the gpuStats structure.
-	virtual void UpdateStats() = 0;
+	virtual void GetStats(char *buffer, size_t bufsize) = 0;
 
 	// Invalidate any cached content sourced from the specified range.
 	// If size = -1, invalidate everything.
@@ -268,6 +268,7 @@ public:
 	virtual void EnableInterrupts(bool enable) = 0;
 
 	virtual void DeviceLost() = 0;
+	virtual void DeviceRestore() = 0;
 	virtual void ReapplyGfxState() = 0;
 	virtual void SyncThread(bool force = false) = 0;
 	virtual void SyncBeginFrame() = 0;

@@ -51,9 +51,18 @@ enum IdentifiedFileType {
 
 class FileLoader {
 public:
+	enum class Flags {
+		NONE,
+		// Not necessary to read from / store into cache.
+		HINT_UNCACHED,
+	};
+
 	virtual ~FileLoader() {}
 
 	virtual bool Exists() = 0;
+	virtual bool ExistsFast() {
+		return Exists();
+	}
 	virtual bool IsDirectory() = 0;
 	virtual s64 FileSize() = 0;
 	virtual std::string Path() const = 0;
@@ -68,22 +77,27 @@ public:
 	}
 
 	virtual void Seek(s64 absolutePos) = 0;
-	virtual size_t Read(size_t bytes, size_t count, void *data) = 0;
-	virtual size_t Read(size_t bytes, void *data) {
-		return Read(1, bytes, data);
+	virtual size_t Read(size_t bytes, size_t count, void *data, Flags flags = Flags::NONE) = 0;
+	virtual size_t Read(size_t bytes, void *data, Flags flags = Flags::NONE) {
+		return Read(1, bytes, data, flags);
 	}
-	virtual size_t ReadAt(s64 absolutePos, size_t bytes, size_t count, void *data) = 0;
-	virtual size_t ReadAt(s64 absolutePos, size_t bytes, void *data) {
-		return ReadAt(absolutePos, 1, bytes, data);
+	virtual size_t ReadAt(s64 absolutePos, size_t bytes, size_t count, void *data, Flags flags = Flags::NONE) = 0;
+	virtual size_t ReadAt(s64 absolutePos, size_t bytes, void *data, Flags flags = Flags::NONE) {
+		return ReadAt(absolutePos, 1, bytes, data, flags);
 	}
 };
+
+inline u32 operator & (const FileLoader::Flags &a, const FileLoader::Flags &b) {
+	return (u32)a & (u32)b;
+}
 
 FileLoader *ConstructFileLoader(const std::string &filename);
 // Resolve to the target binary, ISO, or other file (e.g. from a directory.)
 FileLoader *ResolveFileLoaderTarget(FileLoader *fileLoader);
 
-// This can modify the string, for example for stripping off the "/EBOOT.PBP"
-// for a FILETYPE_PSP_PBP_DIRECTORY.
+std::string ResolvePBPDirectory(const std::string &filename);
+std::string ResolvePBPFile(const std::string &filename);
+
 IdentifiedFileType Identify_File(FileLoader *fileLoader);
 
 // Can modify the string filename, as it calls IdentifyFile above.

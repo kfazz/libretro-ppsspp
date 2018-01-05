@@ -40,6 +40,7 @@
 #include "UI/ReportScreen.h"
 #include "UI/CwCheatScreen.h"
 #include "UI/MainScreen.h"
+#include "UI/OnScreenDisplay.h"
 #include "UI/GameInfoCache.h"
 
 void AsyncImageFileView::GetContentDimensions(const UIContext &dc, float &w, float &h) const {
@@ -79,6 +80,8 @@ void AsyncImageFileView::Draw(UIContext &dc) {
 		texture_ = dc.GetThin3DContext()->CreateTextureFromFile(filename_.c_str(), DETECT);
 		if (!texture_)
 			textureFailed_ = true;
+		else if (textureAutoGen_)
+			texture_->AutoGenMipmaps();
 	}
 
 	if (HasFocus()) {
@@ -176,7 +179,7 @@ private:
 	std::string screenshotFilename_;
 };
 
-SaveSlotView::SaveSlotView(const std::string &gameFilename, int slot, UI::LayoutParams *layoutParams) : UI::LinearLayout(UI::ORIENT_HORIZONTAL, layoutParams), gamePath_(gameFilename), slot_(slot) {
+SaveSlotView::SaveSlotView(const std::string &gameFilename, int slot, UI::LayoutParams *layoutParams) : UI::LinearLayout(UI::ORIENT_HORIZONTAL, layoutParams), slot_(slot), gamePath_(gameFilename) {
 	using namespace UI;
 
 	screenshotFilename_ = SaveState::GenerateSaveSlotFilename(gamePath_, slot, SaveState::SCREENSHOT_EXTENSION);
@@ -224,9 +227,15 @@ void SaveSlotView::Draw(UIContext &dc) {
 	UI::LinearLayout::Draw(dc);
 }
 
+static void AfterSaveStateAction(bool status, const std::string &message, void *) {
+	if (!message.empty()) {
+		osm.Show(message, 2.0);
+	}
+}
+
 UI::EventReturn SaveSlotView::OnLoadState(UI::EventParams &e) {
 	g_Config.iCurrentStateSlot = slot_;
-	SaveState::LoadSlot(gamePath_, slot_, SaveState::Callback(), 0);
+	SaveState::LoadSlot(gamePath_, slot_, &AfterSaveStateAction);
 	UI::EventParams e2;
 	e2.v = this;
 	OnStateLoaded.Trigger(e2);
@@ -235,7 +244,7 @@ UI::EventReturn SaveSlotView::OnLoadState(UI::EventParams &e) {
 
 UI::EventReturn SaveSlotView::OnSaveState(UI::EventParams &e) {
 	g_Config.iCurrentStateSlot = slot_;
-	SaveState::SaveSlot(gamePath_, slot_, SaveState::Callback(), 0);
+	SaveState::SaveSlot(gamePath_, slot_, &AfterSaveStateAction);
 	UI::EventParams e2;
 	e2.v = this;
 	OnStateSaved.Trigger(e2);
@@ -324,7 +333,7 @@ void GamePauseScreen::CreateViews() {
 
 	// TODO, also might be nice to show overall compat rating here?
 	// Based on their platform or even cpu/gpu/config.  Would add an API for it.
-	if (Reporting::IsEnabled()) {
+	if (Reporting::IsSupported() && gameId.size() && gameId != "_") {
 		I18NCategory *rp = GetI18NCategory("Reporting");
 		rightColumnItems->Add(new Choice(rp->T("ReportButton", "Report Feedback")))->OnClick.Handle(this, &GamePauseScreen::OnReportFeedback);
 	}
@@ -389,14 +398,14 @@ UI::EventReturn GamePauseScreen::OnReportFeedback(UI::EventParams &e) {
 }
 
 UI::EventReturn GamePauseScreen::OnRewind(UI::EventParams &e) {
-	SaveState::Rewind(SaveState::Callback(), 0);
+	SaveState::Rewind(&AfterSaveStateAction);
 
 	screenManager()->finishDialog(this, DR_CANCEL);
 	return UI::EVENT_DONE;
 }
 
 UI::EventReturn GamePauseScreen::OnCwCheat(UI::EventParams &e) {
-	screenManager()->push(new CwCheatScreen());
+	screenManager()->push(new CwCheatScreen(gamePath_));
 	return UI::EVENT_DONE;
 }
 

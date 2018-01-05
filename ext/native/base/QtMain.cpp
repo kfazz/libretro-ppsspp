@@ -30,6 +30,7 @@
 #include "SDL_audio.h"
 #endif
 #include "QtMain.h"
+#include "gfx_es2/gpu_features.h"
 #include "math/math_util.h"
 
 #include <string.h>
@@ -239,7 +240,10 @@ QString MainUI::InputBoxGetQString(QString title, QString defaultValue)
 
 void MainUI::resizeGL(int w, int h)
 {
-    UpdateScreenScale(w, h, false);
+    bool smallWindow = g_Config.IsPortrait() ? (h < 480 + 80) : (w < 480 + 80);
+    if (UpdateScreenScale(w, h, smallWindow)) {
+        NativeMessageReceived("gpu resized", "");
+    }
     xscale = w / this->width();
     yscale = h / this->height();
 
@@ -346,10 +350,17 @@ bool MainUI::event(QEvent *e)
 void MainUI::initializeGL()
 {
 #ifndef USING_GLES2
-        glewInit();
+	// Some core profile drivers elide certain extensions from GL_EXTENSIONS/etc.
+	// glewExperimental allows us to force GLEW to search for the pointers anyway.
+	if (gl_extensions.IsCoreContext)
+		glewExperimental = true;
+	glewInit();
+	// Unfortunately, glew will generate an invalid enum error, ignore.
+	if (gl_extensions.IsCoreContext)
+		glGetError();
 #endif
-        graphicsContext = new QtDummyGraphicsContext();
-        NativeInitGraphics(graphicsContext);
+	graphicsContext = new QtDummyGraphicsContext();
+	NativeInitGraphics(graphicsContext);
 }
 
 void MainUI::paintGL()
@@ -357,7 +368,7 @@ void MainUI::paintGL()
     updateAccelerometer();
     UpdateInputState(&input_state);
     time_update();
-    UpdateRunLoop();
+    UpdateRunLoop(&input_state);
 }
 
 void MainUI::updateAccelerometer()
@@ -489,9 +500,6 @@ int main(int argc, char *argv[])
 	
 	int ret = mainInternal(a);
 
-#ifndef MOBILE_DEVICE
-	exit(0);
-#endif
 	NativeShutdownGraphics();
 #ifdef SDL
 	SDL_PauseAudio(1);

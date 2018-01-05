@@ -11,6 +11,8 @@
 #include <vector>
 #include <string>
 
+#include "base/logging.h"
+
 class Matrix4x4;
 
 enum T3DBlendEquation : int {
@@ -64,6 +66,16 @@ enum T3DBlendFactor : int {
 	ONE_MINUS_DST_COLOR,
 	ONE_MINUS_DST_ALPHA,
 	FIXED_COLOR,
+};
+
+enum T3DTextureWrap : int {
+	REPEAT,
+	CLAMP,
+};
+
+enum T3DTextureFilter : int {
+	NEAREST,
+	LINEAR,
 };
 
 enum T3DBufferUsage : int {
@@ -124,6 +136,12 @@ enum T3DBlendStatePreset : int {
 	BS_PREMUL_ALPHA,
 	BS_ADDITIVE,
 	BS_MAX_PRESET,
+};
+
+enum T3DSamplerStatePreset : int {
+	SAMPS_NEAREST,
+	SAMPS_LINEAR,
+	SAMPS_MAX_PRESET,
 };
 
 enum T3DClear : int {
@@ -196,14 +214,30 @@ public:
 	Thin3DObject() : refcount_(1) {}
 	virtual ~Thin3DObject() {}
 
+	// TODO: Reconsider this annoying ref counting stuff.
 	virtual void AddRef() { refcount_++; }
-	virtual void Release() { refcount_--; if (!refcount_) delete this; }
+	virtual bool Release() {
+		if (refcount_ > 0 && refcount_ < 10000) {
+			refcount_--;
+			if (refcount_ == 0) {
+				delete this;
+				return true;
+			}
+		} else {
+			ELOG("Refcount (%d) invalid for object %p - corrupt?", refcount_, this);
+		}
+		return false;
+	}
 
 private:
 	int refcount_;
 };
 
 class Thin3DBlendState : public Thin3DObject {
+public:
+};
+
+class Thin3DSamplerState : public Thin3DObject {
 public:
 };
 
@@ -262,7 +296,7 @@ class Thin3DShaderSet : public Thin3DObject {
 public:
 	// TODO: Make some faster way of doing these. Support uniform buffers (and fake them on GL 2.0?)
 	virtual void SetVector(const char *name, float *value, int n) = 0;
-	virtual void SetMatrix4x4(const char *name, const Matrix4x4 &value) = 0;
+	virtual void SetMatrix4x4(const char *name, const float value[16]) = 0;
 };
 
 struct T3DBlendStateDesc {
@@ -278,6 +312,14 @@ struct T3DBlendStateDesc {
 	// int colorMask;
 };
 
+struct T3DSamplerStateDesc {
+	T3DTextureWrap wrapS;
+	T3DTextureWrap wrapT;
+	T3DTextureFilter magFilt;
+	T3DTextureFilter minFilt;
+	T3DTextureFilter mipFilt;
+};
+
 class Thin3DContext : public Thin3DObject {
 public:
 	virtual ~Thin3DContext();
@@ -286,6 +328,7 @@ public:
 
 	virtual Thin3DDepthStencilState *CreateDepthStencilState(bool depthTestEnabled, bool depthWriteEnabled, T3DComparison depthCompare) = 0;
 	virtual Thin3DBlendState *CreateBlendState(const T3DBlendStateDesc &desc) = 0;
+	virtual Thin3DSamplerState *CreateSamplerState(const T3DSamplerStateDesc &desc) = 0;
 	virtual Thin3DBuffer *CreateBuffer(size_t size, uint32_t usageFlags) = 0;
 	virtual Thin3DShaderSet *CreateShaderSet(Thin3DShader *vshader, Thin3DShader *fshader) = 0;
 	virtual Thin3DVertexFormat *CreateVertexFormat(const std::vector<Thin3DVertexComponent> &components, int stride, Thin3DShader *vshader) = 0;
@@ -299,16 +342,18 @@ public:
 
 	// Note that these DO NOT AddRef so you must not ->Release presets unless you manually AddRef them.
 	Thin3DBlendState *GetBlendStatePreset(T3DBlendStatePreset preset) { return bsPresets_[preset]; }
+	Thin3DSamplerState *GetSamplerStatePreset(T3DSamplerStatePreset preset) { return sampsPresets_[preset]; }
 	Thin3DShader *GetVshaderPreset(T3DVertexShaderPreset preset) { return fsPresets_[preset]; }
 	Thin3DShader *GetFshaderPreset(T3DFragmentShaderPreset preset) { return vsPresets_[preset]; }
 	Thin3DShaderSet *GetShaderSetPreset(T3DShaderSetPreset preset) { return ssPresets_[preset]; }
 
 	// The implementation makes the choice of which shader code to use.
-	virtual Thin3DShader *CreateVertexShader(const char *glsl_source, const char *hlsl_source) = 0;
-	virtual Thin3DShader *CreateFragmentShader(const char *glsl_source, const char *hlsl_source) = 0;
+	virtual Thin3DShader *CreateVertexShader(const char *glsl_source, const char *hlsl_source, const char *vulkan_source) = 0;
+	virtual Thin3DShader *CreateFragmentShader(const char *glsl_source, const char *hlsl_source, const char *vulkan_source) = 0;
 
 	// Bound state objects. Too cumbersome to add them all as parameters to Draw.
 	virtual void SetBlendState(Thin3DBlendState *state) = 0;
+	virtual void SetSamplerStates(int start, int count, Thin3DSamplerState **state) = 0;
 	virtual void SetDepthStencilState(Thin3DDepthStencilState *state) = 0;
 	virtual void SetTextures(int start, int count, Thin3DTexture **textures) = 0;
 
@@ -328,8 +373,15 @@ public:
 	virtual void Draw(T3DPrimitive prim, Thin3DShaderSet *pipeline, Thin3DVertexFormat *format, Thin3DBuffer *vdata, int vertexCount, int offset) = 0;
 	virtual void DrawIndexed(T3DPrimitive prim, Thin3DShaderSet *pipeline, Thin3DVertexFormat *format, Thin3DBuffer *vdata, Thin3DBuffer *idata, int vertexCount, int offset) = 0;
 	virtual void DrawUP(T3DPrimitive prim, Thin3DShaderSet *pipeline, Thin3DVertexFormat *format, const void *vdata, int vertexCount) = 0;
+	
+	// Render pass management. Default implementations here.
+	virtual void Begin(bool clear, uint32_t colorval, float depthVal, int stencilVal) {
+		Clear(0xF, colorval, depthVal, stencilVal);
+	}
+	virtual void End() {}
+	
 	virtual void Clear(int mask, uint32_t colorval, float depthVal, int stencilVal) = 0;
-
+	
 	// Necessary to correctly flip scissor rectangles etc for OpenGL.
 	void SetTargetSize(int w, int h) {
 		targetWidth_ = w;
@@ -345,6 +397,7 @@ protected:
 	Thin3DShader *fsPresets_[FS_MAX_PRESET];
 	Thin3DBlendState *bsPresets_[BS_MAX_PRESET];
 	Thin3DShaderSet *ssPresets_[SS_MAX_PRESET];
+	Thin3DSamplerState *sampsPresets_[SAMPS_MAX_PRESET];
 
 	int targetWidth_;
 	int targetHeight_;
@@ -361,3 +414,7 @@ struct IDirect3DDevice9Ex;
 struct IDirect3D9Ex;
 Thin3DContext *T3DCreateDX9Context(IDirect3D9 *d3d, IDirect3D9Ex *d3dEx, int adapterId, IDirect3DDevice9 *device, IDirect3DDevice9Ex *deviceEx);
 #endif
+
+class VulkanContext;
+
+Thin3DContext *T3DCreateVulkanContext(VulkanContext *context);

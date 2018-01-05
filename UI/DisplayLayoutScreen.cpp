@@ -31,7 +31,7 @@
 #include "GPU/GLES/Framebuffer.h"
 
 static const int leftColumnWidth = 200;
-static const float orgRatio = 1.764706;
+static const float orgRatio = 1.764706f;
 
 // Ugly hackery, need to rework some stuff to get around this
 static float local_dp_xres;
@@ -62,6 +62,7 @@ public:
 
 DisplayLayoutScreen::DisplayLayoutScreen() {
 	picked_ = 0;
+	mode_ = nullptr;
 };
 
 
@@ -70,7 +71,7 @@ bool DisplayLayoutScreen::touch(const TouchInput &touch) {
 
 	using namespace UI;
 
-	int mode = mode_->GetSelection();
+	int mode = mode_ ? mode_->GetSelection() : 0;
 	if (g_Config.iSmallDisplayZoomType == 2) { mode = -1; }
 
 	const Bounds &screen_bounds = screenManager()->getUIContext()->GetBounds();
@@ -162,6 +163,27 @@ void DisplayLayoutScreen::dialogFinished(const Screen *dialog, DialogResult resu
 	RecreateViews();
 }
 
+class Boundary : public UI::View {
+public:
+	Boundary(UI::LayoutParams *layoutParams) : UI::View(layoutParams) {
+	}
+
+	void Draw(UIContext &dc) override {
+		dc.Draw()->DrawImageStretch(dc.theme->whiteImage, bounds_.x, bounds_.y, bounds_.x2(), bounds_.y2(), dc.theme->itemDownStyle.background.color);
+	}
+};
+
+// Stealing StickyChoice's layout and text rendering.
+class HighlightLabel : public UI::StickyChoice {
+public:
+	HighlightLabel(const std::string &text, UI::LayoutParams *layoutParams)
+		: UI::StickyChoice(text, "", layoutParams) {
+		Press();
+	}
+
+	bool CanBeFocused() const override { return false; }
+};
+
 void DisplayLayoutScreen::CreateViews() {
 	const Bounds &bounds = screenManager()->getUIContext()->GetBounds();
 
@@ -176,43 +198,41 @@ void DisplayLayoutScreen::CreateViews() {
 
 	root_ = new AnchorLayout(new LayoutParams(FILL_PARENT, FILL_PARENT));
 
-	// Just visual boundaries of the screen, should be easier to use than imagination
-	float verticalBoundaryPositionL = local_dp_xres / 4.0f;
-	float verticalBoundaryPositionR = local_dp_xres - verticalBoundaryPositionL;
-	float horizontalBoundaryPositionL = local_dp_yres / 4.0f;
-	float horizontalBoundaryPositionR = local_dp_yres - horizontalBoundaryPositionL;
-	TabHolder *verticalBoundaryL = new TabHolder(ORIENT_VERTICAL, verticalBoundaryPositionL, new AnchorLayoutParams(0, 0, 0, 0, false));
-	TabHolder *verticalBoundaryR = new TabHolder(ORIENT_VERTICAL, verticalBoundaryPositionR + 4.0f, new AnchorLayoutParams(0, 0, 0, 0, false));
-	TabHolder *horizontalBoundaryL = new TabHolder(ORIENT_VERTICAL, verticalBoundaryPositionL * 2.0f, new AnchorLayoutParams(verticalBoundaryPositionL * 2.0f, horizontalBoundaryPositionL - 32.0f, 0, 0, true));
-	TabHolder *horizontalBoundaryR = new TabHolder(ORIENT_VERTICAL, verticalBoundaryPositionL * 2.0f, new AnchorLayoutParams(verticalBoundaryPositionL * 2.0f, horizontalBoundaryPositionR + 32.0f, 0, 0, true));
-	AnchorLayout *topBoundary = new AnchorLayout(new LayoutParams(FILL_PARENT, FILL_PARENT));
-	AnchorLayout *bottomBoundary = new AnchorLayout(new LayoutParams(FILL_PARENT, FILL_PARENT));
-	root_->Add(verticalBoundaryL);
-	root_->Add(verticalBoundaryR);
-	root_->Add(horizontalBoundaryL);
-	root_->Add(horizontalBoundaryR);
-	horizontalBoundaryL->AddTab("", topBoundary);
-	horizontalBoundaryR->AddTab("", bottomBoundary);
+	const float previewWidth = local_dp_xres / 2.0f;
+	const float previewHeight = local_dp_yres / 2.0f;
 
-	Choice *back = new Choice(di->T("Back"), "", false, new AnchorLayoutParams(leftColumnWidth, WRAP_CONTENT, 10, NONE, NONE, 10));
+	// Just visual boundaries of the screen, should be easier to use than imagination
+	const float horizPreviewPadding = local_dp_xres / 4.0f;
+	const float vertPreviewPadding = local_dp_yres / 4.0f;
+	const float horizBoundariesWidth = 4.0f;
+	// This makes it have at least 10.0f padding below at 1x.
+	const float vertBoundariesHeight = 52.0f;
+
+	// Left side, right, top, bottom.
+	root_->Add(new Boundary(new AnchorLayoutParams(horizBoundariesWidth, FILL_PARENT, NONE, 0, horizPreviewPadding + previewWidth, 0)));
+	root_->Add(new Boundary(new AnchorLayoutParams(horizBoundariesWidth, FILL_PARENT, horizPreviewPadding + previewWidth, 0, NONE, 0)));
+	root_->Add(new Boundary(new AnchorLayoutParams(previewWidth, vertBoundariesHeight, horizPreviewPadding, vertPreviewPadding - vertBoundariesHeight, NONE, NONE)));
+	root_->Add(new Boundary(new AnchorLayoutParams(previewWidth, vertBoundariesHeight, horizPreviewPadding, NONE, NONE, vertPreviewPadding - vertBoundariesHeight)));
+
 	static const char *zoomLevels[] = { "Stretching", "Partial Stretch", "Auto Scaling", "Manual Scaling" };
-	zoom_ = new PopupMultiChoice(&g_Config.iSmallDisplayZoomType, di->T("Options"), zoomLevels, 0, ARRAY_SIZE(zoomLevels), gr->GetName(), screenManager(), new AnchorLayoutParams(400, WRAP_CONTENT, local_dp_xres / 2 - 200, NONE, NONE, 10));
+	zoom_ = new PopupMultiChoice(&g_Config.iSmallDisplayZoomType, di->T("Options"), zoomLevels, 0, ARRAY_SIZE(zoomLevels), gr->GetName(), screenManager(), new AnchorLayoutParams(400, WRAP_CONTENT, previewWidth - 200.0f, NONE, NONE, 10));
 	zoom_->OnChoice.Handle(this, &DisplayLayoutScreen::OnZoomTypeChange);
 
 	static const char *displayRotation[] = { "Landscape", "Portrait", "Landscape Reversed", "Portrait Reversed" };
-	rotation_ = new PopupMultiChoice(&g_Config.iInternalScreenRotation, gr->T("Rotation"), displayRotation, 1, ARRAY_SIZE(displayRotation), co->GetName(), screenManager(), new AnchorLayoutParams(400, WRAP_CONTENT, local_dp_xres / 2 - 200, NONE, NONE, local_dp_yres - 64));
+	rotation_ = new PopupMultiChoice(&g_Config.iInternalScreenRotation, gr->T("Rotation"), displayRotation, 1, ARRAY_SIZE(displayRotation), co->GetName(), screenManager(), new AnchorLayoutParams(400, WRAP_CONTENT, previewWidth - 200.0f, 10, NONE, local_dp_yres - 64 - 10));
 	rotation_->SetEnabledPtr(&displayRotEnable_);
 	displayRotEnable_ = (g_Config.iRenderingMode != FB_NON_BUFFERED_MODE);
 	bool bRotated = false;
 	if (displayRotEnable_ && (g_Config.iInternalScreenRotation == ROTATION_LOCKED_VERTICAL || g_Config.iInternalScreenRotation == ROTATION_LOCKED_VERTICAL180)) {
 		bRotated = true;
 	}
-	mode_ = new ChoiceStrip(ORIENT_VERTICAL, new AnchorLayoutParams(leftColumnWidth, WRAP_CONTENT, 10, NONE, NONE, 158 + 64 + 10));
 	displayRepresentationScale_ = g_Config.fSmallDisplayZoomLevel * 8.0f; // Visual representation image is just icon size and have to be scaled 8 times to match PSP native resolution which is used as 1.0 for zoom
+
+	HighlightLabel *label = nullptr;
+	mode_ = nullptr;
 	if (g_Config.iSmallDisplayZoomType > 1) { // Scaling
 		if (g_Config.iSmallDisplayZoomType == 2) { // Auto Scaling
-			mode_->AddChoice(gr->T("Auto Scaling"));
-			mode_->ReplaceLayoutParams(new AnchorLayoutParams(0, 0, local_dp_xres / 2.0f - 70.0f, NONE, NONE, local_dp_yres / 2.0f + 32.0f));
+			label = new HighlightLabel(gr->T("Auto Scaling"), new AnchorLayoutParams(WRAP_CONTENT, 64.0f, local_dp_xres / 2.0f, local_dp_yres / 2.0f, NONE, NONE, true));
 			float autoBound = local_dp_yres / 270.0f;
 			// Case of screen rotated ~ only works with buffered rendering
 			if (bRotated) {
@@ -238,8 +258,9 @@ void DisplayLayoutScreen::CreateViews() {
 			Choice *center = new Choice(di->T("Center"), "", false, new AnchorLayoutParams(leftColumnWidth, WRAP_CONTENT, 10, NONE, NONE, 74));
 			center->OnClick.Handle(this, &DisplayLayoutScreen::OnCenter);
 			root_->Add(center);
-			PopupSliderChoiceFloat *zoomlvl_ = new PopupSliderChoiceFloat(&g_Config.fSmallDisplayZoomLevel, 1.0f, 10.0f, di->T("Zoom"), 1.0f, screenManager(), di->T("* PSP res"), new AnchorLayoutParams(leftColumnWidth, WRAP_CONTENT, 10, NONE, NONE, 134));
-			root_->Add(zoomlvl_);
+			PopupSliderChoiceFloat *zoomlvl = new PopupSliderChoiceFloat(&g_Config.fSmallDisplayZoomLevel, 1.0f, 10.0f, di->T("Zoom"), 1.0f, screenManager(), di->T("* PSP res"), new AnchorLayoutParams(leftColumnWidth, WRAP_CONTENT, 10, NONE, NONE, 10 + 64 + 64));
+			root_->Add(zoomlvl);
+			mode_ = new ChoiceStrip(ORIENT_VERTICAL, new AnchorLayoutParams(leftColumnWidth, WRAP_CONTENT, 10, NONE, NONE, 158 + 64 + 10));
 			mode_->AddChoice(di->T("Move"));
 			mode_->AddChoice(di->T("Resize"));
 			mode_->SetSelection(0);
@@ -247,12 +268,11 @@ void DisplayLayoutScreen::CreateViews() {
 		displayRepresentation_ = new DragDropDisplay(g_Config.fSmallDisplayOffsetX, g_Config.fSmallDisplayOffsetY, I_PSP_DISPLAY, displayRepresentationScale_);
 		displayRepresentation_->SetVisibility(V_VISIBLE);
 	} else { // Stretching
-		mode_->AddChoice(gr->T("Stretching"));
-		mode_->ReplaceLayoutParams(new AnchorLayoutParams(0, 0, local_dp_xres / 2.0f - 70.0f, NONE, NONE, local_dp_yres / 2.0f + 32.0f));
+		label = new HighlightLabel(gr->T("Stretching"), new AnchorLayoutParams(WRAP_CONTENT, 64.0f, local_dp_xres / 2.0f, local_dp_yres / 2.0f, NONE, NONE, true));
 		displayRepresentation_ = new DragDropDisplay(g_Config.fSmallDisplayOffsetX, g_Config.fSmallDisplayOffsetY, I_PSP_DISPLAY, displayRepresentationScale_);
 		displayRepresentation_->SetVisibility(V_INVISIBLE);
-		float width = local_dp_xres / 2.0f;
-		float height = local_dp_yres / 2.0f;
+		float width = previewWidth;
+		float height = previewHeight;
 		if (g_Config.iSmallDisplayZoomType == 0) { // Stretched
 			Choice *stretched = new Choice("", "", false, new AnchorLayoutParams(width, height, width - width / 2.0f, NONE, NONE, height - height / 2.0f));
 			stretched->SetEnabled(false);
@@ -262,12 +282,16 @@ void DisplayLayoutScreen::CreateViews() {
 			float frameRatio = width / height;
 			if (origRatio > frameRatio) {
 				height = width / origRatio;
-				if (!bRotated && g_Config.iSmallDisplayZoomType == 1) {	height = (272.0f + height) / 2.0f; }
+				if (!bRotated && g_Config.iSmallDisplayZoomType == 1) {
+					height = (272.0f + height) / 2.0f;
+				}
 			} else {
 				width = height * origRatio;
-				if (bRotated && g_Config.iSmallDisplayZoomType == 1) { width = (272.0f + height) / 2.0f; }
+				if (bRotated && g_Config.iSmallDisplayZoomType == 1) {
+					width = (272.0f + height) / 2.0f;
+				}
 			}
-			Choice *stretched = new Choice("", "", false, new AnchorLayoutParams(width, height, local_dp_xres / 2.0f - width / 2.0f, NONE, NONE, local_dp_yres / 2.0f - height / 2.0f));
+			Choice *stretched = new Choice("", "", false, new AnchorLayoutParams(width, height, previewWidth - width / 2.0f, NONE, NONE, previewHeight - height / 2.0f));
 			stretched->SetEnabled(false);
 			root_->Add(stretched);
 		}
@@ -276,9 +300,15 @@ void DisplayLayoutScreen::CreateViews() {
 		displayRepresentation_->SetAngle(90.0f);
 	}
 
+	Choice *back = new Choice(di->T("Back"), "", false, new AnchorLayoutParams(leftColumnWidth, WRAP_CONTENT, 10, NONE, NONE, 10));
 	back->OnClick.Handle<UIScreen>(this, &UIScreen::OnBack);
 	root_->Add(displayRepresentation_);
-	root_->Add(mode_);
+	if (mode_) {
+		root_->Add(mode_);
+	}
+	if (label) {
+		root_->Add(label);
+	}
 	root_->Add(zoom_);
 	root_->Add(rotation_);
 	root_->Add(back);

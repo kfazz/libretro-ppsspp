@@ -79,6 +79,7 @@ namespace MainWindow {
 
 		// File submenus
 		SUBMENU_FILE_SAVESTATE_SLOT = 6,
+		SUBMENU_FILE_RECORD = 11,
 
 		// Emulation submenus
 		SUBMENU_DISPLAY_ROTATION = 4,
@@ -232,6 +233,7 @@ namespace MainWindow {
 		TranslateMenuItem(menu, ID_FILE_QUICKSAVESTATE, L"\tF2");
 		TranslateMenuItem(menu, ID_FILE_LOADSTATEFILE);
 		TranslateMenuItem(menu, ID_FILE_SAVESTATEFILE);
+		TranslateSubMenu(menu, "Record", MENU_FILE, SUBMENU_FILE_RECORD);
 		TranslateMenuItem(menu, ID_FILE_EXIT, L"\tAlt+F4");
 
 		// Emulation menu
@@ -270,6 +272,11 @@ namespace MainWindow {
 		TranslateMenuItem(menu, ID_OPTIONS_MORE_SETTINGS);
 		TranslateMenuItem(menu, ID_OPTIONS_CONTROLS);
 		TranslateMenuItem(menu, ID_OPTIONS_DISPLAY_LAYOUT);
+
+		// Movie menu
+		TranslateMenuItem(menu, ID_FILE_DUMPFRAMES);
+		TranslateMenuItem(menu, ID_FILE_USEFFV1);
+		TranslateMenuItem(menu, ID_FILE_DUMPAUDIO);
 
 		// Skip display multipliers x1-x10
 		TranslateMenuItem(menu, ID_OPTIONS_FULLSCREEN, L"\tAlt+Return, F11");
@@ -400,7 +407,10 @@ namespace MainWindow {
 		g_Config.iInternalScreenRotation = rotation;
 	}
 
-	static void SaveStateActionFinished(bool result, void *userdata) {
+	static void SaveStateActionFinished(bool result, const std::string &message, void *userdata) {
+		if (!message.empty()) {
+			osm.Show(message, 2.0);
+		}
 		PostMessage(MainWindow::GetHWND(), WM_USER_SAVESTATE_FINISH, 0, 0);
 	}
 
@@ -580,6 +590,7 @@ namespace MainWindow {
 		case ID_FILE_SAVESTATE_NEXT_SLOT:
 		{
 			SaveState::NextSlot();
+			NativeMessageReceived("savestate_displayslot", "");
 			break;
 		}
 
@@ -588,6 +599,7 @@ namespace MainWindow {
 			if (KeyMap::g_controllerMap[VIRTKEY_NEXT_SLOT].empty())
 			{
 				SaveState::NextSlot();
+				NativeMessageReceived("savestate_displayslot", "");
 			}
 			break;
 		}
@@ -691,14 +703,18 @@ namespace MainWindow {
 
 		case ID_OPTIONS_DIRECT3D9:
 			g_Config.iGPUBackend = GPU_BACKEND_DIRECT3D9;
-			// TODO: Remove once software renderer supports D3D9.
-			g_Config.bSoftwareRendering = false;
 			g_Config.bRestartRequired = true;
 			PostMessage(MainWindow::GetHWND(), WM_CLOSE, 0, 0);
 			break;
 
 		case ID_OPTIONS_OPENGL:
 			g_Config.iGPUBackend = GPU_BACKEND_OPENGL;
+			g_Config.bRestartRequired = true;
+			PostMessage(MainWindow::GetHWND(), WM_CLOSE, 0, 0);
+			break;
+
+		case ID_OPTIONS_VULKAN:
+			g_Config.iGPUBackend = GPU_BACKEND_VULKAN;
 			g_Config.bRestartRequired = true;
 			PostMessage(MainWindow::GetHWND(), WM_CLOSE, 0, 0);
 			break;
@@ -833,9 +849,11 @@ namespace MainWindow {
 				FILE *fp = File::OpenCFile(fn, "wb");
 				u32 handle = pspFileSystem.OpenFile(filename, FILEACCESS_READ, "");
 				u8 buffer[4096];
-				while (pspFileSystem.ReadFile(handle, buffer, sizeof(buffer)) > 0) {
-					fwrite(buffer, sizeof(buffer), 1, fp);
-				}
+				size_t bytes;
+				do {
+					bytes = pspFileSystem.ReadFile(handle, buffer, sizeof(buffer));
+					fwrite(buffer, 1, bytes, fp);
+				} while (bytes == sizeof(buffer));
 				pspFileSystem.CloseFile(handle);
 				fclose(fp);
 			}
@@ -917,6 +935,18 @@ namespace MainWindow {
 			g_TakeScreenshot = true;
 			break;
 
+		case ID_FILE_DUMPFRAMES:
+			g_Config.bDumpFrames = !g_Config.bDumpFrames;
+			break;
+
+		case ID_FILE_USEFFV1:
+			g_Config.bUseFFV1 = !g_Config.bUseFFV1;
+			break;
+
+		case ID_FILE_DUMPAUDIO:
+			g_Config.bDumpAudio = !g_Config.bDumpAudio;
+			break;
+
 		default:
 		{
 			// Handle the dynamic shader switching here.
@@ -955,6 +985,9 @@ namespace MainWindow {
 		CHECKITEM(ID_TEXTURESCALING_DEPOSTERIZE, g_Config.bTexDeposterize);
 		CHECKITEM(ID_EMULATION_CHEATS, g_Config.bEnableCheats);
 		CHECKITEM(ID_OPTIONS_IGNOREWINKEY, g_Config.bIgnoreWindowsKey);
+		CHECKITEM(ID_FILE_DUMPFRAMES, g_Config.bDumpFrames);
+		CHECKITEM(ID_FILE_USEFFV1, g_Config.bUseFFV1);
+		CHECKITEM(ID_FILE_DUMPAUDIO, g_Config.bDumpAudio);
 
 		static const int displayrotationitems[] = {
 			ID_EMULATION_ROTATION_H,
@@ -1146,14 +1179,31 @@ namespace MainWindow {
 			CheckMenuItem(menu, savestateSlot[i], MF_BYCOMMAND | ((i == g_Config.iCurrentStateSlot) ? MF_CHECKED : MF_UNCHECKED));
 		}
 
-		if (g_Config.iGPUBackend == GPU_BACKEND_DIRECT3D9) {
+		switch (g_Config.iGPUBackend) {
+		case GPU_BACKEND_DIRECT3D9:
 			EnableMenuItem(menu, ID_OPTIONS_DIRECT3D9, MF_GRAYED);
-			CheckMenuItem(menu, ID_OPTIONS_DIRECT3D9, MF_CHECKED);
 			EnableMenuItem(menu, ID_OPTIONS_OPENGL, MF_ENABLED);
-		} else {
-			EnableMenuItem(menu, ID_OPTIONS_OPENGL, MF_GRAYED);
-			CheckMenuItem(menu, ID_OPTIONS_OPENGL, MF_CHECKED);
+			EnableMenuItem(menu, ID_OPTIONS_VULKAN, MF_ENABLED);
+			CheckMenuItem(menu, ID_OPTIONS_DIRECT3D9, MF_CHECKED);
+			CheckMenuItem(menu, ID_OPTIONS_OPENGL, MF_UNCHECKED);
+			CheckMenuItem(menu, ID_OPTIONS_VULKAN, MF_UNCHECKED);
+			break;
+		case GPU_BACKEND_OPENGL:
 			EnableMenuItem(menu, ID_OPTIONS_DIRECT3D9, MF_ENABLED);
+			EnableMenuItem(menu, ID_OPTIONS_OPENGL, MF_GRAYED);
+			EnableMenuItem(menu, ID_OPTIONS_VULKAN, MF_ENABLED);
+			CheckMenuItem(menu, ID_OPTIONS_DIRECT3D9, MF_UNCHECKED);
+			CheckMenuItem(menu, ID_OPTIONS_OPENGL, MF_CHECKED);
+			CheckMenuItem(menu, ID_OPTIONS_VULKAN, MF_UNCHECKED);
+			break;
+		case GPU_BACKEND_VULKAN:
+			EnableMenuItem(menu, ID_OPTIONS_DIRECT3D9, MF_ENABLED);
+			EnableMenuItem(menu, ID_OPTIONS_OPENGL, MF_ENABLED);
+			EnableMenuItem(menu, ID_OPTIONS_VULKAN, MF_GRAYED);
+			CheckMenuItem(menu, ID_OPTIONS_DIRECT3D9, MF_UNCHECKED);
+			CheckMenuItem(menu, ID_OPTIONS_OPENGL, MF_UNCHECKED);
+			CheckMenuItem(menu, ID_OPTIONS_VULKAN, MF_CHECKED);
+			break;
 		}
 
 		UpdateDynamicMenuCheckmarks(menu);

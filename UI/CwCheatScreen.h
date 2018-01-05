@@ -26,6 +26,7 @@ extern std::string gameTitle;
 
 class CwCheatScreen : public UIDialogScreenWithBackground {
 public:
+	CwCheatScreen(std::string gamePath);
 	CwCheatScreen() {}
 	void CreateCodeList();
 	void processFileOn(std::string activatedCheat);
@@ -44,7 +45,6 @@ protected:
 private:
 	UI::EventReturn OnCheckBox(UI::EventParams &params);
 	std::vector<std::string> formattedList_;
-	bool anythingChanged_;
 };
 
 // TODO: Instead just hook the OnClick event on a regular checkbox.

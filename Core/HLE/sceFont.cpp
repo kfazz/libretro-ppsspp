@@ -82,10 +82,12 @@ struct FontRegistryEntry {
 	const char *fontName;
 	int expireDate;
 	int shadow_option;
+	bool ignoreIfMissing;
 };
 
 static const FontRegistryEntry fontRegistry[] = {
-	{ 0x288, 0x288, 0x2000, 0x2000, 0, 0, FONT_FAMILY_SANS_SERIF, FONT_STYLE_DB, 0, FONT_LANGUAGE_CHINESE, 0, 1, "zh_gb.pgf", "FTT-NewRodin Pro DB", 0, 0 },
+	// This was added for Chinese translations and is not normally loaded on a PSP.
+	{ 0x288, 0x288, 0x2000, 0x2000, 0, 0, FONT_FAMILY_SANS_SERIF, FONT_STYLE_DB, 0, FONT_LANGUAGE_CHINESE, 0, 1, "zh_gb.pgf", "FTT-NewRodin Pro DB", 0, 0, true },
 	{ 0x288, 0x288, 0x2000, 0x2000, 0, 0, FONT_FAMILY_SANS_SERIF, FONT_STYLE_DB, 0, FONT_LANGUAGE_JAPANESE, 0, 1, "jpn0.pgf", "FTT-NewRodin Pro DB", 0, 0 },
 	{0x288, 0x288, 0x2000, 0x2000, 0, 0, FONT_FAMILY_SANS_SERIF, FONT_STYLE_REGULAR, 0, FONT_LANGUAGE_LATIN, 0, 1, "ltn0.pgf", "FTT-NewRodin Pro Latin", 0, 0},
 	{0x288, 0x288, 0x2000, 0x2000, 0, 0, FONT_FAMILY_SERIF, FONT_STYLE_REGULAR, 0, FONT_LANGUAGE_LATIN, 0, 1, "ltn1.pgf", "FTT-Matisse Pro Latin", 0, 0},
@@ -645,9 +647,26 @@ static void __LoadInternalFonts() {
 	if (!pspFileSystem.GetFileInfo(fontPath).exists) {
 		pspFileSystem.MkDir(fontPath);
 	}
+	if ((pspFileSystem.GetFileInfo("disc0:/PSP_GAME/USRDIR/zh_gb.pgf").exists) && (pspFileSystem.GetFileInfo("disc0:/PSP_GAME/USRDIR/oldfont.prx").exists)) {
+		for (size_t i = 0; i < ARRAY_SIZE(fontRegistry); i++) {
+			const FontRegistryEntry &entry = fontRegistry[i];
+			std::string fontFilename = userfontPath + entry.fileName;
+			PSPFileInfo info = pspFileSystem.GetFileInfo(fontFilename);
+			DEBUG_LOG(SCEFONT, "Loading internal font %s (%i bytes)", fontFilename.c_str(), (int)info.size);
+			std::vector<u8> buffer;
+			if (pspFileSystem.ReadEntireFile(fontFilename, buffer) < 0) {
+				ERROR_LOG(SCEFONT, "Failed opening font");
+				continue;
+			}
+			internalFonts.push_back(new Font(buffer, entry));
+			DEBUG_LOG(SCEFONT, "Loaded font %s", fontFilename.c_str());
+			return;
+		}
+	}
+
 	for (size_t i = 0; i < ARRAY_SIZE(fontRegistry); i++) {
 		const FontRegistryEntry &entry = fontRegistry[i];
-		std::string fontFilename = userfontPath + entry.fileName; 
+		std::string fontFilename = userfontPath + entry.fileName;
 		PSPFileInfo info = pspFileSystem.GetFileInfo(fontFilename);
 
 		if (!info.exists) {
@@ -673,7 +692,7 @@ static void __LoadInternalFonts() {
 			internalFonts.push_back(new Font(buffer, entry));
 
 			DEBUG_LOG(SCEFONT, "Loaded font %s", fontFilename.c_str());
-		} else {
+		} else if (!entry.ignoreIfMissing) {
 			WARN_LOG(SCEFONT, "Font file not found: %s", fontFilename.c_str());
 		}
 	}
