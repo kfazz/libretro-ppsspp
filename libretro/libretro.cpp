@@ -20,6 +20,7 @@
 #include "input/input_state.h"
 #include "GPU/GLES/FBO.h"
 #include "GPU/GLES/GLStateCache.h"
+//#include "GPU/GLES/GPU_GLES.h"
 #include "gfx_es2/gpu_features.h"
 #include "ext/native/gfx/gl_lost_manager.h"
 #include "ext/native/thread/thread.h"
@@ -745,12 +746,14 @@ static void check_variables(void)
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
    {
       if (!strcmp(var.value, "jit"))
-         coreParam.cpuCore = CPU_JIT;
+         coreParam.cpuCore = CPU_CORE_JIT;
+      else if (!strcmp(var.value, "irjit"))
+         coreParam.cpuCore = CPU_CORE_IRJIT;
       else if (!strcmp(var.value, "interpreter"))
-         coreParam.cpuCore = CPU_INTERPRETER;
+         coreParam.cpuCore = CPU_CORE_INTERPRETER;
    }
    else
-      coreParam.cpuCore = CPU_JIT;
+      coreParam.cpuCore = CPU_CORE_JIT;
 
    var.key = "ppsspp_locked_cpu_speed";
    var.value = NULL;
@@ -923,7 +926,7 @@ bool retro_load_game(const struct retro_game_info *game)
    if (environ_cb(RETRO_ENVIRONMENT_GET_USERNAME, &tmp) && tmp)
       g_Config.sNickName = std::string(tmp);
 
-   coreParam.gpuCore = GPU_GLES;
+   coreParam.gpuCore = GPUCORE_GLES;
    coreParam.enableSound = true;
    coreParam.fileToStart = std::string(game->path);
    coreParam.mountIso = "";
@@ -935,7 +938,7 @@ bool retro_load_game(const struct retro_game_info *game)
    _initialized = false;
    check_variables();
 
-   g_Config.bVertexDecoderJit = (coreParam.cpuCore == CPU_JIT) ? true : false;
+   g_Config.bVertexDecoderJit = (coreParam.cpuCore == CPU_CORE_JIT) ? true : false;
 
 
 
@@ -1185,30 +1188,29 @@ size_t retro_serialize_size(void)
 
 bool retro_serialize(void *data, size_t size)
 {
-   (void)size;
-   SaveState::SaveStart state;
+    std::vector<u8> state;
 
    if (!_initialized)
       return false;
 
-   size_t sz = CChunkFileReader::MeasurePtr(state);
-
-#if 0
-   if (log_cb)
-      log_cb(RETRO_LOG_INFO, "Savestate size: %u\n", sz);
-#endif
-
-   if (size < sz)
-      return false;
-   else
-      return CChunkFileReader::SavePtr((u8 *) data, state) == CChunkFileReader::ERROR_NONE;
+   if (SaveState::SaveToRam(state) == CChunkFileReader::ERROR_NONE &&
+       size >= (sizeof(uint32_t) + state.size()*sizeof(u8)))
+   {
+      static_cast<uint32_t*>(data)[0] = state.size();
+      std::memcpy(static_cast<uint32_t*>(data)+1, state.data(), state.size()*sizeof(u8));
+      return true;
+   }
+return false;
 }
 
 bool retro_unserialize(const void *data, size_t size)
 {
-   (void)size;
-   SaveState::SaveStart state;
-   return CChunkFileReader::LoadPtr((u8 *) data, state) == CChunkFileReader::ERROR_NONE;
+   if (size < static_cast<uint32_t const*>(data)[0]*sizeof(u8) + sizeof(uint32_t))
+      return false;
+
+   u8 const* state_data = static_cast<u8 const*>(data)+4;
+   std::vector<u8> state(state_data, state_data+static_cast<uint32_t const*>(data)[0]);
+return SaveState::LoadFromRam(state) == CChunkFileReader::ERROR_NONE;
 }
 
 void *retro_get_memory_data(unsigned id)

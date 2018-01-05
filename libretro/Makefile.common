@@ -135,11 +135,11 @@ SOURCES_CXX += $(GPUCOMMONDIR)/TextureDecoder.cpp \
 				$(GPUDIR)/Debugger/Stepping.cpp \
 				$(GPUDIR)/GLES/DepalettizeShader.cpp \
 				$(GPUDIR)/GLES/FBO.cpp \
- 				$(GPUDIR)/GLES/GLES_GPU.cpp \
+ 				$(GPUDIR)/GLES/GPU_GLES.cpp \
 				$(GPUDIR)/GLES/GLStateCache.cpp \
 				$(GPUDIR)/GLES/FragmentShaderGenerator.cpp \
 				$(GPUDIR)/GLES/FragmentTestCache.cpp \
-				$(GPUDIR)/GLES/TransformPipeline.cpp \
+				$(GPUDIR)/GLES/DrawEngineGLES.cpp \
 				$(GPUDIR)/GLES/Framebuffer.cpp \
 				$(NATIVEDIR)/base/backtrace.cpp \
 				$(GPUDIR)/GLES/ShaderManager.cpp \
@@ -219,10 +219,13 @@ SOURCES_CXX += $(NATIVEDIR)/file/chunk_file.cpp \
 				$(NATIVEDIR)/util/hash/hash.cpp \
 				$(NATIVEDIR)/util/text/utf8.cpp \
 				$(NATIVEDIR)/util/text/parsers.cpp \
+				$(NATIVEDIR)/util/text/wrap_text.cpp \
 				$(NATIVEDIR)/ext/jpge/jpgd.cpp \
 				$(NATIVEDIR)/ext/jpge/jpge.cpp \
 				$(COREDIR)/Config.cpp \
 				$(COREDIR)/Core.cpp \
+				$(COREDIR)/AVIDump.cpp \
+				$(COREDIR)/WaveFile.cpp \
 				$(COREDIR)/Compatibility.cpp \
 				$(COREDIR)/FileLoaders/HTTPFileLoader.cpp \
 				$(COREDIR)/FileLoaders/CachingFileLoader.cpp \
@@ -330,6 +333,7 @@ SOURCES_CXX += $(NATIVEDIR)/file/chunk_file.cpp \
 				$(COREDIR)/HW/MemoryStick.cpp \
 				$(COREDIR)/HW/SasAudio.cpp \
 				$(COREDIR)/HW/SasReverb.cpp \
+				$(COREDIR)/HW/StereoResampler.cpp \
 				$(COREDIR)/Host.cpp \
 				$(COREDIR)/Loaders.cpp \
 				$(COREDIR)/MIPS/JitCommon/JitCommon.cpp \
@@ -346,6 +350,17 @@ SOURCES_CXX += $(NATIVEDIR)/file/chunk_file.cpp \
 				$(COREDIR)/MIPS/MIPSStackWalk.cpp \
 				$(COREDIR)/MIPS/MIPSTables.cpp \
 				$(COREDIR)/MIPS/MIPSVFPUUtils.cpp \
+				$(COREDIR)/MIPS/IR/IRCompALU.cpp \
+				$(COREDIR)/MIPS/IR/IRCompBranch.cpp \
+				$(COREDIR)/MIPS/IR/IRCompFPU.cpp \
+				$(COREDIR)/MIPS/IR/IRCompLoadStore.cpp \
+				$(COREDIR)/MIPS/IR/IRCompVFPU.cpp \
+				$(COREDIR)/MIPS/IR/IRFrontend.cpp \
+				$(COREDIR)/MIPS/IR/IRInst.cpp \
+				$(COREDIR)/MIPS/IR/IRInterpreter.cpp \
+				$(COREDIR)/MIPS/IR/IRJit.cpp \
+				$(COREDIR)/MIPS/IR/IRPassSimplify.cpp \
+				$(COREDIR)/MIPS/IR/IRRegCache.cpp \
 				$(COREDIR)/MemMap.cpp \
 				$(COREDIR)/MemMapFunctions.cpp \
 				$(COREDIR)/PSPLoaders.cpp \
@@ -353,6 +368,7 @@ SOURCES_CXX += $(NATIVEDIR)/file/chunk_file.cpp \
 				$(COREDIR)/SaveState.cpp \
 				$(COREDIR)/Screenshot.cpp \
 				$(COREDIR)/System.cpp \
+				$(COREDIR)/TextureReplacer.cpp \
 				$(COREDIR)/Util/GameManager.cpp \
 				$(COREDIR)/Util/BlockAllocator.cpp \
 				$(COREDIR)/Util/PPGeDraw.cpp \
@@ -363,7 +379,7 @@ SOURCES_CXX += $(NATIVEDIR)/file/chunk_file.cpp \
 
 
 #SOURCES_CXX += $(LIBRETRODIR)/Core/HLE/__sceAudio.cpp
-SOURCES_CXX += $(LIBRETRODIR)/Core/HLE/StereoResampler.cpp
+#SOURCES_CXX += $(LIBRETRODIR)/Core/HLE/StereoResampler.cpp
 SOURCES_CXX += $(COREDIR)/HLE/__sceAudio.cpp
 
 
