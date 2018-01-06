@@ -135,6 +135,7 @@ bool AndroidEGLGraphicsContext::Init(ANativeWindow *wnd, int backbufferWidth, in
 	gl->MakeCurrent();
 	CheckGLExtensions();
 	draw_ = Draw::T3DCreateGLContext();
+	SetGPUBackend(GPUBackend::OPENGL);
 	bool success = draw_->CreatePresets();  // There will always be a GLSL compiler capable of compiling these.
 	assert(success);
 	return true;
@@ -161,6 +162,7 @@ public:
 	AndroidJavaEGLGraphicsContext() {
 		CheckGLExtensions();
 		draw_ = Draw::T3DCreateGLContext();
+		SetGPUBackend(GPUBackend::OPENGL);
 		bool success = draw_->CreatePresets();
 		assert(success);
 	}
@@ -284,13 +286,17 @@ bool AndroidVulkanContext::Init(ANativeWindow *wnd, int desiredBackbufferSizeX, 
 	g_LogOptions.breakOnWarning = true;
 	g_LogOptions.msgBoxOnError = false;
 
-	ILOG("Creating vulkan context");
+	ILOG("Creating Vulkan context");
 	Version gitVer(PPSSPP_GIT_VERSION);
 
 	if (!g_Vulkan) {
 		g_Vulkan = new VulkanContext();
 	}
-	if (VK_SUCCESS != g_Vulkan->CreateInstance("PPSSPP", gitVer.ToInteger(), VULKAN_FLAG_PRESENT_MAILBOX | VULKAN_FLAG_PRESENT_FIFO_RELAXED)) {
+	VulkanContext::CreateInfo info{};
+	info.app_name = "PPSSPP";
+	info.app_ver = gitVer.ToInteger();
+	info.flags = VULKAN_FLAG_PRESENT_MAILBOX | VULKAN_FLAG_PRESENT_FIFO_RELAXED;
+	if (VK_SUCCESS != g_Vulkan->CreateInstance(info)) {
 		ELOG("Failed to create vulkan context: %s", g_Vulkan->InitError().c_str());
 		System_SendMessage("toast", "No Vulkan compatible device found. Using OpenGL instead.");
 		delete g_Vulkan;
@@ -310,7 +316,7 @@ bool AndroidVulkanContext::Init(ANativeWindow *wnd, int desiredBackbufferSizeX, 
 	g_Vulkan->ChooseDevice(physicalDevice);
 	// Here we can enable device extensions if we like.
 
-	ILOG("Creating vulkan device");
+	ILOG("Creating Vulkan device");
 	if (g_Vulkan->CreateDevice() != VK_SUCCESS) {
 		ILOG("Failed to create vulkan device: %s", g_Vulkan->InitError().c_str());
 		System_SendMessage("toast", "No Vulkan driver found. Using OpenGL instead.");
@@ -326,7 +332,7 @@ bool AndroidVulkanContext::Init(ANativeWindow *wnd, int desiredBackbufferSizeX, 
 		height = pixel_yres;
 	}
 	ILOG("InitSurfaceAndroid: width=%d height=%d", width, height);
-	g_Vulkan->InitSurfaceAndroid(wnd, width, height);
+	g_Vulkan->InitSurface(WINDOWSYSTEM_ANDROID, (void *)wnd, nullptr, width, height);
 	if (g_validate_) {
 		int bits = VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT | VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT;
 		g_Vulkan->InitDebugMsgCallback(&Vulkan_Dbg, bits, &g_LogOptions);
@@ -335,6 +341,7 @@ bool AndroidVulkanContext::Init(ANativeWindow *wnd, int desiredBackbufferSizeX, 
 	bool success = true;
 	if (g_Vulkan->InitObjects()) {
 		draw_ = Draw::T3DCreateVulkanContext(g_Vulkan, g_Config.bGfxDebugSplitSubmit);
+		SetGPUBackend(GPUBackend::VULKAN);
 		success = draw_->CreatePresets();  // Doesn't fail, we ship the compiler.
 		assert(success);
 		draw_->HandleEvent(Draw::Event::GOT_BACKBUFFER, g_Vulkan->GetBackbufferWidth(), g_Vulkan->GetBackbufferHeight());
@@ -359,10 +366,10 @@ bool AndroidVulkanContext::Init(ANativeWindow *wnd, int desiredBackbufferSizeX, 
 void AndroidVulkanContext::Shutdown() {
 	ILOG("AndroidVulkanContext::Shutdown");
 	draw_->HandleEvent(Draw::Event::LOST_BACKBUFFER, g_Vulkan->GetBackbufferWidth(), g_Vulkan->GetBackbufferHeight());
-	delete draw_;
-	draw_ = nullptr;
 	ILOG("Calling NativeShutdownGraphics");
 	NativeShutdownGraphics();
+	delete draw_;
+	draw_ = nullptr;
 	g_Vulkan->WaitUntilQueueIdle();
 	g_Vulkan->DestroyObjects();
 	g_Vulkan->DestroyDevice();
@@ -386,7 +393,7 @@ void AndroidVulkanContext::Resize() {
 	g_Vulkan->DestroyObjects();
 
 	// backbufferResize updated these values.	TODO: Notify another way?
-	g_Vulkan->ReinitSurfaceAndroid(pixel_xres, pixel_yres);
+	g_Vulkan->ReinitSurface(pixel_xres, pixel_yres);
 	g_Vulkan->InitObjects();
 	draw_->HandleEvent(Draw::Event::GOT_BACKBUFFER, g_Vulkan->GetBackbufferWidth(), g_Vulkan->GetBackbufferHeight());
 	ILOG("AndroidVulkanContext::Resize end (%d, %d)", g_Vulkan->GetBackbufferWidth(), g_Vulkan->GetBackbufferHeight());
@@ -437,7 +444,6 @@ static float dp_xscale = 1.0f;
 static float dp_yscale = 1.0f;
 
 static bool renderer_inited = false;
-static bool renderer_ever_inited = false;
 static bool sustainedPerfSupported = false;
 
 // See NativeQueryConfig("androidJavaGL") to change this value.
@@ -609,7 +615,6 @@ extern "C" void Java_org_ppsspp_ppsspp_NativeApp_init
 	PROFILE_INIT();
 
 	renderer_inited = false;
-	renderer_ever_inited = false;
 	androidVersion = jAndroidVersion;
 	deviceType = jdeviceType;
 
@@ -748,16 +753,16 @@ extern "C" void Java_org_ppsspp_ppsspp_NativeRenderer_displayInit(JNIEnv * env, 
 
 	if (renderer_inited) {
 		ILOG("NativeApp.displayInit() restoring");
-		NativeDeviceLost();
 		NativeShutdownGraphics();
-		NativeDeviceRestore();
+		delete graphicsContext;
+
+		graphicsContext = new AndroidJavaEGLGraphicsContext();
 		NativeInitGraphics(graphicsContext);
 		ILOG("Restored.");
 	} else {
 		ILOG("NativeApp.displayInit() first time");
 		NativeInitGraphics(graphicsContext);
 		renderer_inited = true;
-		renderer_ever_inited = true;
 	}
 
 	NativeMessageReceived("recreateviews", "");
@@ -1101,6 +1106,10 @@ static void ProcessFrameCommands(JNIEnv *env) {
 }
 
 extern "C" bool JNICALL Java_org_ppsspp_ppsspp_NativeActivity_runEGLRenderLoop(JNIEnv *env, jobject obj, jobject _surf) {
+	exitRenderLoop = false;
+	// This is up here to prevent race conditions, in case we pause during init.
+	renderLoopRunning = true;
+
 	ANativeWindow *wnd = ANativeWindow_fromSurface(env, _surf);
 
 	// Need to get the local JNI env for the graphics thread. Used later in draw_text_android.
@@ -1113,12 +1122,13 @@ extern "C" bool JNICALL Java_org_ppsspp_ppsspp_NativeActivity_runEGLRenderLoop(J
 
 	if (wnd == nullptr) {
 		ELOG("Error: Surface is null.");
+		renderLoopRunning = false;
 		return false;
 	}
 
 retry:
 
-	bool vulkan = g_Config.iGPUBackend == GPU_BACKEND_VULKAN;
+	bool vulkan = g_Config.iGPUBackend == (int)GPUBackend::VULKAN;
 
 	int tries = 0;
 	AndroidGraphicsContext *graphicsContext;
@@ -1131,30 +1141,24 @@ retry:
 	if (!graphicsContext->Init(wnd, desiredBackbufferSizeX, desiredBackbufferSizeY, backbuffer_format, androidVersion)) {
 		ELOG("Failed to initialize graphics context.");
 
-		if (vulkan && tries < 2) {
+		if (!exitRenderLoop && (vulkan && tries < 2)) {
 			ILOG("Trying again, this time with OpenGL.");
-			g_Config.iGPUBackend = GPU_BACKEND_OPENGL;
-			SetGPUBackend((GPUBackend)g_Config.iGPUBackend);  // Wait, why do we need a separate enum here?
+			g_Config.iGPUBackend = (int)GPUBackend::OPENGL;
+			SetGPUBackend((GPUBackend)g_Config.iGPUBackend);
 			tries++;
 			goto retry;
 		}
 
 		delete graphicsContext;
 		graphicsContext = nullptr;
+		renderLoopRunning = false;
 		return false;
 	}
 
-	if (!renderer_inited) {
+	if (!exitRenderLoop) {
 		NativeInitGraphics(graphicsContext);
-		if (renderer_ever_inited) {
-			NativeDeviceRestore();
-		}
 		renderer_inited = true;
-		renderer_ever_inited = true;
 	}
-
-	exitRenderLoop = false;
-	renderLoopRunning = true;
 
 	while (!exitRenderLoop) {
 		static bool hasSetThreadName = false;
@@ -1174,9 +1178,8 @@ retry:
 	}
 
 	ILOG("Leaving EGL/Vulkan render loop.");
-	g_gameInfoCache->WorkQueue()->Flush();
 
-	NativeDeviceLost();
+	NativeShutdownGraphics();
 	renderer_inited = false;
 
 	ILOG("Shutting down graphics context.");

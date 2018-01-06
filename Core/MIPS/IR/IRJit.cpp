@@ -41,6 +41,10 @@ IRJit::IRJit(MIPSState *mips) : frontend_(mips->HasDefaultPrefix()), mips_(mips)
 	u32 size = 128 * 1024;
 	// blTrampolines_ = kernelMemory.Alloc(size, true, "trampoline");
 	InitIR();
+
+	IROptions opts{};
+	opts.unalignedLoadStore = true;
+	frontend_.SetOptions(opts);
 }
 
 IRJit::~IRJit() {
@@ -63,17 +67,23 @@ void IRJit::Compile(u32 em_address) {
 	PROFILE_THIS_SCOPE("jitc");
 
 	int block_num = blocks_.AllocateBlock(em_address);
+	if ((block_num & ~MIPS_EMUHACK_VALUE_MASK) != 0) {
+		// Ran out of block numbers - need to reset.
+		ERROR_LOG(JIT, "Ran out of block numbers, clearing cache");
+		ClearCache();
+		block_num = blocks_.AllocateBlock(em_address);
+	}
 	IRBlock *b = blocks_.GetBlock(block_num);
 
 	std::vector<IRInst> instructions;
-	std::vector<u32> constants;
 	u32 mipsBytes;
-	frontend_.DoJit(em_address, instructions, constants, mipsBytes);
-	b->SetInstructions(instructions, constants);
+	frontend_.DoJit(em_address, instructions, mipsBytes);
+	b->SetInstructions(instructions);
 	b->SetOriginalSize(mipsBytes);
-	b->Finalize(block_num);  // Overwrites the first instruction
+	// Overwrites the first instruction, and also updates stats.
+	blocks_.FinalizeBlock(block_num);
 
-	if (frontend_.CheckRounding()) {
+	if (frontend_.CheckRounding(em_address)) {
 		// Our assumptions are all wrong so it's clean-slate time.
 		ClearCache();
 		Compile(em_address);
@@ -99,7 +109,7 @@ void IRJit::RunLoopUntil(u64 globalticks) {
 			if (opcode == MIPS_EMUHACK_OPCODE) {
 				u32 data = inst & 0xFFFFFF;
 				IRBlock *block = blocks_.GetBlock(data);
-				mips_->pc = IRInterpret(mips_, block->GetInstructions(), block->GetConstants(), block->GetNumInstructions());
+				mips_->pc = IRInterpret(mips_, block->GetInstructions(), block->GetNumInstructions());
 			} else {
 				// RestoreRoundingMode(true);
 				Compile(mips_->pc);
@@ -112,7 +122,7 @@ void IRJit::RunLoopUntil(u64 globalticks) {
 }
 
 bool IRJit::DescribeCodePtr(const u8 *ptr, std::string &name) {
-	// Used in disassembly viewer.
+	// Used in target disassembly viewer.
 	return false;
 }
 
@@ -130,26 +140,56 @@ bool IRJit::ReplaceJalTo(u32 dest) {
 }
 
 void IRBlockCache::Clear() {
-	for (int i = 0; i < size_; ++i) {
+	for (int i = 0; i < (int)blocks_.size(); ++i) {
 		blocks_[i].Destroy(i);
 	}
 	blocks_.clear();
+	byPage_.clear();
 }
 
 void IRBlockCache::InvalidateICache(u32 address, u32 length) {
-	// TODO: Could be more efficient.
-	for (int i = 0; i < size_; ++i) {
-		if (blocks_[i].OverlapsRange(address, length)) {
-			blocks_[i].Destroy(i);
+	u32 startPage = AddressToPage(address);
+	u32 endPage = AddressToPage(address + length);
+
+	for (u32 page = startPage; page <= endPage; ++page) {
+		const auto iter = byPage_.find(page);
+		if (iter == byPage_.end())
+			continue;
+
+		const std::vector<int> &blocksInPage = iter->second;
+		for (int i : blocksInPage) {
+			if (blocks_[i].OverlapsRange(address, length)) {
+				// Not removing from the page, hopefully doesn't build up with small recompiles.
+				blocks_[i].Destroy(i);
+			}
 		}
 	}
 }
 
+void IRBlockCache::FinalizeBlock(int i) {
+	blocks_[i].Finalize(i);
+
+	u32 startAddr, size;
+	blocks_[i].GetRange(startAddr, size);
+
+	u32 startPage = AddressToPage(startAddr);
+	u32 endPage = AddressToPage(startAddr + size);
+
+	for (u32 page = startPage; page <= endPage; ++page) {
+		byPage_[page].push_back(i);
+	}
+}
+
+u32 IRBlockCache::AddressToPage(u32 addr) const {
+	// Use relatively small pages since basic blocks are typically small.
+	return (addr & 0x3FFFFFFF) >> 10;
+}
+
 std::vector<u32> IRBlockCache::SaveAndClearEmuHackOps() {
 	std::vector<u32> result;
-	result.resize(size_);
+	result.resize(blocks_.size());
 
-	for (int number = 0; number < size_; ++number) {
+	for (int number = 0; number < (int)blocks_.size(); ++number) {
 		IRBlock &b = blocks_[number];
 		if (b.IsValid() && b.RestoreOriginalFirstOp(number)) {
 			result[number] = number;
@@ -162,12 +202,12 @@ std::vector<u32> IRBlockCache::SaveAndClearEmuHackOps() {
 }
 
 void IRBlockCache::RestoreSavedEmuHackOps(std::vector<u32> saved) {
-	if (size_ != (int)saved.size()) {
+	if ((int)blocks_.size() != (int)saved.size()) {
 		ERROR_LOG(JIT, "RestoreSavedEmuHackOps: Wrong saved block size.");
 		return;
 	}
 
-	for (int number = 0; number < size_; ++number) {
+	for (int number = 0; number < (int)blocks_.size(); ++number) {
 		IRBlock &b = blocks_[number];
 		// Only if we restored it, write it back.
 		if (b.IsValid() && saved[number] != 0 && b.HasOriginalFirstOp()) {
@@ -176,7 +216,78 @@ void IRBlockCache::RestoreSavedEmuHackOps(std::vector<u32> saved) {
 	}
 }
 
-bool IRBlock::HasOriginalFirstOp() {
+JitBlockDebugInfo IRBlockCache::GetBlockDebugInfo(int blockNum) const {
+	const IRBlock &ir = blocks_[blockNum];
+	JitBlockDebugInfo debugInfo{};
+	uint32_t start, size;
+	ir.GetRange(start, size);
+	debugInfo.originalAddress = start;  // TODO
+
+	for (u32 addr = start; addr < start + size; addr += 4) {
+		char temp[256];
+		MIPSDisAsm(Memory::Read_Instruction(addr), addr, temp, true);
+		std::string mipsDis = temp;
+		debugInfo.origDisasm.push_back(mipsDis);
+	}
+
+	for (int i = 0; i < ir.GetNumInstructions(); i++) {
+		IRInst inst = ir.GetInstructions()[i];
+		char buffer[256];
+		DisassembleIR(buffer, sizeof(buffer), inst);
+		debugInfo.irDisasm.push_back(buffer);
+	}
+	return debugInfo;
+}
+
+void IRBlockCache::ComputeStats(BlockCacheStats &bcStats) const {
+	double totalBloat = 0.0;
+	double maxBloat = 0.0;
+	double minBloat = 1000000000.0;
+	for (const auto &b : blocks_) {
+		double codeSize = (double)b.GetNumInstructions() * sizeof(IRInst);
+		if (codeSize == 0)
+			continue;
+
+		u32 origAddr, mipsBytes;
+		b.GetRange(origAddr, mipsBytes);
+		double origSize = (double)mipsBytes;
+		double bloat = codeSize / origSize;
+		if (bloat < minBloat) {
+			minBloat = bloat;
+			bcStats.minBloatBlock = origAddr;
+		}
+		if (bloat > maxBloat) {
+			maxBloat = bloat;
+			bcStats.maxBloatBlock = origAddr;
+		}
+		totalBloat += bloat;
+		bcStats.bloatMap[bloat] = origAddr;
+	}
+	bcStats.numBlocks = (int)blocks_.size();
+	bcStats.minBloat = minBloat;
+	bcStats.maxBloat = maxBloat;
+	bcStats.avgBloat = totalBloat / (double)blocks_.size();
+}
+
+int IRBlockCache::GetBlockNumberFromStartAddress(u32 em_address, bool realBlocksOnly) const {
+	u32 page = AddressToPage(em_address);
+
+	const auto iter = byPage_.find(page);
+	if (iter == byPage_.end())
+		return -1;
+
+	const std::vector<int> &blocksInPage = iter->second;
+	for (int i : blocksInPage) {
+		uint32_t start, size;
+		blocks_[i].GetRange(start, size);
+		if (start == em_address) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+bool IRBlock::HasOriginalFirstOp() const {
 	return Memory::ReadUnchecked_U32(origAddr_) == origFirstOpcode_.encoding;
 }
 
@@ -206,8 +317,10 @@ void IRBlock::Destroy(int number) {
 	}
 }
 
-bool IRBlock::OverlapsRange(u32 addr, u32 size) {
-	return addr + size > origAddr_ && addr < origAddr_ + origSize_;
+bool IRBlock::OverlapsRange(u32 addr, u32 size) const {
+	addr &= 0x3FFFFFFF;
+	u32 origAddr = origAddr_ & 0x3FFFFFFF;
+	return addr + size > origAddr && addr < origAddr + origSize_;
 }
 
 MIPSOpcode IRJit::GetOriginalOp(MIPSOpcode op) {
