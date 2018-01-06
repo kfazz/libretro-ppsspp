@@ -190,7 +190,7 @@ public:
 void retro_set_environment(retro_environment_t cb)
 {
    static const struct retro_variable vars[] = {
-      { "ppsspp_cpu_core", "CPU Core; jit|interpreter" },
+      { "ppsspp_cpu_core", "CPU Core; jit|ir_jit|interpreter" },
       { "ppsspp_locked_cpu_speed", "Locked CPU Speed; off|222MHz|266MHz|333MHz" },
       { "ppsspp_language", "Language; automatic|english|japanese|french|spanish|german|italian|dutch|portuguese|russian|korean|chinese_traditional|chinese_simplified" },
       { "ppsspp_rendering_mode", "Rendering Mode; buffered|nonbuffered|read_framebuffers_to_memory_cpu|read_framebuffers_to_memory_gpu" },
@@ -799,6 +799,8 @@ static void check_variables(void)
    {
       if (!strcmp(var.value, "jit"))
          coreParam.cpuCore = CPUCore::JIT;
+      if (!strcmp(var.value, "ir_jit"))
+         coreParam.cpuCore = CPUCore::IR_JIT;
       else if (!strcmp(var.value, "interpreter"))
          coreParam.cpuCore = CPUCore::INTERPRETER;
    }
@@ -968,7 +970,7 @@ bool retro_load_game(const struct retro_game_info *game)
 
    PrintfLogger *printfLogger = new PrintfLogger();
 
-   bool fullLog = true;
+   bool fullLog = false;
    for (int i = 0; i < LogTypes::NUMBER_OF_LOGS; i++) {
 	   LogTypes::LOG_TYPE type = (LogTypes::LOG_TYPE)i;
 	   logman->SetEnabled(type, fullLog);
@@ -1012,9 +1014,7 @@ bool retro_load_game(const struct retro_game_info *game)
    _initialized = false;
    check_variables();
 
-#if 0
-   g_Config.bVertexDecoderJit = (coreParam.cpuCore == CPU_JIT) ? true : false;
-#endif
+   g_Config.bVertexDecoderJit = (coreParam.cpuCore == CPUCore::JIT) ? true : false;
 
    return true;
 }
