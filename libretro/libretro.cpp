@@ -1,35 +1,42 @@
 #include "libretro.h"
 #include "libretro_host.h"
 
+#define NO_FBO 1
+const char *PPSSPP_GIT_VERSION = "v1.4-git";
+
 #include "Common/ChunkFile.h"
 #include "Core/Config.h"
+#include "Core/Core.h"
 #include "Core/CoreParameter.h"
 #include "Core/CoreTiming.h"
 #include "Core/HLE/sceCtrl.h"
 #include "Core/HLE/sceDisplay.h"
 #include "Core/HLE/sceUtility.h"
 #include "Core/HLE/__sceAudio.h"
+#include "Core/HW/MemoryStick.h"
 #include "Core/Host.h"
 #include "Core/SaveState.h"
 #include "Core/System.h"
+#include "Log.h"
+#include "LogManager.h"
 #include "gfx/gl_common.h"
 #include "file/vfs.h"
 #include "file/zip_read.h"
 #include "GPU/GPUState.h"
 #include "GPU/GPUInterface.h"
 #include "input/input_state.h"
-//#include "GPU/GLES/FramebufferManagerGLES.h"
-//#include "GPU/GLES/GLStateCache.h"
-//#include "GPU/GLES/GPU_GLES.h"
+#include "base/NativeApp.h"
+#include "gfx/gl_common.h"
 #include "gfx_es2/gpu_features.h"
-#include "ext/native/gfx/gl_lost_manager.h"
-//#include "thread/thread.h"
-#include <thread>
-#include "ext/native/thread/threadutil.h"
-#include "ext/native/base/NativeApp.h"
 #include "Common/GraphicsContext.h"
+#include "ext/native/gfx/gl_lost_manager.h"
+#ifndef NO_FBO
+#include "native/thread/thread.h"
+#include "native/thread/threadutil.h"
+#endif
 
 #include <cstring>
+#include <cassert>
 
 #ifdef _WIN32
 // for MAX_PATH
@@ -42,20 +49,82 @@
 
 #define SAMPLERATE 44100
 
-#ifdef BAKE_IN_GIT
-const char *PPSSPP_GIT_VERSION = "v1.0.1-git";
+retro_log_printf_t log_cb;
+
+class PrintfLogger : public LogListener {
+public:
+	void Log(const LogMessage &message) {
+		switch (message.level) {
+		case LogTypes::LVERBOSE:
+			if (log_cb)
+				log_cb(RETRO_LOG_INFO, "V %s.\n", message.msg.c_str());
+			break;
+		case LogTypes::LDEBUG:
+			if (log_cb)
+				log_cb(RETRO_LOG_DEBUG, "D %s.\n", message.msg.c_str());
+			break;
+		case LogTypes::LINFO:
+			if (log_cb)
+				log_cb(RETRO_LOG_INFO, "I %s.\n", message.msg.c_str());
+			break;
+		case LogTypes::LERROR:
+			if (log_cb)
+				log_cb(RETRO_LOG_ERROR, "E %s.\n", message.msg.c_str());
+			break;
+		case LogTypes::LWARNING:
+			if (log_cb)
+				log_cb(RETRO_LOG_WARN, "W %s.\n", message.msg.c_str());
+			break;
+		case LogTypes::LNOTICE:
+		default:
+			if (log_cb)
+				log_cb(RETRO_LOG_INFO, "N %s.\n", message.msg.c_str());
+			break;
+		}
+	}
+};
+
+Draw::DrawContext *libretro_draw;
+static bool gl_initialized = false;
+
+class LibretroGLGraphicsContext : public GraphicsContext {
+public:
+	LibretroGLGraphicsContext()
+	{
+	}
+	bool Init();
+	void Shutdown() override;
+	void SwapBuffers() override;
+	void SwapInterval(int interval) override {}
+	void Resize() override {}
+	Draw::DrawContext *GetDrawContext() override {
+		return NULL;
+	}
+
+private:
+};
+
+void LibretroGLGraphicsContext::Shutdown() {
+#if 0
+	NativeShutdownGraphics();
+	gl->ClearCurrent();
+	gl->Shutdown();
+	delete gl;
+	finalize_glslang();
 #endif
+}
+
+void LibretroGLGraphicsContext::SwapBuffers() {
+}
 
 static CoreParameter coreParam;
 static struct retro_hw_render_callback hw_render;
-retro_log_printf_t log_cb;
 static retro_video_refresh_t video_cb;
 static retro_audio_sample_batch_t audio_batch_cb;
 static retro_input_poll_t input_poll_cb;
 static retro_input_state_t input_state_cb;
 static retro_environment_t environ_cb;
 static bool _initialized;
-static FBO *libretro_framebuffer;
 static bool gpu_refresh = false;
 static bool threaded_input = false;
 
@@ -67,38 +136,13 @@ static bool first_ctx_reset;
 // linker stubs
 std::string System_GetProperty(SystemProperty prop) { return ""; }
 int System_GetPropertyInt(SystemProperty prop) { return -1; }
-void NativeUpdate(InputState &input_state) { }
-void NativeRenderInt(void);
-void NativeRender(GraphicsContext *graphicsContext) { NativeRenderInt(); }
-void NativeRenderInt() {
-   fbo_override_backbuffer(libretro_framebuffer);
-
-   glstate.depthWrite.set(GL_TRUE);
-   glstate.colorMask.set(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-   glstate.Restore();
-
-   gpu->ReapplyGfxState();
-
-   // We just run the CPU until we get to vblank. This will quickly sync up pretty nicely.
-   // The actual number of cycles doesn't matter so much here as we will break due to CORE_NEXTFRAME, most of the time hopefully...
-   int blockTicks = usToCycles(1000000 / 10);
-
-   // Run until CORE_NEXTFRAME
-   while (coreState == CORE_RUNNING)
-      PSP_RunLoopUntil(CoreTiming::GetTicks() + blockTicks);
-
-   // Hopefully coreState is now CORE_NEXTFRAME
-   if (coreState == CORE_NEXTFRAME)
-      // set back to running for the next frame
-      coreState = CORE_RUNNING;
-
-   bool useBufferedRendering = g_Config.iRenderingMode != 0;
-   if (useBufferedRendering)
-      fbo_unbind();
-}
+void NativeUpdate() { }
+void NativeRender(GraphicsContext *graphicsContext) { }
 void NativeResized() { }
-void NativeMessageReceived(const char *message, const char *value) { }
+void NativeMessageReceived(const char *message, const char *value) {}
+#if 0
 InputState input_state;
+#endif
 
 extern "C"
 {
@@ -277,12 +321,14 @@ void retro_set_controller_port_device(unsigned port, unsigned device)
 
 void retro_get_system_info(struct retro_system_info *info)
 {
+   char str[256];
    memset(info, 0, sizeof(*info));
    info->library_name     = "PPSSPP";
 #ifndef GIT_VERSION
 #define GIT_VERSION ""
 #endif
-   info->library_version  = "v1.0.1-git" GIT_VERSION;
+   sprintf(str, "%s", PPSSPP_GIT_VERSION);
+   info->library_version  = strdup(str); 
    info->need_fullpath    = true;
    info->valid_extensions = "elf|iso|cso|prx|pbp";
 }
@@ -334,7 +380,11 @@ static void initialize_gl(void)
       return;
    }
 #endif
+#if 0
+   glstate.Initialize();
+#endif
    CheckGLExtensions();
+   gl_initialized = true;
 }
 
 static void context_reset(void)
@@ -349,9 +399,12 @@ static void context_reset(void)
 
       //RecreateViews(); /* TODO ? */
 
-      initialize_gl();
+      gl_lost();
 
+      initialize_gl();
+#if 0
       glstate.Restore();
+#endif
    }
    
    first_ctx_reset = false;
@@ -382,6 +435,7 @@ static void check_variables(void)
 
    var.key = "ppsspp_internal_resolution";
    var.value = NULL;
+
 
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
    {
@@ -447,9 +501,11 @@ static void check_variables(void)
    else
          g_Config.bFastMemory = true;
 
+
+#if 0
    var.key = "ppsspp_set_rounding_mode";
    var.value = NULL;
-#if 0
+
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
    {
       if (!strcmp(var.value, "enabled"))
@@ -696,9 +752,6 @@ static void check_variables(void)
    else
       g_Config.bTexDeposterize = false;
 
-
-   g_Config.bSeparateCPUThread = false;
-
    var.key = "ppsspp_separate_io_thread";
    var.value = NULL;
 
@@ -712,20 +765,19 @@ static void check_variables(void)
    else
       g_Config.bSeparateIOThread = false;
 
-#if 0
+
    var.key = "ppsspp_unsafe_func_replacements";
    var.value = NULL;
 
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
    {
       if (!strcmp(var.value, "enabled"))
-         g_Config.bUnsafeFuncReplacements = true;
+         g_Config.bFuncReplacements = true;
       else if (!strcmp(var.value, "disabled"))
-         g_Config.bUnsafeFuncReplacements = false;
+         g_Config.bFuncReplacements = false;
    }
    else
-         g_Config.bUnsafeFuncReplacements = true;
-#endif
+         g_Config.bFuncReplacements = true;
    
    var.key = "ppsspp_sound_speedhack";
    var.value = NULL;
@@ -747,14 +799,12 @@ static void check_variables(void)
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
    {
       if (!strcmp(var.value, "jit"))
-         coreParam.cpuCore = (CPUCore)CPUCore::JIT;
-/*      else if (!strcmp(var.value, "irjit"))
-         coreParam.cpuCore = (CPUCore)CPUCore::IRJIT; */
+         coreParam.cpuCore = CPUCore::JIT;
       else if (!strcmp(var.value, "interpreter"))
-         coreParam.cpuCore = (CPUCore)CPUCore::INTERPRETER;
+         coreParam.cpuCore = CPUCore::INTERPRETER;
    }
    else
-      coreParam.cpuCore = CPU_CORE_JIT;
+      coreParam.cpuCore = CPUCore::JIT;
 
    var.key = "ppsspp_locked_cpu_speed";
    var.value = NULL;
@@ -803,6 +853,7 @@ static void check_variables(void)
    else
       g_Config.iForceMaxEmulatedFPS = 0;
 
+#if 0
    var.key = "ppsspp_prescale_uv";
    var.value = NULL;
 
@@ -815,6 +866,7 @@ static void check_variables(void)
    }
    else
       g_Config.bPrescaleUV = 0;
+#endif
 
    var.key = "ppsspp_threaded_input";
    var.value = NULL;
@@ -908,11 +960,26 @@ bool retro_load_game(const struct retro_game_info *game)
 
    host = new LibretroHost;
 
-	// We do this here, instead of in NativeInitGraphics, because the display may be reset.
-	// When it's reset we don't want to forget all our managed things.
-	gl_lost_manager_init();
+   // We do this here, instead of in NativeInitGraphics, because the display may be reset.
+   // When it's reset we don't want to forget all our managed things.
+   gl_lost_manager_init();
 
+   LogManager::Init();
+   LogManager *logman = LogManager::GetInstance();
+
+   PrintfLogger *printfLogger = new PrintfLogger();
+
+   bool fullLog = true;
+   for (int i = 0; i < LogTypes::NUMBER_OF_LOGS; i++) {
+	   LogTypes::LOG_TYPE type = (LogTypes::LOG_TYPE)i;
+	   logman->SetEnabled(type, fullLog);
+	   logman->SetLogLevel(type, LogTypes::LDEBUG);
+   }
+   logman->AddListener(printfLogger);
+
+#if 0
    g_Config.Load("");
+#endif
 
    g_Config.currentDirectory      = retro_base_dir;
    g_Config.externalDirectory     = retro_base_dir;
@@ -923,26 +990,32 @@ bool retro_load_game(const struct retro_game_info *game)
    g_Config.bFrameSkipUnthrottle = false;
    g_Config.bVSync = false;
    g_Config.bEnableLogging = true;
+   g_Config.bMemStickInserted = PSP_MEMORYSTICK_STATE_INSERTED;
 
    if (environ_cb(RETRO_ENVIRONMENT_GET_USERNAME, &tmp) && tmp)
       g_Config.sNickName = std::string(tmp);
 
-   coreParam.gpuCore = GPUCORE_GLES;
+
+   coreParam.gpuCore     = GPUCORE_GLES;
+   coreParam.cpuCore     = CPUCore::JIT;
+   coreParam.graphicsContext = new LibretroGLGraphicsContext;
    coreParam.enableSound = true;
    coreParam.fileToStart = std::string(game->path);
    coreParam.mountIso = "";
    coreParam.startPaused = false;
-   coreParam.printfEmuLog = false;
+   coreParam.printfEmuLog = true;
    coreParam.headLess = true;
    coreParam.unthrottle = true;
 
+   g_Config.iGlobalVolume = VOLUME_MAX - 1;
+   g_Config.bEnableSound  = true;
+   g_Config.bAudioResampler = false;
    _initialized = false;
    check_variables();
 
-   g_Config.bVertexDecoderJit = (coreParam.cpuCore == CPU_CORE_JIT) ? true : false;
-
-
-
+#if 0
+   g_Config.bVertexDecoderJit = (coreParam.cpuCore == CPU_JIT) ? true : false;
+#endif
 
    return true;
 }
@@ -1007,8 +1080,9 @@ static void retro_input(void)
    __CtrlSetAnalogY(analogY);
 }
 
-
+#if 0
 static std::thread *input_thread = NULL;
+#endif
 static bool running = false;
 
 static inline void rarch_sleep(unsigned msec)
@@ -1031,6 +1105,7 @@ static inline void rarch_sleep(unsigned msec)
 #endif
 }
 
+#if 0
 void retro_input_poll_thread()
 {
 	setCurrentThreadName("Input Thread");
@@ -1043,6 +1118,7 @@ void retro_input_poll_thread()
       rarch_sleep(4);
    }
 }
+#endif
 
 
 void retro_run(void)
@@ -1053,61 +1129,50 @@ void retro_run(void)
 	   check_variables();
 	   if (gpu_refresh)
 	   {
-         switch (coreParam.renderWidth)
-         {
-            case 480:
-               g_Config.iInternalResolution = 1;
-               break;
-            case 960:
-               g_Config.iInternalResolution = 2;
-               break;
-            case 1440:
-               g_Config.iInternalResolution = 3;
-               break;
-            case 1920:
-               g_Config.iInternalResolution = 4;
-               break;
-            case 2400:
-               g_Config.iInternalResolution = 5;
-               break;
-            case 2880:
-               g_Config.iInternalResolution = 6;
-               break;
-            case 3360:
-               g_Config.iInternalResolution = 7;
-               break;
-            case 3840:
-               g_Config.iInternalResolution = 8;
-               break;
-            case 4320:
-               g_Config.iInternalResolution = 9;
-               break;
-            case 4800:
-               g_Config.iInternalResolution = 10;
-               break;
+		   switch (coreParam.renderWidth)
+		   {
+			   case 480:
+				   g_Config.iInternalResolution = 1;
+				   break;
+			   case 960:
+				   g_Config.iInternalResolution = 2;
+				   break;
+			   case 1440:
+				   g_Config.iInternalResolution = 3;
+				   break;
+			   case 1920:
+				   g_Config.iInternalResolution = 4;
+				   break;
+			   case 2400:
+				   g_Config.iInternalResolution = 5;
+				   break;
+			   case 2880:
+				   g_Config.iInternalResolution = 6;
+				   break;
+			   case 3360:
+				   g_Config.iInternalResolution = 7;
+				   break;
+			   case 3840:
+				   g_Config.iInternalResolution = 8;
+				   break;
+			   case 4320:
+				   g_Config.iInternalResolution = 9;
+				   break;
+			   case 4800:
+				   g_Config.iInternalResolution = 10;
+				   break;
 
-         }
+		   }
 
-         if (gpu)
-         {
-            gpu->ClearCacheNextFrame();
-            gpu->Resized();		   	   
-            gpu_refresh = false;
-         }
+		   if (gpu)
+		   {
+			   gpu->ClearCacheNextFrame();
+			   gpu->Resized();		   	   
+			   gpu_refresh = false;
+		   }
 	   }
    }
   
-   if (threaded_input)
-   {
-	   if (!input_thread)
-		   input_thread = new std::thread(&retro_input_poll_thread);
-   }
-   else
-   {
-      if (input_poll_cb)
-         input_poll_cb();
-      retro_input();
-   }
 
    if (should_reset)
       PSP_Shutdown();
@@ -1115,27 +1180,39 @@ void retro_run(void)
    
    if (!_initialized || should_reset)
    {
-      static bool gl_initialized = false;
       should_reset = false;
 
       if (!gl_initialized)
       {
          initialize_gl();
-         gl_initialized = true;
       }
 
       std::string error_string;
-      if(!PSP_Init(coreParam, &error_string))
+      if (gl_initialized)
       {
-         if (log_cb)
-            log_cb(RETRO_LOG_ERROR, "PSP_Init() failed: %s.\n", error_string.c_str());
-         environ_cb(RETRO_ENVIRONMENT_SHUTDOWN, nullptr);
+	      libretro_draw         = Draw::T3DCreateGLContext();
+	      coreParam.thin3d      = libretro_draw;
+
+	     // bool success = libretro_draw->CreatePresets();
+	     // assert(success);
+
+	      if(!PSP_Init(coreParam, &error_string))
+	      {
+		      if (log_cb)
+			      log_cb(RETRO_LOG_ERROR, "PSP_Init() failed: %s.\n", error_string.c_str());
+		      environ_cb(RETRO_ENVIRONMENT_SHUTDOWN, nullptr);
+	      }
+
+	      host->BootDone();
+	      _initialized = true;
+	      coreState = CORE_RUNNING;
+	     // extern GLuint g_defaultFBO;
+	     // g_defaultFBO = hw_render.get_current_framebuffer();
       }
 
-      host->BootDone();
-      _initialized = true;
-      libretro_framebuffer = fbo_create_from_native_fbo((GLuint) hw_render.get_current_framebuffer(), libretro_framebuffer);
    }
+
+   PSP_BeginHostFrame();
 
 #if 0
    if (log_cb)
@@ -1145,9 +1222,42 @@ void retro_run(void)
       log_cb(RETRO_LOG_INFO, "Function replacements: %d\n", g_Config.bFuncReplacements);
 #endif
 
-   NativeRenderInt();
+   if (_initialized)
+   {
+#if 0
+	   if (threaded_input)
+	   {
+		   if (!input_thread)
+			   input_thread = new std::thread(&retro_input_poll_thread);
+	   }
+	   else
+#endif
+	   {
+		   if (input_poll_cb)
+			   input_poll_cb();
+		   retro_input();
+	   }
+
+
+	   // We just run the CPU until we get to vblank. This will quickly sync up pretty nicely.
+	   // The actual number of cycles doesn't matter so much here as we will break due to CORE_NEXTFRAME, most of the time hopefully...
+	   int blockTicks = usToCycles(1000000 / 10);
+	   PSP_RunLoopFor(blockTicks);
+
+	   // Hopefully coreState is now CORE_NEXTFRAME
+	   if (coreState == CORE_NEXTFRAME)
+		   // set back to running for the next frame
+		   coreState = CORE_RUNNING;
+
+#ifndef NO_FBO
+	   bool useBufferedRendering = g_Config.iRenderingMode != 0;
+	   if (useBufferedRendering)
+		   fbo_unbind();
+#endif
+   }
 
    video_cb(((gstate_c.skipDrawReason & SKIPDRAW_SKIPFRAME) == 0) ? NULL : RETRO_HW_FRAME_BUFFER_VALID, screen_width, screen_height, 0);
+   PSP_EndHostFrame();
 }
 
 void retro_unload_game(void)
@@ -1155,18 +1265,21 @@ void retro_unload_game(void)
    if (threaded_input)
       threaded_input = false;
 
-	if (libretro_framebuffer)
-		fbo_destroy(libretro_framebuffer);
-	libretro_framebuffer = NULL;
 
 	PSP_Shutdown();
+	VFSShutdown();
 
+	delete libretro_draw;
+	libretro_draw = nullptr;
+
+#if 0
 	if (input_thread)
 	{
       input_thread->join();
 		delete input_thread;
 		input_thread = NULL;
 	}
+#endif
 }
 unsigned retro_get_region(void)
 {
@@ -1189,7 +1302,7 @@ size_t retro_serialize_size(void)
 
 bool retro_serialize(void *data, size_t size)
 {
-    std::vector<u8> state;
+   std::vector<u8> state;
 
    if (!_initialized)
       return false;
@@ -1201,7 +1314,7 @@ bool retro_serialize(void *data, size_t size)
       std::memcpy(static_cast<uint32_t*>(data)+1, state.data(), state.size()*sizeof(u8));
       return true;
    }
-return false;
+      return false;
 }
 
 bool retro_unserialize(const void *data, size_t size)
@@ -1211,7 +1324,7 @@ bool retro_unserialize(const void *data, size_t size)
 
    u8 const* state_data = static_cast<u8 const*>(data)+4;
    std::vector<u8> state(state_data, state_data+static_cast<uint32_t const*>(data)[0]);
-return SaveState::LoadFromRam(state) == CChunkFileReader::ERROR_NONE;
+   return SaveState::LoadFromRam(state) == CChunkFileReader::ERROR_NONE;
 }
 
 void *retro_get_memory_data(unsigned id)
