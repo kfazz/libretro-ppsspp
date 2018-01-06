@@ -53,7 +53,11 @@ SOURCES_C   += $(EXTDIR)/libkirk/amctrl.c \
 				$(EXTDIR)/libkirk/SHA1.c \
 				$(NATIVEDIR)/ext/libzip/zip_entry_free.c \
 				$(NATIVEDIR)/ext/libzip/zip_entry_new.c 
-SOURCES_CXX += $(COMMONDIR)/MemArena.cpp
+SOURCES_CXX += $(COMMONDIR)/MemArenaAndroid.cpp \
+				$(COMMONDIR)/MemArenaDarwin.cpp \
+				$(COMMONDIR)/MemArenaPosix.cpp \
+				$(COMMONDIR)/MemArenaWin32.cpp
+SOURCES_CXX += $(COMMONDIR)/OSVersion.cpp
 SOURCES_C   += $(NATIVEDIR)/ext/libzip/zip_err_str.c \
 				$(NATIVEDIR)/ext/libzip/zip_error.c \
 				$(NATIVEDIR)/ext/libzip/zip_error_clear.c \
@@ -92,7 +96,6 @@ SOURCES_C   += $(NATIVEDIR)/ext/libzip/zip_get_archive_comment.c \
 				$(NATIVEDIR)/ext/libzip/zip_new.c \
 				$(NATIVEDIR)/ext/libzip/zip_open.c \
 				$(NATIVEDIR)/ext/libzip/zip_rename.c \
-				$(NATIVEDIR)/ext/libpng17/pngtest.c \
 				$(NATIVEDIR)/ext/libzip/zip_replace.c \
 				$(EXTDIR)/xxhash.c \
 				$(NATIVEDIR)/ext/libzip/zip_set_archive_comment.c \
@@ -133,29 +136,28 @@ SOURCES_CXX += $(GPUCOMMONDIR)/TextureDecoder.cpp \
 				$(COMMONDIR)/ColorConv.cpp \
 				$(GPUDIR)/Debugger/Breakpoints.cpp \
 				$(GPUDIR)/Debugger/Stepping.cpp \
-				$(GPUDIR)/GLES/DepalettizeShader.cpp \
-				$(GPUDIR)/GLES/FBO.cpp \
- 				$(GPUDIR)/GLES/GPU_GLES.cpp \
-				$(GPUDIR)/GLES/GLStateCache.cpp \
-				$(GPUDIR)/GLES/FragmentShaderGenerator.cpp \
-				$(GPUDIR)/GLES/FragmentTestCache.cpp \
+				$(GPUDIR)/GLES/DepalettizeShaderGLES.cpp \
 				$(GPUDIR)/GLES/DrawEngineGLES.cpp \
-				$(GPUDIR)/GLES/Framebuffer.cpp \
+				$(GPUDIR)/GLES/FragmentShaderGeneratorGLES.cpp \
+				$(GPUDIR)/GLES/FragmentTestCacheGLES.cpp \
+				$(GPUDIR)/GLES/FramebufferManagerGLES.cpp \
+ 				$(GPUDIR)/GLES/GPU_GLES.cpp \
+				$(GPUDIR)/GLES/ShaderManagerGLES.cpp \
+				$(GPUDIR)/GLES/StateMappingGLES.cpp \
+				$(GPUDIR)/GLES/StencilBufferGLES.cpp \
+				$(GPUDIR)/GLES/TextureCacheGLES.cpp \
+				$(GPUDIR)/GLES/TextureScalerGLES.cpp \
+				$(GPUDIR)/GLES/VertexShaderGeneratorGLES.cpp \
 				$(NATIVEDIR)/base/backtrace.cpp \
-				$(GPUDIR)/GLES/ShaderManager.cpp \
 				$(NATIVEDIR)/base/buffer.cpp \
 				$(NATIVEDIR)/base/colorutil.cpp \
 				$(NATIVEDIR)/base/display.cpp \
 				$(NATIVEDIR)/base/stringutil.cpp \
-				$(GPUDIR)/GLES/StateMapping.cpp \
 				$(NATIVEDIR)/base/timeutil.cpp \
 				$(NATIVEDIR)/data/compression.cpp \
-				$(GPUDIR)/GLES/StencilBuffer.cpp \
 				$(NATIVEDIR)/ext/vjson/block_allocator.cpp \
 				$(GPUDIR)/Common/TextureCacheCommon.cpp \
-				$(GPUDIR)/Common/TextureScalerCommon.cpp \
-				$(GPUDIR)/GLES/TextureCache.cpp \
-				$(GPUDIR)/GLES/TextureScaler.cpp
+				$(GPUDIR)/Common/TextureScalerCommon.cpp 
 SOURCES_C   += $(NATIVEDIR)/gfx_es2/gl3stub.c \
 				$(NATIVEDIR)/math/fast/fast_math.c \
 				$(NATIVEDIR)/math/fast/fast_matrix.c
@@ -165,7 +167,6 @@ SOURCES_CXX += $(NATIVEDIR)/file/chunk_file.cpp \
 				$(NATIVEDIR)/file/file_util.cpp \
 				$(NATIVEDIR)/file/free.cpp \
 				$(NATIVEDIR)/file/ini_file.cpp \
-				$(GPUDIR)/GLES/VertexShaderGenerator.cpp \
 				$(GPUDIR)/GeDisasm.cpp \
 				$(NATIVEDIR)/file/path.cpp \
 				$(GPUDIR)/GPUCommon.cpp \
@@ -173,6 +174,7 @@ SOURCES_CXX += $(NATIVEDIR)/file/chunk_file.cpp \
 				$(GPUDIR)/GPUState.cpp \
 				$(GPUDIR)/Math3D.cpp \
 				$(NATIVEDIR)/file/zip_read.cpp \
+				$(NATIVEDIR)/gfx/GLStateCache.cpp \
 				$(GPUDIR)/Null/NullGpu.cpp \
 				$(GPUDIR)/Software/Clipper.cpp \
 				$(GPUDIR)/Software/Lighting.cpp \
@@ -215,7 +217,6 @@ SOURCES_CXX += $(NATIVEDIR)/file/chunk_file.cpp \
 				$(NATIVEDIR)/ui/ui_screen.cpp \
 				$(NATIVEDIR)/ui/view.cpp \
 				$(NATIVEDIR)/ui/viewgroup.cpp \
-				$(NATIVEDIR)/ui/virtual_input.cpp \
 				$(NATIVEDIR)/util/hash/hash.cpp \
 				$(NATIVEDIR)/util/text/utf8.cpp \
 				$(NATIVEDIR)/util/text/parsers.cpp \

@@ -18,12 +18,13 @@
 #include "GPU/GPUState.h"
 #include "GPU/GPUInterface.h"
 #include "input/input_state.h"
-#include "GPU/GLES/FBO.h"
-#include "GPU/GLES/GLStateCache.h"
+//#include "GPU/GLES/FramebufferManagerGLES.h"
+//#include "GPU/GLES/GLStateCache.h"
 //#include "GPU/GLES/GPU_GLES.h"
 #include "gfx_es2/gpu_features.h"
 #include "ext/native/gfx/gl_lost_manager.h"
-#include "ext/native/thread/thread.h"
+//#include "thread/thread.h"
+#include <thread>
 #include "ext/native/thread/threadutil.h"
 #include "ext/native/base/NativeApp.h"
 #include "Common/GraphicsContext.h"
@@ -746,11 +747,11 @@ static void check_variables(void)
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
    {
       if (!strcmp(var.value, "jit"))
-         coreParam.cpuCore = CPU_CORE_JIT;
-      else if (!strcmp(var.value, "irjit"))
-         coreParam.cpuCore = CPU_CORE_IRJIT;
+         coreParam.cpuCore = (CPUCore)CPUCore::JIT;
+/*      else if (!strcmp(var.value, "irjit"))
+         coreParam.cpuCore = (CPUCore)CPUCore::IRJIT; */
       else if (!strcmp(var.value, "interpreter"))
-         coreParam.cpuCore = CPU_CORE_INTERPRETER;
+         coreParam.cpuCore = (CPUCore)CPUCore::INTERPRETER;
    }
    else
       coreParam.cpuCore = CPU_CORE_JIT;

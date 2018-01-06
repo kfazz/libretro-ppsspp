@@ -15,10 +15,6 @@
 // Official git repository and contact information can be found at
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
-#ifdef __LIBRETRO__
-#include "ThreadEventQueueLR.h"
-#else
-
 #pragma once
 
 #include <mutex>
@@ -207,5 +203,3 @@ private:
 	std::condition_variable_any eventsWait_;
 	std::condition_variable_any eventsDrain_;
 };
-
-#endif
