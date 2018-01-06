@@ -371,7 +371,12 @@ END
 
 // Icon with lowest ID value placed first to ensure application icon
 // remains consistent on all systems.
+
+#ifdef GOLD
+IDI_PPSSPP              ICON                    "ppsspp_gold.ico"
+#else
 IDI_PPSSPP              ICON                    "ppsspp.ico"
+#endif
 IDI_STOP                ICON                    "icon1.ico"
 IDI_STOPDISABLE         ICON                    "stop1.ico"
 
@@ -458,11 +463,11 @@ BEGIN
         MENUITEM "Keep PPSSPP On Top",                      ID_OPTIONS_TOPMOST
         MENUITEM "Pause When Not Focused",                  ID_OPTIONS_PAUSE_FOCUS
         MENUITEM "Ignore Windows Key",                      ID_OPTIONS_IGNOREWINKEY
-        MENUITEM "More Settings...",                        ID_OPTIONS_MORE_SETTINGS
-        MENUITEM "Control Mapping...",                      ID_OPTIONS_CONTROLS
         MENUITEM "Language...",                             ID_OPTIONS_LANGUAGE
-        MENUITEM SEPARATOR
+        MENUITEM "Control Mapping...",                      ID_OPTIONS_CONTROLS
         MENUITEM "Display Layout Editor"                    ID_OPTIONS_DISPLAY_LAYOUT
+        MENUITEM "More Settings...",                        ID_OPTIONS_MORE_SETTINGS
+        MENUITEM SEPARATOR
         MENUITEM "Fullscreen",                              ID_OPTIONS_FULLSCREEN
         MENUITEM "VSync",                                   ID_OPTIONS_VSYNC
         MENUITEM "Postprocessing Shader",                   ID_OPTIONS_FXAA
@@ -491,6 +496,7 @@ BEGIN
         POPUP "Backend"
         BEGIN
             MENUITEM "Direct3D9" ID_OPTIONS_DIRECT3D9
+            MENUITEM "Direct3D11" ID_OPTIONS_DIRECT3D11
             MENUITEM "OpenGL" ID_OPTIONS_OPENGL
             MENUITEM "Vulkan" ID_OPTIONS_VULKAN
         END

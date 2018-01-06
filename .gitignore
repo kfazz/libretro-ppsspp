@@ -48,16 +48,25 @@ PPSSPPControls.dat
 # Qt Linguist files
 *.qm
 
+# Gradle/Android Studio
+.gradle
+.idea
+*.iml
+build
+build.ios
+versionname.txt
+versioncode.txt
+build*/
+
+# Temp file used by jenkins windows build (TODO: remove)
+desc.txt
+
+
 Logs
 Memstick
 memstick
 Cheats
 
-bin
-gen
-libs
-obj
-build*/
 /git-version.cpp
 
 .pspsh.hist

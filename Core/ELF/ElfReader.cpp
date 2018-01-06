@@ -24,10 +24,6 @@
 #include "Core/HLE/sceKernelMemory.h"
 #include "Core/HLE/sceKernelModule.h"
 
-#ifdef BLACKBERRY
-using std::strnlen;
-#endif
-
 const char *ElfReader::GetSectionName(int section) const {
 	if (sections[section].sh_type == SHT_NULL)
 		return 0;
@@ -40,8 +36,6 @@ const char *ElfReader::GetSectionName(int section) const {
 	else
 		return 0;
 }
-
-
 
 void addrToHiLo(u32 addr, u16 &hi, s16 &lo)
 {
@@ -449,9 +443,9 @@ int ElfReader::LoadInto(u32 loadAddress, bool fromTop)
 	DEBUG_LOG(LOADER,"%i segments:", header->e_phnum);
 
 	// First pass : Get the damn bits into RAM
-	u32 baseAddress = bRelocate?vaddr:0;
+	u32 baseAddress = bRelocate ? vaddr : 0;
 
-	for (int i=0; i<header->e_phnum; i++)
+	for (int i = 0; i < header->e_phnum; i++)
 	{
 		Elf32_Phdr *p = segments + i;
 		DEBUG_LOG(LOADER, "Type: %08x Vaddr: %08x Filesz: %08x Memsz: %08x ", (int)p->p_type, (u32)p->p_vaddr, (int)p->p_filesz, (int)p->p_memsz);
@@ -587,12 +581,11 @@ int ElfReader::LoadInto(u32 loadAddress, bool fromTop)
 
 SectionID ElfReader::GetSectionByName(const char *name, int firstSection) const
 {
-	for (int i = firstSection; i < header->e_shnum; i++)
-	{
+	if (!name)
+		return -1;
+	for (int i = firstSection; i < header->e_shnum; i++) {
 		const char *secname = GetSectionName(i);
-
-		if (secname != 0 && strcmp(name, secname) == 0)
-		{
+		if (secname && strcmp(name, secname) == 0) {
 			return i;
 		}
 	}

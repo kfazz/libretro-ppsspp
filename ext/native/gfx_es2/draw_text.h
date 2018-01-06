@@ -8,20 +8,25 @@
 
 #pragma once
 
+#include "ppsspp_config.h"
+
 #include <map>
+#include <memory>
 
 #include "base/basictypes.h"
 #include "gfx_es2/draw_buffer.h"
 
-class Thin3DContext;
-class Thin3DTexture;
+namespace Draw {
+	class DrawContext;
+	class Texture;
+}
 
 #ifdef USING_QT_UI
 #include <QtGui/QFont>
 #endif
 
 struct TextStringEntry {
-	Thin3DTexture *texture;
+	Draw::Texture *texture;
 	int width;
 	int height;
 	int bmWidth;
@@ -43,11 +48,11 @@ enum {
 
 // Internal struct but all details in .cpp file (pimpl to avoid pulling in excessive headers here)
 struct TextDrawerContext;
-struct TextDrawerFontContext;
+class TextDrawerFontContext;
 
 class TextDrawer {
 public:
-	TextDrawer(Thin3DContext *thin3d);
+	TextDrawer(Draw::DrawContext *thin3d);
 	~TextDrawer();
 
 	uint32_t SetFont(const char *fontName, int size, int flags);
@@ -61,25 +66,29 @@ public:
 	void DrawStringRect(DrawBuffer &target, const char *str, const Bounds &bounds, uint32_t color, int align);
 	// Use for housekeeping like throwing out old strings.
 	void OncePerFrame();
+	float CalculateDPIScale();
 
 private:
-	Thin3DContext *thin3d_;
+	Draw::DrawContext *draw_;
 
+	void ClearCache();
+	void RecreateFonts();  // On DPI change
 	void WrapString(std::string &out, const char *str, float maxWidth);
 
 	int frameCount_;
 	float fontScaleX_;
 	float fontScaleY_;
+	float dpiScale_;
 
 	TextDrawerContext *ctx_;
-#ifdef USING_QT_UI
+#if defined(USING_QT_UI)
 	std::map<uint32_t, QFont *> fontMap_;
-#else
-	std::map<uint32_t, TextDrawerFontContext *> fontMap_;
+#elif defined(_WIN32) && !PPSSPP_PLATFORM(UWP)
+	std::map<uint32_t, std::unique_ptr<TextDrawerFontContext>> fontMap_;
 #endif
 
 	uint32_t fontHash_;
 	// The key is the CityHash of the string xor the fontHash_.
-	std::map<uint32_t, TextStringEntry *> cache_;
-	std::map<uint32_t, TextMeasureEntry *> sizeCache_;
+	std::map<uint32_t, std::unique_ptr<TextStringEntry>> cache_;
+	std::map<uint32_t, std::unique_ptr<TextMeasureEntry>> sizeCache_;
 };

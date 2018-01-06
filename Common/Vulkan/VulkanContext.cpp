@@ -7,6 +7,7 @@
 
 #include "base/basictypes.h"
 #include "VulkanContext.h"
+#include "GPU/Common/ShaderCommon.h"
 
 #ifdef USE_CRT_DBG
 #undef new
@@ -37,6 +38,16 @@ static const char *validationLayers[] = {
 	"VK_LAYER_LUNARG_object_tracker",
 	"VK_LAYER_LUNARG_param_checker",
 	*/
+	/*
+	// For layers included in the Android NDK.
+	"VK_LAYER_GOOGLE_threading",
+	"VK_LAYER_LUNARG_parameter_validation",
+	"VK_LAYER_LUNARG_core_validation",
+	"VK_LAYER_LUNARG_image",
+	"VK_LAYER_LUNARG_object_tracker",
+	"VK_LAYER_LUNARG_swapchain",
+	"VK_LAYER_GOOGLE_unique_objects",
+	*/
 };
 
 static VkBool32 CheckLayers(const std::vector<layer_properties> &layer_props, const std::vector<const char *> &layer_names);
@@ -47,7 +58,7 @@ VulkanContext::VulkanContext(const char *app_name, int app_ver, uint32_t flags)
 #ifdef _WIN32
 	connection(nullptr),
 	window(nullptr),
-#elif defined(ANDROID)
+#elif defined(__ANDROID__)
 	native_window(nullptr),
 #endif
 	graphics_queue_family_index_(-1),
@@ -71,7 +82,7 @@ VulkanContext::VulkanContext(const char *app_name, int app_ver, uint32_t flags)
 	instance_extension_names.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
 #ifdef _WIN32
 	instance_extension_names.push_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
-#elif defined(ANDROID)
+#elif defined(__ANDROID__)
 	instance_extension_names.push_back(VK_KHR_ANDROID_SURFACE_EXTENSION_NAME);
 #endif
 	device_extension_names.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
@@ -158,7 +169,7 @@ VulkanContext::~VulkanContext() {
 void TransitionToPresent(VkCommandBuffer cmd, VkImage image) {
 	VkImageMemoryBarrier prePresentBarrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
 	prePresentBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-	prePresentBarrier.dstAccessMask = 0;
+	prePresentBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
 	prePresentBarrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 	prePresentBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 	prePresentBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -175,7 +186,7 @@ void TransitionToPresent(VkCommandBuffer cmd, VkImage image) {
 
 void TransitionFromPresent(VkCommandBuffer cmd, VkImage image) {
 	VkImageMemoryBarrier prePresentBarrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
-	prePresentBarrier.srcAccessMask = 0;
+	prePresentBarrier.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
 	prePresentBarrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 	prePresentBarrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 	prePresentBarrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
@@ -820,7 +831,7 @@ void VulkanContext::ReinitSurfaceWin32() {
 	assert(res == VK_SUCCESS);
 }
 
-#elif defined(ANDROID)
+#elif defined(__ANDROID__)
 
 void VulkanContext::InitSurfaceAndroid(ANativeWindow *wnd, int width, int height) {
 	native_window = wnd;
@@ -989,7 +1000,7 @@ void VulkanContext::InitSwapchain(VkCommandBuffer cmd) {
 			break;
 		}
 	}
-#ifdef ANDROID
+#ifdef __ANDROID__
 	// HACK
 	swapchainPresentMode = VK_PRESENT_MODE_FIFO_KHR;
 #endif
@@ -1030,7 +1041,13 @@ void VulkanContext::InitSwapchain(VkCommandBuffer cmd) {
 	swap_chain_info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
 	swap_chain_info.queueFamilyIndexCount = 0;
 	swap_chain_info.pQueueFamilyIndices = NULL;
-	swap_chain_info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+	// OPAQUE is not supported everywhere.
+	if (surfCapabilities.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR) {
+		swap_chain_info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+	} else {
+		// This should be supported anywhere, and is the only thing supported on the SHIELD TV, for example.
+		swap_chain_info.compositeAlpha = VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
+	}
 
 	res = vkCreateSwapchainKHR(device_, &swap_chain_info, NULL, &swap_chain_);
 	assert(res == VK_SUCCESS);
@@ -1266,39 +1283,43 @@ void TransitionImageLayout(VkCommandBuffer cmd, VkImage image, VkImageAspectFlag
 	image_memory_barrier.subresourceRange.levelCount = 1;
 	image_memory_barrier.subresourceRange.layerCount = 1;
 	if (old_image_layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
-		image_memory_barrier.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+		image_memory_barrier.srcAccessMask |= VK_ACCESS_MEMORY_READ_BIT;
 	}
 
 	if (old_image_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
-		image_memory_barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+		image_memory_barrier.srcAccessMask |= VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 	}
 
 	if (new_image_layout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) {
 		if (old_image_layout == VK_IMAGE_LAYOUT_PREINITIALIZED) {
-			image_memory_barrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
+			image_memory_barrier.srcAccessMask |= VK_ACCESS_HOST_WRITE_BIT;
 		}
-		image_memory_barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+		image_memory_barrier.dstAccessMask |= VK_ACCESS_TRANSFER_READ_BIT;
 	}
 
 	if (new_image_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
 		/* Make sure anything that was copying from this image has completed */
-		image_memory_barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		image_memory_barrier.dstAccessMask |= VK_ACCESS_TRANSFER_WRITE_BIT;
 	}
 
 	if (new_image_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
 		/* Make sure any Copy or CPU writes to image are flushed */
 		if (old_image_layout != VK_IMAGE_LAYOUT_UNDEFINED) {
-			image_memory_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+			image_memory_barrier.srcAccessMask |= VK_ACCESS_TRANSFER_WRITE_BIT;
 		}
-		image_memory_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		image_memory_barrier.dstAccessMask |= VK_ACCESS_SHADER_READ_BIT;
 	}
 
 	if (new_image_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
-		image_memory_barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+		image_memory_barrier.dstAccessMask |= VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
 	}
 
 	if (new_image_layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
-		image_memory_barrier.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+		image_memory_barrier.dstAccessMask |= VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+	}
+
+	if (new_image_layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
+		image_memory_barrier.dstAccessMask |= VK_ACCESS_MEMORY_READ_BIT;
 	}
 
 	VkPipelineStageFlags src_stages = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
@@ -1307,100 +1328,6 @@ void TransitionImageLayout(VkCommandBuffer cmd, VkImage image, VkImageAspectFlag
 	vkCmdPipelineBarrier(cmd, src_stages, dest_stages, 0, 0, nullptr, 0, nullptr, 1, &image_memory_barrier);
 }
 
-void init_resources(TBuiltInResource &Resources) {
-	Resources.maxLights = 32;
-	Resources.maxClipPlanes = 6;
-	Resources.maxTextureUnits = 32;
-	Resources.maxTextureCoords = 32;
-	Resources.maxVertexAttribs = 64;
-	Resources.maxVertexUniformComponents = 4096;
-	Resources.maxVaryingFloats = 64;
-	Resources.maxVertexTextureImageUnits = 32;
-	Resources.maxCombinedTextureImageUnits = 80;
-	Resources.maxTextureImageUnits = 32;
-	Resources.maxFragmentUniformComponents = 4096;
-	Resources.maxDrawBuffers = 32;
-	Resources.maxVertexUniformVectors = 128;
-	Resources.maxVaryingVectors = 8;
-	Resources.maxFragmentUniformVectors = 16;
-	Resources.maxVertexOutputVectors = 16;
-	Resources.maxFragmentInputVectors = 15;
-	Resources.minProgramTexelOffset = -8;
-	Resources.maxProgramTexelOffset = 7;
-	Resources.maxClipDistances = 8;
-	Resources.maxComputeWorkGroupCountX = 65535;
-	Resources.maxComputeWorkGroupCountY = 65535;
-	Resources.maxComputeWorkGroupCountZ = 65535;
-	Resources.maxComputeWorkGroupSizeX = 1024;
-	Resources.maxComputeWorkGroupSizeY = 1024;
-	Resources.maxComputeWorkGroupSizeZ = 64;
-	Resources.maxComputeUniformComponents = 1024;
-	Resources.maxComputeTextureImageUnits = 16;
-	Resources.maxComputeImageUniforms = 8;
-	Resources.maxComputeAtomicCounters = 8;
-	Resources.maxComputeAtomicCounterBuffers = 1;
-	Resources.maxVaryingComponents = 60;
-	Resources.maxVertexOutputComponents = 64;
-	Resources.maxGeometryInputComponents = 64;
-	Resources.maxGeometryOutputComponents = 128;
-	Resources.maxFragmentInputComponents = 128;
-	Resources.maxImageUnits = 8;
-	Resources.maxCombinedImageUnitsAndFragmentOutputs = 8;
-	Resources.maxCombinedShaderOutputResources = 8;
-	Resources.maxImageSamples = 0;
-	Resources.maxVertexImageUniforms = 0;
-	Resources.maxTessControlImageUniforms = 0;
-	Resources.maxTessEvaluationImageUniforms = 0;
-	Resources.maxGeometryImageUniforms = 0;
-	Resources.maxFragmentImageUniforms = 8;
-	Resources.maxCombinedImageUniforms = 8;
-	Resources.maxGeometryTextureImageUnits = 16;
-	Resources.maxGeometryOutputVertices = 256;
-	Resources.maxGeometryTotalOutputComponents = 1024;
-	Resources.maxGeometryUniformComponents = 1024;
-	Resources.maxGeometryVaryingComponents = 64;
-	Resources.maxTessControlInputComponents = 128;
-	Resources.maxTessControlOutputComponents = 128;
-	Resources.maxTessControlTextureImageUnits = 16;
-	Resources.maxTessControlUniformComponents = 1024;
-	Resources.maxTessControlTotalOutputComponents = 4096;
-	Resources.maxTessEvaluationInputComponents = 128;
-	Resources.maxTessEvaluationOutputComponents = 128;
-	Resources.maxTessEvaluationTextureImageUnits = 16;
-	Resources.maxTessEvaluationUniformComponents = 1024;
-	Resources.maxTessPatchComponents = 120;
-	Resources.maxPatchVertices = 32;
-	Resources.maxTessGenLevel = 64;
-	Resources.maxViewports = 16;
-	Resources.maxVertexAtomicCounters = 0;
-	Resources.maxTessControlAtomicCounters = 0;
-	Resources.maxTessEvaluationAtomicCounters = 0;
-	Resources.maxGeometryAtomicCounters = 0;
-	Resources.maxFragmentAtomicCounters = 8;
-	Resources.maxCombinedAtomicCounters = 8;
-	Resources.maxAtomicCounterBindings = 1;
-	Resources.maxVertexAtomicCounterBuffers = 0;
-	Resources.maxTessControlAtomicCounterBuffers = 0;
-	Resources.maxTessEvaluationAtomicCounterBuffers = 0;
-	Resources.maxGeometryAtomicCounterBuffers = 0;
-	Resources.maxFragmentAtomicCounterBuffers = 1;
-	Resources.maxCombinedAtomicCounterBuffers = 1;
-	Resources.maxAtomicCounterBufferSize = 16384;
-	Resources.maxTransformFeedbackBuffers = 4;
-	Resources.maxTransformFeedbackInterleavedComponents = 64;
-	Resources.maxCullDistances = 8;
-	Resources.maxCombinedClipAndCullDistances = 8;
-	Resources.maxSamples = 4;
-	Resources.limits.nonInductiveForLoops = 1;
-	Resources.limits.whileLoops = 1;
-	Resources.limits.doWhileLoops = 1;
-	Resources.limits.generalUniformIndexing = 1;
-	Resources.limits.generalAttributeMatrixVectorIndexing = 1;
-	Resources.limits.generalVaryingIndexing = 1;
-	Resources.limits.generalSamplerIndexing = 1;
-	Resources.limits.generalVariableIndexing = 1;
-	Resources.limits.generalConstantMatrixVectorIndexing = 1;
-}
 
 EShLanguage FindLanguage(const VkShaderStageFlagBits shader_type) {
 	switch (shader_type) {

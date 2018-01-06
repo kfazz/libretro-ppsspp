@@ -15,6 +15,8 @@
 // Official git repository and contact information can be found at
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
+#include "ppsspp_config.h"
+
 #include "Common/FileUtil.h"
 #include "Common/StringUtils.h"
 #include "Common/ChunkFile.h"
@@ -25,20 +27,11 @@
 #include "file/zip_read.h"
 #include "util/text/utf8.h"
 
-#if defined(_WIN32) && !defined(__MINGW32__)
-#define _WIN32_NO_MINGW
-#endif
-
 #ifdef _WIN32
 #include "Common/CommonWindows.h"
 #include <sys/stat.h>
-#endif
-
-#ifndef _WIN32_NO_MINGW
+#else
 #include <dirent.h>
-#endif
-
-#ifndef _WIN32
 #include <unistd.h>
 #include <sys/stat.h>
 #include <ctype.h>
@@ -369,7 +362,7 @@ u32 VirtualDiscFileSystem::OpenFile(std::string filename, FileAccess access, con
 		bool success = entry.Open(basePath, fileList[entry.fileIndex].fileName, FILEACCESS_READ);
 
 		if (!success) {
-#ifdef _WIN32_NO_MINGW
+#ifdef _WIN32
 			ERROR_LOG(FILESYS, "VirtualDiscFileSystem::OpenFile: FAILED, %i", GetLastError());
 #else
 			ERROR_LOG(FILESYS, "VirtualDiscFileSystem::OpenFile: FAILED");
@@ -395,7 +388,7 @@ u32 VirtualDiscFileSystem::OpenFile(std::string filename, FileAccess access, con
 	bool success = entry.Open(basePath, filename, access);
 
 	if (!success) {
-#ifdef _WIN32_NO_MINGW
+#ifdef _WIN32
 		ERROR_LOG(FILESYS, "VirtualDiscFileSystem::OpenFile: FAILED, %i - access = %i", GetLastError(), (int)access);
 #else
 		ERROR_LOG(FILESYS, "VirtualDiscFileSystem::OpenFile: FAILED, access = %i", (int)access);
@@ -653,7 +646,7 @@ bool VirtualDiscFileSystem::GetHostPath(const std::string &inpath, std::string &
 	return false;
 }
 
-#ifdef _WIN32_NO_MINGW
+#ifdef _WIN32
 #define FILETIME_FROM_UNIX_EPOCH_US 11644473600000000ULL
 
 static void tmFromFiletime(tm &dest, FILETIME &src)
@@ -669,7 +662,7 @@ static void tmFromFiletime(tm &dest, FILETIME &src)
 std::vector<PSPFileInfo> VirtualDiscFileSystem::GetDirListing(std::string path)
 {
 	std::vector<PSPFileInfo> myVector;
-#ifdef _WIN32_NO_MINGW
+#ifdef _WIN32
 	WIN32_FIND_DATA findData;
 	HANDLE hFind;
 
@@ -677,7 +670,7 @@ std::vector<PSPFileInfo> VirtualDiscFileSystem::GetDirListing(std::string path)
 
 	std::string w32path = GetLocalPath(path) + "\\*.*";
 
-	hFind = FindFirstFile(ConvertUTF8ToWString(w32path).c_str(), &findData);
+	hFind = FindFirstFileEx(ConvertUTF8ToWString(w32path).c_str(), FindExInfoStandard, &findData, FindExSearchNameMatch, NULL, 0);
 
 	if (hFind == INVALID_HANDLE_VALUE) {
 		return myVector; //the empty list
@@ -816,14 +809,16 @@ void VirtualDiscFileSystem::HandlerLogger(void *arg, HandlerHandle handle, LogTy
 }
 
 VirtualDiscFileSystem::Handler::Handler(const char *filename, VirtualDiscFileSystem *const sys) {
-#if defined(_WIN32_NO_MINGW)
+#ifdef _WIN32
+#if PPSSPP_PLATFORM(UWP)
+#define dlopen(name, ignore) (void *)LoadPackagedLibrary(ConvertUTF8ToWString(name).c_str(), 0)
+#define dlsym(mod, name) GetProcAddress((HMODULE)mod, name)
+#define dlclose(mod) FreeLibrary((HMODULE)mod)
+#else
 #define dlopen(name, ignore) (void *)LoadLibrary(ConvertUTF8ToWString(name).c_str())
 #define dlsym(mod, name) GetProcAddress((HMODULE)mod, name)
 #define dlclose(mod) FreeLibrary((HMODULE)mod)
-#elif defined(_WIN32)
-#define dlopen(name, ignore) (void *)LoadLibrary(name)
-#define dlsym(mod, name) GetProcAddress((HMODULE)mod, name)
-#define dlclose(mod) FreeLibrary((HMODULE)mod)
+#endif
 #endif
 
 	library = dlopen(filename, RTLD_LOCAL | RTLD_NOW);
@@ -858,10 +853,13 @@ VirtualDiscFileSystem::Handler::~Handler() {
 	if (library != NULL) {
 		Shutdown();
 
+#if !PPSSPP_PLATFORM(UWP)
 #ifdef _WIN32
 		FreeLibrary((HMODULE)library);
 #else
 		dlclose(library);
 #endif
+#endif
 	}
 }
+

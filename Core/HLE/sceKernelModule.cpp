@@ -60,10 +60,6 @@
 #include "GPU/GPUInterface.h"
 #include "GPU/GPUState.h"
 
-#ifdef BLACKBERRY
-using std::strnlen;
-#endif
-
 enum {
 	PSP_THREAD_ATTR_USER = 0x80000000
 };
@@ -301,8 +297,17 @@ public:
 				}
 			} else {
 				// Older save state.  Let's still reload, but this may not pick up new flags, etc.
+				bool foundBroken = false;
 				for (auto func : importedFuncs) {
-					ImportFunc(func, true);
+					if (func.moduleName[KERNELOBJECT_MAX_NAME_LENGTH] != '\0' || !Memory::IsValidAddress(func.stubAddr)) {
+						foundBroken = true;
+					} else {
+						ImportFunc(func, true);
+					}
+				}
+
+				if (foundBroken) {
+					ERROR_LOG(LOADER, "Broken stub import data while loading state");
 				}
 			}
 
@@ -717,7 +722,7 @@ void ImportFuncSymbol(const FuncSymbolImport &func, bool reimporting) {
 	// It hasn't been exported yet, but hopefully it will later.
 	bool isKnownModule = GetModuleIndex(func.moduleName) != -1;
 	if (isKnownModule) {
-		WARN_LOG_REPORT(LOADER, "Unknown syscall in known module: %s 0x%08x", func.moduleName, func.nid);
+		WARN_LOG_REPORT(LOADER, "Unknown syscall in known module '%s': 0x%08x", func.moduleName, func.nid);
 	} else {
 		INFO_LOG(LOADER, "Function (%s,%08x) unresolved, storing for later resolving", func.moduleName, func.nid);
 	}
@@ -789,7 +794,7 @@ void Module::Cleanup() {
 	}
 
 	if (memoryBlockAddr != 0 && nm.text_addr != 0 && memoryBlockSize >= nm.data_size + nm.bss_size + nm.text_size) {
-		DEBUG_LOG(HLE, "Zeroing out module %s memory: %08x - %08x", nm.name, memoryBlockAddr, memoryBlockAddr + memoryBlockSize);
+		DEBUG_LOG(LOADER, "Zeroing out module %s memory: %08x - %08x", nm.name, memoryBlockAddr, memoryBlockAddr + memoryBlockSize);
 		for (u32 i = 0; i < (u32)(nm.text_size + 3); i += 4) {
 			Memory::Write_U32(MIPS_MAKE_BREAK(1), nm.text_addr + i);
 		}
@@ -1438,29 +1443,26 @@ static Module *__KernelLoadModule(u8 *fileptr, SceKernelLMOption *options, std::
 {
 	Module *module = 0;
 	// Check for PBP
-	if (memcmp(fileptr, "\0PBP", 4) == 0)
-	{
+	if (memcmp(fileptr, "\0PBP", 4) == 0) {
 		// PBP!
 		u32_le version;
 		memcpy(&version, fileptr + 4, 4);
 		u32_le offset0, offsets[16];
-		int numfiles;
 
 		memcpy(&offset0, fileptr + 8, 4);
-		numfiles = (offset0 - 8)/4;
+		int numfiles = (offset0 - 8)/4;
 		offsets[0] = offset0;
 		for (int i = 1; i < numfiles; i++)
 			memcpy(&offsets[i], fileptr + 12 + 4*i, 4);
+
 		u32 magic = 0;
-
-
 		u8 *temp = 0;
 		if (offsets[5] & 3) {
 			// Our loader does NOT like to load from an unaligned address on ARM!
 			size_t size = offsets[6] - offsets[5];
 			temp = new u8[size];
 			memcpy(temp, fileptr + offsets[5], size);
-			INFO_LOG(LOADER, "Elf unaligned, aligning!");
+			INFO_LOG(LOADER, "PBP: ELF unaligned (%d: %d), aligning!", offsets[5], offsets[5] & 3);
 		}
 
 		u32 error;
@@ -1669,7 +1671,7 @@ int sceKernelLoadExec(const char *filename, u32 paramPtr)
 	return 0;
 }
 
-static u32 sceKernelLoadModule(const char *name, u32 flags, u32 optionAddr) {
+u32 sceKernelLoadModule(const char *name, u32 flags, u32 optionAddr) {
 	if (!name) {
 		return hleLogError(LOADER, SCE_KERNEL_ERROR_ILLEGAL_ADDR, "bad filename");
 	}

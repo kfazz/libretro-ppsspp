@@ -140,7 +140,7 @@ void MainWindow::Boot()
 
 	memoryWindow = new Debugger_Memory(currentDebugMIPS, this, this);
 	memoryTexWindow = new Debugger_MemoryTex(this);
-	displaylistWindow = new Debugger_DisplayList(currentDebugMIPS, this, this);
+	displaylistWindow = new Debugger_DisplayList(currentDebugMIPS, gpu->GetDrawContext(), this, this);
 
 	notifyMapsLoaded();
 
@@ -400,9 +400,14 @@ void MainWindow::forumAct()
 	QDesktopServices::openUrl(QUrl("http://forums.ppsspp.org/"));
 }
 
+void MainWindow::gitAct() 
+{
+	QDesktopServices::openUrl(QUrl("https://github.com/hrydgard/ppsspp/"));
+}
+
 void MainWindow::aboutAct()
 {
-	QMessageBox::about(this, "About", QString::fromUtf8("PPSSPP Qt " PPSSPP_GIT_VERSION "\n\n"
+	QMessageBox::about(this, "About", QString("PPSSPP Qt %1\n\n"
 	                                                    "PSP emulator and debugger\n\n"
 	                                                    "Copyright (c) by Henrik Rydg\xc3\xa5rd and the PPSSPP Project 2012-\n"
 	                                                    "Qt port maintained by xSacha\n\n"
@@ -412,7 +417,7 @@ void MainWindow::aboutAct()
 	                                                    "    zlib by Jean-loup Gailly (compression) and Mark Adler (decompression)\n"
 	                                                    "    Qt project by Digia\n\n"
 	                                                    "All trademarks are property of their respective owners.\n"
-	                                                    "The emulator is for educational and development purposes only and it may not be used to play games you do not legally own."));
+	                                                    "The emulator is for educational and development purposes only and it may not be used to play games you do not legally own.").arg(PPSSPP_GIT_VERSION));
 }
 
 /* Private functions */
@@ -449,7 +454,7 @@ void MainWindow::SetWindowScale(int zoom) {
 
 void MainWindow::SetGameTitle(QString text)
 {
-	QString title = "PPSSPP " PPSSPP_GIT_VERSION;
+	QString title = QString("PPSSPP %1").arg(PPSSPP_GIT_VERSION);
 	if (text != "")
 		title += QString(" - %1").arg(text);
 
@@ -645,6 +650,7 @@ void MainWindow::createMenus()
 	MenuTree* helpMenu = new MenuTree(this, menuBar(),    QT_TR_NOOP("&Help"));
 	helpMenu->add(new MenuAction(this, SLOT(websiteAct()),    QT_TR_NOOP("Official &website"), QKeySequence::HelpContents));
 	helpMenu->add(new MenuAction(this, SLOT(forumAct()),      QT_TR_NOOP("Official &forum")));
+	helpMenu->add(new MenuAction(this, SLOT(gitAct()),        QT_TR_NOOP("&GitHub")));
 	helpMenu->add(new MenuAction(this, SLOT(aboutAct()),      QT_TR_NOOP("&About PPSSPP..."), QKeySequence::WhatsThis));
 
 	retranslate();

@@ -15,6 +15,9 @@
 // Official git repository and contact information can be found at
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
+#include "ppsspp_config.h"
+#if PPSSPP_ARCH(MIPS)
+
 #include "base/logging.h"
 #include "profiler/profiler.h"
 #include "Common/ChunkFile.h"
@@ -94,11 +97,6 @@ void MipsJit::ClearCache()
 	blocks.Clear();
 	ClearCodeSpace();
 	//GenerateFixedCode();
-}
-
-void MipsJit::InvalidateCache()
-{
-	blocks.Clear();
 }
 
 void MipsJit::InvalidateCacheAt(u32 em_address, int length)
@@ -358,3 +356,5 @@ void MipsJit::WriteSyscallExit()
 // mov dreg, [eax+offreg]
 	
 }
+
+#endif // PPSSPP_ARCH(MIPS)

@@ -677,6 +677,9 @@
       <Filter>Core</Filter>
     </ClCompile>
     <ClCompile Include="WaveFile.cpp" />
+    <ClCompile Include="HLE\KUBridge.cpp">
+      <Filter>HLE\Libraries</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ELF\ElfReader.h">
@@ -1244,11 +1247,13 @@
       <Filter>Core</Filter>
     </ClInclude>
     <ClInclude Include="WaveFile.h" />
+    <ClInclude Include="HLE\KUBridge.h">
+      <Filter>HLE\Libraries</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="CMakeLists.txt" />
     <None Include="..\LICENSE.TXT" />
     <None Include="..\android\jni\Android.mk" />
-    <None Include="GameLogNotes.txt" />
   </ItemGroup>
 </Project>

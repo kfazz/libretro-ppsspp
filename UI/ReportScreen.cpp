@@ -41,7 +41,7 @@ public:
 	Event OnChoice;
 
 protected:
-	void Update(const InputState &input_state) override;
+	void Update() override;
 
 	virtual void SetupChoices();
 	virtual int TotalChoices() {
@@ -73,8 +73,8 @@ RatingChoice::RatingChoice(const char *captionKey, int *value, LayoutParams *lay
 	SetupChoices();
 }
 
-void RatingChoice::Update(const InputState &input_state) {
-	LinearLayout::Update(input_state);
+void RatingChoice::Update() {
+	LinearLayout::Update();
 
 	for (int i = 0; i < TotalChoices(); i++) {
 		StickyChoice *chosen = GetChoice(i);
@@ -119,7 +119,7 @@ EventReturn RatingChoice::OnChoiceClick(EventParams &e) {
 		}
 	}
 
-	EventParams e2;
+	EventParams e2{};
 	e2.v = e.v;
 	e2.a = *value_;
 	// Dispatch immediately (we're already on the UI thread as we're in an event handler).
@@ -154,13 +154,13 @@ void CompatRatingChoice::SetupChoices() {
 }
 
 ReportScreen::ReportScreen(const std::string &gamePath)
-	: UIScreenWithGameBackground(gamePath), overall_(-1), graphics_(-1), speed_(-1), gameplay_(-1),
+	: UIDialogScreenWithGameBackground(gamePath), overall_(-1), graphics_(-1), speed_(-1), gameplay_(-1),
 	includeScreenshot_(true) {
 	enableReporting_ = Reporting::IsEnabled();
 	ratingEnabled_ = enableReporting_;
 }
 
-void ReportScreen::update(InputState &input) {
+void ReportScreen::update() {
 	if (screenshot_) {
 		if (includeScreenshot_) {
 			screenshot_->SetVisibility(V_VISIBLE);
@@ -168,7 +168,7 @@ void ReportScreen::update(InputState &input) {
 			screenshot_->SetVisibility(V_GONE);
 		}
 	}
-	UIScreenWithGameBackground::update(input);
+	UIDialogScreenWithGameBackground::update();
 }
 
 EventReturn ReportScreen::HandleChoice(EventParams &e) {
@@ -236,7 +236,7 @@ void ReportScreen::CreateViews() {
 	}
 	screenshotFilename_ = path + ".reporting.jpg";
 	int shotWidth = 0, shotHeight = 0;
-	if (TakeGameScreenshot(screenshotFilename_.c_str(), SCREENSHOT_JPG, SCREENSHOT_RENDER, &shotWidth, &shotHeight, 4)) {
+	if (TakeGameScreenshot(screenshotFilename_.c_str(), SCREENSHOT_JPG, SCREENSHOT_DISPLAY, &shotWidth, &shotHeight, 4)) {
 		float scale = 340.0f * (1.0f / g_dpi_scale) * (1.0f / shotHeight);
 		leftColumnItems->Add(new CheckBox(&includeScreenshot_, rp->T("FeedbackIncludeScreen", "Include a screenshot")))->SetEnabledPtr(&enableReporting_);
 		screenshot_ = leftColumnItems->Add(new AsyncImageFileView(screenshotFilename_, IS_DEFAULT, nullptr, new LinearLayoutParams(shotWidth * scale, shotHeight * scale, Margins(12, 0))));
@@ -289,7 +289,7 @@ EventReturn ReportScreen::HandleSubmit(EventParams &e) {
 
 	std::string filename = includeScreenshot_ ? screenshotFilename_ : "";
 	Reporting::ReportCompatibility(compat, graphics_ + 1, speed_ + 1, gameplay_ + 1, filename);
-	screenManager()->finishDialog(this, DR_OK);
+	TriggerFinish(DR_OK);
 	screenManager()->push(new ReportFinishScreen(gamePath_));
 	return EVENT_DONE;
 }
@@ -301,7 +301,7 @@ EventReturn ReportScreen::HandleBrowser(EventParams &e) {
 }
 
 ReportFinishScreen::ReportFinishScreen(const std::string &gamePath)
-	: UIScreenWithGameBackground(gamePath), resultNotice_(nullptr), setStatus_(false) {
+	: UIDialogScreenWithGameBackground(gamePath), resultNotice_(nullptr), setStatus_(false) {
 }
 
 void ReportFinishScreen::CreateViews() {
@@ -332,7 +332,7 @@ void ReportFinishScreen::CreateViews() {
 	rightColumn->Add(rightColumnItems);
 }
 
-void ReportFinishScreen::update(InputState &input) {
+void ReportFinishScreen::update() {
 	I18NCategory *rp = GetI18NCategory("Reporting");
 
 	if (!setStatus_) {
@@ -353,7 +353,7 @@ void ReportFinishScreen::update(InputState &input) {
 		}
 	}
 
-	UIScreenWithGameBackground::update(input);
+	UIDialogScreenWithGameBackground::update();
 }
 
 UI::EventReturn ReportFinishScreen::HandleViewFeedback(UI::EventParams &e) {

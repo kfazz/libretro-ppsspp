@@ -17,10 +17,12 @@
 
 #include <algorithm>
 #include <vector>
+#include <thread>
+#include <mutex>
 
-#include "base/mutex.h"
 #include "base/timeutil.h"
 #include "i18n/i18n.h"
+#include "thread/threadutil.h"
 
 #include "Common/FileUtil.h"
 #include "Common/ChunkFile.h"
@@ -96,6 +98,8 @@ namespace SaveState
 
 		CChunkFileReader::Error Save()
 		{
+			std::lock_guard<std::mutex> guard(lock_);
+
 			int n = next_++ % size_;
 			if ((next_ % size_) == first_)
 				++first_;
@@ -116,7 +120,7 @@ namespace SaveState
 				err = SaveToRam(buffer);
 
 			if (err == CChunkFileReader::ERROR_NONE)
-				Compress(states_[n], *compressBuffer, bases_[base_]);
+				ScheduleCompress(&states_[n], compressBuffer, &bases_[base_]);
 			else
 				states_[n].clear();
 			baseMapping_[n] = base_;
@@ -125,6 +129,8 @@ namespace SaveState
 
 		CChunkFileReader::Error Restore()
 		{
+			std::lock_guard<std::mutex> guard(lock_);
+
 			// No valid states left.
 			if (Empty())
 				return CChunkFileReader::ERROR_BAD_FILE;
@@ -138,8 +144,22 @@ namespace SaveState
 			return LoadFromRam(buffer);
 		}
 
+		void ScheduleCompress(std::vector<u8> *result, const std::vector<u8> *state, const std::vector<u8> *base)
+		{
+			auto th = new std::thread([=]{
+				setCurrentThreadName("SaveStateCompress");
+				Compress(*result, *state, *base);
+			});
+			th->detach();
+		}
+
 		void Compress(std::vector<u8> &result, const std::vector<u8> &state, const std::vector<u8> &base)
 		{
+			std::lock_guard<std::mutex> guard(lock_);
+			// Bail if we were cleared before locking.
+			if (first_ == 0 && next_ == 0)
+				return;
+
 			result.clear();
 			for (size_t i = 0; i < state.size(); i += BLOCK_SIZE)
 			{
@@ -156,6 +176,7 @@ namespace SaveState
 
 		void Decompress(std::vector<u8> &result, const std::vector<u8> &compressed, const std::vector<u8> &base)
 		{
+			std::lock_guard<std::mutex> guard(lock_);
 			result.clear();
 			result.reserve(base.size());
 			auto basePos = base.begin();
@@ -181,6 +202,8 @@ namespace SaveState
 
 		void Clear()
 		{
+			// This lock is mainly for shutdown.
+			std::lock_guard<std::mutex> guard(lock_);
 			first_ = 0;
 			next_ = 0;
 		}
@@ -193,20 +216,25 @@ namespace SaveState
 		static const int BLOCK_SIZE;
 		// TODO: Instead, based on size of compressed state?
 		static const int BASE_USAGE_INTERVAL;
+
 		typedef std::vector<u8> StateBuffer;
+
 		int first_;
 		int next_;
 		int size_;
+
 		std::vector<StateBuffer> states_;
 		StateBuffer bases_[2];
 		std::vector<int> baseMapping_;
+		std::mutex lock_;
+
 		int base_;
 		int baseUsage_;
 	};
 
 	static bool needsProcess = false;
 	static std::vector<Operation> pending;
-	static recursive_mutex mutex;
+	static std::mutex mutex;
 	static bool hasLoadedState = false;
 
 	// TODO: Should this be configurable?
@@ -250,7 +278,7 @@ namespace SaveState
 
 	void Enqueue(SaveState::Operation op)
 	{
-		lock_guard guard(mutex);
+		std::lock_guard<std::mutex> guard(mutex);
 		pending.push_back(op);
 
 		// Don't actually run it until next frame.
@@ -480,7 +508,7 @@ namespace SaveState
 
 	std::vector<Operation> Flush()
 	{
-		lock_guard guard(mutex);
+		std::lock_guard<std::mutex> guard(mutex);
 		std::vector<Operation> copy = pending;
 		pending.clear();
 
@@ -549,7 +577,7 @@ namespace SaveState
 
 		if (!__KernelIsRunning())
 		{
-			ERROR_LOG(COMMON, "Savestate failure: Unable to load without kernel, this should never happen.");
+			ERROR_LOG(SAVESTATE, "Savestate failure: Unable to load without kernel, this should never happen.");
 			return;
 		}
 
@@ -575,7 +603,7 @@ namespace SaveState
 			switch (op.type)
 			{
 			case SAVESTATE_LOAD:
-				INFO_LOG(COMMON, "Loading state from %s", op.filename.c_str());
+				INFO_LOG(SAVESTATE, "Loading state from %s", op.filename.c_str());
 				result = CChunkFileReader::Load(op.filename, PPSSPP_GIT_VERSION, state, &reason);
 				if (result == CChunkFileReader::ERROR_NONE) {
 					callbackMessage = sc->T("Loaded State");
@@ -584,7 +612,7 @@ namespace SaveState
 				} else if (result == CChunkFileReader::ERROR_BROKEN_STATE) {
 					HandleFailure();
 					callbackMessage = i18nLoadFailure;
-					ERROR_LOG(COMMON, "Load state failure: %s", reason.c_str());
+					ERROR_LOG(SAVESTATE, "Load state failure: %s", reason.c_str());
 					callbackResult = false;
 				} else {
 					callbackMessage = sc->T(reason.c_str(), i18nLoadFailure);
@@ -593,7 +621,7 @@ namespace SaveState
 				break;
 
 			case SAVESTATE_SAVE:
-				INFO_LOG(COMMON, "Saving state to %s", op.filename.c_str());
+				INFO_LOG(SAVESTATE, "Saving state to %s", op.filename.c_str());
 				result = CChunkFileReader::Save(op.filename, g_paramSFO.GetValueString("TITLE"), PPSSPP_GIT_VERSION, state);
 				if (result == CChunkFileReader::ERROR_NONE) {
 					callbackMessage = sc->T("Saved State");
@@ -601,7 +629,7 @@ namespace SaveState
 				} else if (result == CChunkFileReader::ERROR_BROKEN_STATE) {
 					HandleFailure();
 					callbackMessage = i18nSaveFailure;
-					ERROR_LOG(COMMON, "Save state failure: %s", reason.c_str());
+					ERROR_LOG(SAVESTATE, "Save state failure: %s", reason.c_str());
 					callbackResult = false;
 				} else {
 					callbackMessage = i18nSaveFailure;
@@ -612,14 +640,14 @@ namespace SaveState
 			case SAVESTATE_VERIFY:
 				callbackResult = CChunkFileReader::Verify(state) == CChunkFileReader::ERROR_NONE;
 				if (callbackResult) {
-					INFO_LOG(COMMON, "Verified save state system");
+					INFO_LOG(SAVESTATE, "Verified save state system");
 				} else {
-					ERROR_LOG(COMMON, "Save state system verification failed");
+					ERROR_LOG(SAVESTATE, "Save state system verification failed");
 				}
 				break;
 
 			case SAVESTATE_REWIND:
-				INFO_LOG(COMMON, "Rewinding to recent savestate snapshot");
+				INFO_LOG(SAVESTATE, "Rewinding to recent savestate snapshot");
 				result = rewindStates.Restore();
 				if (result == CChunkFileReader::ERROR_NONE) {
 					callbackMessage = sc->T("Loaded State");
@@ -644,15 +672,15 @@ namespace SaveState
 
 			case SAVESTATE_SAVE_SCREENSHOT:
 #ifndef __LIBRETRO__
-				callbackResult = TakeGameScreenshot(op.filename.c_str(), SCREENSHOT_JPG, SCREENSHOT_RENDER);
+				callbackResult = TakeGameScreenshot(op.filename.c_str(), SCREENSHOT_JPG, SCREENSHOT_DISPLAY);
 				if (!callbackResult) {
-					ERROR_LOG(COMMON, "Failed to take a screenshot for the savestate! %s", op.filename.c_str());
+					ERROR_LOG(SAVESTATE, "Failed to take a screenshot for the savestate! %s", op.filename.c_str());
 				}
 #endif
 				break;
 
 			default:
-				ERROR_LOG(COMMON, "Savestate failure: unknown operation type %d", op.type);
+				ERROR_LOG(SAVESTATE, "Savestate failure: unknown operation type %d", op.type);
 				callbackResult = false;
 				break;
 			}
@@ -671,9 +699,15 @@ namespace SaveState
 		// Make sure there's a directory for save slots
 		pspFileSystem.MkDir("ms0:/PSP/PPSSPP_STATE");
 
-		lock_guard guard(mutex);
+		std::lock_guard<std::mutex> guard(mutex);
 		rewindStates.Clear();
 
 		hasLoadedState = false;
+	}
+
+	void Shutdown()
+	{
+		std::lock_guard<std::mutex> guard(mutex);
+		rewindStates.Clear();
 	}
 }

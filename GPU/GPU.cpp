@@ -15,21 +15,30 @@
 // Official git repository and contact information can be found at
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
+#include "ppsspp_config.h"
+
 #include "Common/GraphicsContext.h"
 #include "Core/Core.h"
 
 #include "GPU/GPU.h"
 #include "GPU/GPUInterface.h"
+
+#if PPSSPP_PLATFORM(UWP)
+#include "GPU/D3D11/GPU_D3D11.h"
+#else
 #include "GPU/GLES/GPU_GLES.h"
+
 #ifndef NO_VULKAN
 #include "GPU/Vulkan/GPU_Vulkan.h"
 #endif
 #include "GPU/Null/NullGpu.h"
 #include "GPU/Software/SoftGpu.h"
 
-#if defined(_WIN32_NO_LIBRETRO)
-#include "GPU/Directx9/helper/global.h"
+#if defined(_WIN32)
 #include "GPU/Directx9/GPU_DX9.h"
+#include "GPU/D3D11/GPU_D3D11.h"
+#endif
+
 #endif
 
 GPUStatistics gpuStats;
@@ -46,32 +55,48 @@ static void SetGPU(T *obj) {
 #undef new
 #endif
 
-bool GPU_Init(GraphicsContext *ctx, Thin3DContext *thin3d) {
+bool GPU_Init(GraphicsContext *ctx, Draw::DrawContext *draw) {
+#if PPSSPP_PLATFORM(UWP)
+	SetGPU(new GPU_D3D11(ctx, draw));
+	return true;
+#else
 	switch (PSP_CoreParameter().gpuCore) {
 	case GPUCORE_NULL:
 		SetGPU(new NullGPU());
 		break;
 	case GPUCORE_GLES:
-		SetGPU(new GPU_GLES(ctx));
+		SetGPU(new GPU_GLES(ctx, draw));
 		break;
 	case GPUCORE_SOFTWARE:
-		SetGPU(new SoftGPU(ctx, thin3d));
+		SetGPU(new SoftGPU(ctx, draw));
 		break;
 	case GPUCORE_DIRECTX9:
-#if defined(_WIN32_NO_LIBRETRO)
-		SetGPU(new DIRECTX9_GPU(ctx));
-#endif
+#if defined(_WIN32)
+		SetGPU(new DIRECTX9_GPU(ctx, draw));
 		break;
-	case GPUCORE_DIRECTX11:
+#else
 		return false;
+#endif
+	case GPUCORE_DIRECTX11:
+#if defined(_WIN32)
+		SetGPU(new GPU_D3D11(ctx, draw));
+		break;
+#else
+		return false;
+#endif
 	case GPUCORE_VULKAN:
 #ifndef NO_VULKAN
-		SetGPU(new GPU_Vulkan(ctx));
+		if (!ctx) {
+			ERROR_LOG(G3D, "Unable to init Vulkan GPU backend, no context");
+			break;
+		}
+		SetGPU(new GPU_Vulkan(ctx, draw));
 #endif
 		break;
 	}
 
 	return gpu != NULL;
+#endif
 }
 #ifdef USE_CRT_DBG
 #define new DBG_NEW

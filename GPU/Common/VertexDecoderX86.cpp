@@ -15,6 +15,9 @@
 // Official git repository and contact information can be found at
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
+#include "ppsspp_config.h"
+#if PPSSPP_ARCH(X86) || PPSSPP_ARCH(AMD64)
+
 #include <emmintrin.h>
 
 #include "Common/CPUDetect.h"
@@ -86,24 +89,27 @@ static const X64Reg fpScratchReg4 = XMM4;
 static const JitLookup jitLookup[] = {
 	{&VertexDecoder::Step_WeightsU8, &VertexDecoderJitCache::Jit_WeightsU8},
 	{&VertexDecoder::Step_WeightsU16, &VertexDecoderJitCache::Jit_WeightsU16},
-	{&VertexDecoder::Step_WeightsU8ToFloat, &VertexDecoderJitCache::Jit_WeightsU8ToFloat},
-	{&VertexDecoder::Step_WeightsU16ToFloat, &VertexDecoderJitCache::Jit_WeightsU16ToFloat},
 	{&VertexDecoder::Step_WeightsFloat, &VertexDecoderJitCache::Jit_WeightsFloat},
-
 	{&VertexDecoder::Step_WeightsU8Skin, &VertexDecoderJitCache::Jit_WeightsU8Skin},
 	{&VertexDecoder::Step_WeightsU16Skin, &VertexDecoderJitCache::Jit_WeightsU16Skin},
 	{&VertexDecoder::Step_WeightsFloatSkin, &VertexDecoderJitCache::Jit_WeightsFloatSkin},
 
-	{&VertexDecoder::Step_TcU8, &VertexDecoderJitCache::Jit_TcU8},
-	{&VertexDecoder::Step_TcU16, &VertexDecoderJitCache::Jit_TcU16},
+	{&VertexDecoder::Step_WeightsU8ToFloat, &VertexDecoderJitCache::Jit_WeightsU8ToFloat},
+	{&VertexDecoder::Step_WeightsU16ToFloat, &VertexDecoderJitCache::Jit_WeightsU16ToFloat},
+
+	{&VertexDecoder::Step_TcFloat, &VertexDecoderJitCache::Jit_TcFloat},
 	{&VertexDecoder::Step_TcU8ToFloat, &VertexDecoderJitCache::Jit_TcU8ToFloat},
 	{&VertexDecoder::Step_TcU16ToFloat, &VertexDecoderJitCache::Jit_TcU16ToFloat},
-	{&VertexDecoder::Step_TcFloat, &VertexDecoderJitCache::Jit_TcFloat},
 	{&VertexDecoder::Step_TcU16Double, &VertexDecoderJitCache::Jit_TcU16Double},
 
 	{&VertexDecoder::Step_TcU8Prescale, &VertexDecoderJitCache::Jit_TcU8Prescale},
 	{&VertexDecoder::Step_TcU16Prescale, &VertexDecoderJitCache::Jit_TcU16Prescale},
 	{&VertexDecoder::Step_TcFloatPrescale, &VertexDecoderJitCache::Jit_TcFloatPrescale},
+
+	{&VertexDecoder::Step_TcU16Through, &VertexDecoderJitCache::Jit_TcU16Through},
+	{&VertexDecoder::Step_TcU16ThroughToFloat, &VertexDecoderJitCache::Jit_TcU16ThroughToFloat},
+	{&VertexDecoder::Step_TcFloatThrough, &VertexDecoderJitCache::Jit_TcFloatThrough},
+	{&VertexDecoder::Step_TcU16ThroughDouble, &VertexDecoderJitCache::Jit_TcU16ThroughDouble},
 
 	{&VertexDecoder::Step_TcU8MorphToFloat, &VertexDecoderJitCache::Jit_TcU8MorphToFloat},
 	{&VertexDecoder::Step_TcU16MorphToFloat, &VertexDecoderJitCache::Jit_TcU16MorphToFloat},
@@ -111,11 +117,6 @@ static const JitLookup jitLookup[] = {
 	{&VertexDecoder::Step_TcU8PrescaleMorph, &VertexDecoderJitCache::Jit_TcU8PrescaleMorph},
 	{&VertexDecoder::Step_TcU16PrescaleMorph, &VertexDecoderJitCache::Jit_TcU16PrescaleMorph},
 	{&VertexDecoder::Step_TcFloatPrescaleMorph, &VertexDecoderJitCache::Jit_TcFloatPrescaleMorph},
-
-	{&VertexDecoder::Step_TcU16Through, &VertexDecoderJitCache::Jit_TcU16Through},
-	{&VertexDecoder::Step_TcU16ThroughToFloat, &VertexDecoderJitCache::Jit_TcU16ThroughToFloat},
-	{&VertexDecoder::Step_TcFloatThrough, &VertexDecoderJitCache::Jit_TcFloatThrough},
-	{&VertexDecoder::Step_TcU16ThroughDouble, &VertexDecoderJitCache::Jit_TcU16ThroughDouble},
 
 	{&VertexDecoder::Step_NormalS8, &VertexDecoderJitCache::Jit_NormalS8},
 	{&VertexDecoder::Step_NormalS8ToFloat, &VertexDecoderJitCache::Jit_NormalS8ToFloat},
@@ -243,6 +244,7 @@ JittedVertexDecoder VertexDecoderJitCache::Compile(const VertexDecoder &dec, int
 	JumpTarget loopStart = GetCodePtr();
 	for (int i = 0; i < dec.numSteps_; i++) {
 		if (!CompileStep(dec, i)) {
+			EndWrite();
 			// Reset the code ptr and return zero to indicate that we failed.
 			SetCodePtr(const_cast<u8 *>(start));
 			return 0;
@@ -684,17 +686,6 @@ void VertexDecoderJitCache::Jit_WeightsFloatSkin() {
 	}
 }
 
-// Fill last two bytes with zeroes to align to 4 bytes. MOVZX does it for us, handy.
-void VertexDecoderJitCache::Jit_TcU8() {
-	MOVZX(32, 16, tempReg1, MDisp(srcReg, dec_->tcoff));
-	MOV(32, MDisp(dstReg, dec_->decFmt.uvoff), R(tempReg1));
-}
-
-void VertexDecoderJitCache::Jit_TcU16() {
-	MOV(32, R(tempReg1), MDisp(srcReg, dec_->tcoff));
-	MOV(32, MDisp(dstReg, dec_->decFmt.uvoff), R(tempReg1));
-}
-
 void VertexDecoderJitCache::Jit_TcU8ToFloat() {
 	Jit_AnyU8ToFloat(dec_->tcoff, 16);
 	MOVQ_xmm(MDisp(dstReg, dec_->decFmt.uvoff), XMM3);
@@ -883,10 +874,27 @@ void VertexDecoderJitCache::Jit_TcU16Through() {
 
 void VertexDecoderJitCache::Jit_TcU16ThroughToFloat() {
 	PXOR(fpScratchReg2, R(fpScratchReg2));
-	MOVD_xmm(fpScratchReg, MDisp(srcReg, dec_->tcoff));
+	MOV(32, R(tempReg1), MDisp(srcReg, dec_->tcoff));
+	MOVD_xmm(fpScratchReg, R(tempReg1));
 	PUNPCKLWD(fpScratchReg, R(fpScratchReg2));
 	CVTDQ2PS(fpScratchReg, R(fpScratchReg));
 	MOVQ_xmm(MDisp(dstReg, dec_->decFmt.uvoff), fpScratchReg);
+
+	MOV(32, R(tempReg2), R(tempReg1));
+	SHR(32, R(tempReg2), Imm8(16));
+
+	auto updateSide = [&](X64Reg r, CCFlags skipCC, u16 *value) {
+		CMP(16, R(r), M(value));
+		FixupBranch skip = J_CC(skipCC);
+		MOV(16, M(value), R(r));
+		SetJumpTarget(skip);
+	};
+
+	// TODO: Can this actually be fast?  Hmm, floats aren't better.
+	updateSide(tempReg1, CC_GE, &gstate_c.vertBounds.minU);
+	updateSide(tempReg1, CC_LE, &gstate_c.vertBounds.maxU);
+	updateSide(tempReg2, CC_GE, &gstate_c.vertBounds.minV);
+	updateSide(tempReg2, CC_LE, &gstate_c.vertBounds.maxV);
 }
 
 void VertexDecoderJitCache::Jit_TcU16ThroughDouble() {
@@ -1626,3 +1634,5 @@ bool VertexDecoderJitCache::CompileStep(const VertexDecoder &dec, int step) {
 	}
 	return false;
 }
+
+#endif // PPSSPP_ARCH(X86) || PPSSPP_ARCH(AMD64)

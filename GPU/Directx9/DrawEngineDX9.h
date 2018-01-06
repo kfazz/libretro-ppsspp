@@ -109,7 +109,7 @@ public:
 // Handles transform, lighting and drawing.
 class DrawEngineDX9 : public DrawEngineCommon {
 public:
-	DrawEngineDX9();
+	DrawEngineDX9(Draw::DrawContext *draw);
 	virtual ~DrawEngineDX9();
 
 	void SubmitPrim(void *verts, void *inds, GEPrimitiveType prim, int vertexCount, u32 vertType, int *bytesRead);
@@ -127,43 +127,11 @@ public:
 	void DestroyDeviceObjects();
 	void GLLost() {};
 
-	void Resized();  // TODO: Call
-
+	void ClearTrackedVertexArrays() override;
 	void DecimateTrackedVertexArrays();
-	void ClearTrackedVertexArrays();
 
 	void SetupVertexDecoder(u32 vertType);
 	void SetupVertexDecoderInternal(u32 vertType);
-
-	// This requires a SetupVertexDecoder call first.
-	int EstimatePerVertexCost() {
-		// TODO: This is transform cost, also account for rasterization cost somehow... although it probably
-		// runs in parallel with transform.
-
-		// Also, this is all pure guesswork. If we can find a way to do measurements, that would be great.
-
-		// GTA wants a low value to run smooth, GoW wants a high value (otherwise it thinks things
-		// went too fast and starts doing all the work over again).
-
-		int cost = 20;
-		if (gstate.isLightingEnabled()) {
-			cost += 10;
-
-			for (int i = 0; i < 4; i++) {
-				if (gstate.isLightChanEnabled(i))
-					cost += 10;
-			}
-		}
-
-		if (gstate.getUVGenMode() != GE_TEXMAP_TEXTURE_COORDS) {
-			cost += 20;
-		}
-		if (dec_ && dec_->morphcount > 1) {
-			cost += 5 * dec_->morphcount;
-		}
-
-		return cost;
-	}
 
 	// So that this can be inlined
 	void Flush() {
@@ -192,7 +160,6 @@ private:
 
 	void ApplyDrawState(int prim);
 	void ApplyDrawStateLate();
-	bool ApplyShaderBlending();
 	void ResetShaderBlending();
 
 	IDirect3DVertexDeclaration9 *SetupDecFmtForDraw(VSShader *vshader, const DecVtxFormat &decFmt, u32 pspFmt);
@@ -200,6 +167,8 @@ private:
 	u32 ComputeMiniHash();
 	ReliableHashType ComputeHash();  // Reads deferred vertex data.
 	void MarkUnreliable(VertexArrayInfoDX9 *vai);
+
+	LPDIRECT3DDEVICE9 device_;
 
 	// Defer all vertex decoding to a Flush, so that we can hash and cache the
 	// generated buffers without having to redecode them every time.
@@ -218,15 +187,16 @@ private:
 	IndexGenerator indexGen;
 	int decodedVerts_;
 	GEPrimitiveType prevPrim_;
-
-	u32 lastVType_;
 	
 	TransformedVertex *transformed;
 	TransformedVertex *transformedExpanded;
 
 	std::unordered_map<u32, VertexArrayInfoDX9 *> vai_;
 	std::unordered_map<u32, IDirect3DVertexDeclaration9 *> vertexDeclMap_;
-	
+
+	// SimpleVertex
+	IDirect3DVertexDeclaration9* transformedVertexDecl_;
+
 	// Other
 	ShaderManagerDX9 *shaderManager_;
 	TextureCacheDX9 *textureCache_;
@@ -242,10 +212,19 @@ private:
 	int decodeCounter_;
 	u32 dcid_;
 
-	UVScale *uvScale;
+	UVScale uvScale[MAX_DEFERRED_DRAW_CALLS];
 
-	bool fboTexNeedBind_;
-	bool fboTexBound_;
+	// Hardware tessellation
+	class TessellationDataTransferDX9 : public TessellationDataTransfer {
+	private:
+		int data_tex[3];
+	public:
+		TessellationDataTransferDX9() : TessellationDataTransfer(), data_tex() {
+		}
+		~TessellationDataTransferDX9() {
+		}
+		void SendDataToShader(const float *pos, const float *tex, const float *col, int size, bool hasColor, bool hasTexCoords) override;
+	};
 };
 
 }  // namespace

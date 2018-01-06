@@ -18,14 +18,12 @@
 #pragma once
 
 #include <vector>
-#include <stdint.h>
+#include <cstdint>
 
 #include "Common.h"
 #include "ArmCommon.h"
 #include "CodeBlock.h"
 #include "MsgHandler.h"
-
-// TODO: Check if Pandora still needs signal.h/kill here. Symbian doesn't.
 
 // VCVT flags
 #define TO_FLOAT      0

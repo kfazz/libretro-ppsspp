@@ -3,7 +3,7 @@
  *
  */
 // Qt 4.7+ / 5.0+ implementation of the framework.
-// Currently supports: Android, Symbian, Blackberry, Maemo/Meego, Linux, Windows, Mac OSX
+// Currently supports: Android, Linux, Windows, Mac OSX
 
 #include <QApplication>
 #include <QUrl>
@@ -20,11 +20,6 @@
 #endif
 #endif
 
-#ifdef __SYMBIAN32__
-#include <QSystemScreenSaver>
-#include <QFeedbackHapticsEffect>
-#include "SymbianMediaKeys.h"
-#endif
 #ifdef SDL
 #include "SDL/SDLJoystick.h"
 #include "SDL_audio.h"
@@ -35,7 +30,6 @@
 
 #include <string.h>
 
-InputState input_state;
 MainUI *emugl = NULL;
 
 #ifdef SDL
@@ -47,13 +41,7 @@ extern void mixaudio(void *userdata, Uint8 *stream, int len) {
 std::string System_GetProperty(SystemProperty prop) {
 	switch (prop) {
 	case SYSPROP_NAME:
-#ifdef __SYMBIAN32__
-		return "Qt:Symbian";
-#elif defined(BLACKBERRY)
-		return "Qt:Blackberry";
-#elif defined(MAEMO)
-		return "Qt:Maemo";
-#elif defined(ANDROID)
+#if defined(__ANDROID__)
 		return "Qt:Android";
 #elif defined(Q_OS_LINUX)
 		return "Qt:Linux";
@@ -78,13 +66,7 @@ int System_GetPropertyInt(SystemProperty prop) {
 	case SYSPROP_DISPLAY_REFRESH_RATE:
 		return 60000;
 	case SYSPROP_DEVICE_TYPE:
-#ifdef __SYMBIAN32__
-		return DEVICE_TYPE_MOBILE;
-#elif defined(BLACKBERRY)
-		return DEVICE_TYPE_MOBILE;
-#elif defined(MAEMO)
-		return DEVICE_TYPE_MOBILE;
-#elif defined(ANDROID)
+#if defined(__ANDROID__)
 		return DEVICE_TYPE_MOBILE;
 #elif defined(Q_OS_LINUX)
 		return DEVICE_TYPE_DESKTOP;
@@ -95,6 +77,8 @@ int System_GetPropertyInt(SystemProperty prop) {
 #else
 		return DEVICE_TYPE_DESKTOP;
 #endif
+	case SYSPROP_HAS_BACK_BUTTON:
+		return 1;
   default:
     return -1;
   }
@@ -123,13 +107,6 @@ void Vibrate(int length_ms) {
 		length_ms = 50;
 	else if (length_ms == -2)
 		length_ms = 25;
-	// Symbian only for now
-#if defined(__SYMBIAN32__)
-	QFeedbackHapticsEffect effect;
-	effect.setIntensity(0.8);
-	effect.setDuration(length_ms);
-	effect.start();
-#endif
 }
 
 void LaunchBrowser(const char *url)
@@ -140,9 +117,7 @@ void LaunchBrowser(const char *url)
 float CalculateDPIScale()
 {
 	// Sane default rather than check DPI
-#ifdef __SYMBIAN32__
-	return 1.4f;
-#elif defined(USING_GLES2)
+#if defined(USING_GLES2)
 	return 1.2f;
 #else
 	return 1.0f;
@@ -158,18 +133,14 @@ static int mainInternal(QApplication &a)
 #endif
 	EnableFZ();
 	// Disable screensaver
-#ifdef __SYMBIAN32__
-	QSystemScreenSaver ssObject(emugl);
-	ssObject.setScreenSaverInhibit();
-	QScopedPointer<SymbianMediaKeys> mediakeys(new SymbianMediaKeys());
-#elif defined(QT_HAS_SYSTEMINFO)
+#if defined(QT_HAS_SYSTEMINFO)
 	QScreenSaver ssObject(emugl);
 	ssObject.setScreenSaverEnabled(false);
 #endif
 
 #ifdef SDL
 	SDLJoystick joy(true);
-	joy.startEventLoop();
+	joy.registerEventHandler();
 	SDL_Init(SDL_INIT_AUDIO);
 	SDL_AudioSpec fmt, ret_fmt;
 	memset(&fmt, 0, sizeof(fmt));
@@ -209,7 +180,7 @@ MainUI::MainUI(QWidget *parent):
 #if QT_VERSION < QT_VERSION_CHECK(5, 0, 0)
     setAttribute(Qt::WA_LockLandscapeOrientation);
 #endif
-#if defined(MOBILE_DEVICE) && !defined(MAEMO)
+#if defined(MOBILE_DEVICE)
     acc = new QAccelerometer(this);
     acc->start();
 #endif
@@ -220,7 +191,7 @@ MainUI::MainUI(QWidget *parent):
 
 MainUI::~MainUI()
 {
-#if defined(MOBILE_DEVICE) && !defined(MAEMO)
+#if defined(MOBILE_DEVICE)
         delete acc;
 #endif
         NativeShutdownGraphics();
@@ -240,8 +211,7 @@ QString MainUI::InputBoxGetQString(QString title, QString defaultValue)
 
 void MainUI::resizeGL(int w, int h)
 {
-    bool smallWindow = g_Config.IsPortrait() ? (h < 480 + 80) : (w < 480 + 80);
-    if (UpdateScreenScale(w, h, smallWindow)) {
+    if (UpdateScreenScale(w, h)) {
         NativeMessageReceived("gpu resized", "");
     }
     xscale = w / this->width();
@@ -280,10 +250,6 @@ bool MainUI::event(QEvent *e)
                 break;
             case Qt::TouchPointPressed:
             case Qt::TouchPointReleased:
-                input_state.pointer_down[touchPoint.id()] = (touchPoint.state() == Qt::TouchPointPressed);
-                input_state.pointer_x[touchPoint.id()] = touchPoint.pos().x() * g_dpi_scale * xscale;
-                input_state.pointer_y[touchPoint.id()] = touchPoint.pos().y() * g_dpi_scale * yscale;
-
                 input.x = touchPoint.pos().x() * g_dpi_scale * xscale;
                 input.y = touchPoint.pos().y() * g_dpi_scale * yscale;
                 input.flags = (touchPoint.state() == Qt::TouchPointPressed) ? TOUCH_DOWN : TOUCH_UP;
@@ -291,9 +257,6 @@ bool MainUI::event(QEvent *e)
                 NativeTouch(input);
                 break;
             case Qt::TouchPointMoved:
-                input_state.pointer_x[touchPoint.id()] = touchPoint.pos().x() * g_dpi_scale * xscale;
-                input_state.pointer_y[touchPoint.id()] = touchPoint.pos().y() * g_dpi_scale * yscale;
-
                 input.x = touchPoint.pos().x() * g_dpi_scale * xscale;
                 input.y = touchPoint.pos().y() * g_dpi_scale * yscale;
                 input.flags = TOUCH_MOVE;
@@ -311,10 +274,6 @@ bool MainUI::event(QEvent *e)
         break;
     case QEvent::MouseButtonPress:
     case QEvent::MouseButtonRelease:
-        input_state.pointer_down[0] = (e->type() == QEvent::MouseButtonPress);
-        input_state.pointer_x[0] = ((QMouseEvent*)e)->pos().x() * g_dpi_scale * xscale;
-        input_state.pointer_y[0] = ((QMouseEvent*)e)->pos().y() * g_dpi_scale * yscale;
-
         input.x = ((QMouseEvent*)e)->pos().x() * g_dpi_scale * xscale;
         input.y = ((QMouseEvent*)e)->pos().y() * g_dpi_scale * yscale;
         input.flags = (e->type() == QEvent::MouseButtonPress) ? TOUCH_DOWN : TOUCH_UP;
@@ -322,9 +281,6 @@ bool MainUI::event(QEvent *e)
         NativeTouch(input);
         break;
     case QEvent::MouseMove:
-        input_state.pointer_x[0] = ((QMouseEvent*)e)->pos().x() * g_dpi_scale * xscale;
-        input_state.pointer_y[0] = ((QMouseEvent*)e)->pos().y() * g_dpi_scale * yscale;
-
         input.x = ((QMouseEvent*)e)->pos().x() * g_dpi_scale * xscale;
         input.y = ((QMouseEvent*)e)->pos().y() * g_dpi_scale * yscale;
         input.flags = TOUCH_MOVE;
@@ -365,35 +321,34 @@ void MainUI::initializeGL()
 
 void MainUI::paintGL()
 {
+#ifdef SDL
+    SDL_PumpEvents();
+#endif
     updateAccelerometer();
-    UpdateInputState(&input_state);
     time_update();
-    UpdateRunLoop(&input_state);
+    UpdateRunLoop();
 }
 
 void MainUI::updateAccelerometer()
 {
-#if defined(MOBILE_DEVICE) && !defined(MAEMO)
+#if defined(MOBILE_DEVICE)
         // TODO: Toggle it depending on whether it is enabled
         QAccelerometerReading *reading = acc->reading();
         if (reading) {
-            input_state.acc.x = reading->x();
-            input_state.acc.y = reading->y();
-            input_state.acc.z = reading->z();
             AxisInput axis;
             axis.deviceId = DEVICE_ID_ACCELEROMETER;
             axis.flags = 0;
 
             axis.axisId = JOYSTICK_AXIS_ACCELEROMETER_X;
-            axis.value = input_state.acc.x;
+            axis.value = reading->x();
             NativeAxis(axis);
 
             axis.axisId = JOYSTICK_AXIS_ACCELEROMETER_Y;
-            axis.value = input_state.acc.y;
+            axis.value = reading->y();
             NativeAxis(axis);
 
             axis.axisId = JOYSTICK_AXIS_ACCELEROMETER_Z;
-            axis.value = input_state.acc.z;
+            axis.value = reading->z();
             NativeAxis(axis);
         }
 #endif
@@ -460,7 +415,7 @@ Q_DECL_EXPORT
 #endif
 int main(int argc, char *argv[])
 {
-#if defined(Q_OS_LINUX) && !defined(MAEMO)
+#if defined(Q_OS_LINUX)
 	QApplication::setAttribute(Qt::AA_X11InitThreads, true);
 #endif
 	QApplication a(argc, argv);
@@ -470,22 +425,13 @@ int main(int argc, char *argv[])
 	pixel_xres = res.width();
 	pixel_yres = res.height();
 	g_dpi_scale = CalculateDPIScale();
+	g_dpi_scale_real = g_dpi_scale;
 	dp_xres = (int)(pixel_xres * g_dpi_scale); dp_yres = (int)(pixel_yres * g_dpi_scale);
-	net::Init();
 	std::string savegame_dir = ".";
 	std::string assets_dir = ".";
 #if QT_VERSION > QT_VERSION_CHECK(5, 0, 0)
 	savegame_dir = QStandardPaths::writableLocation(QStandardPaths::HomeLocation).toStdString();
 	assets_dir = QStandardPaths::writableLocation(QStandardPaths::DataLocation).toStdString();
-#elif defined(__SYMBIAN32__)
-	savegame_dir = "E:/PPSSPP";
-	assets_dir = "E:/PPSSPP";
-#elif defined(BLACKBERRY)
-	savegame_dir = "/accounts/1000/shared/misc";
-	assets_dir = "app/native/assets";
-#elif defined(MAEMO)
-	savegame_dir = "/home/user/MyDocs/PPSSPP";
-	assets_dir = "/opt/PPSSPP";
 #endif
 	savegame_dir += "/";
 	assets_dir += "/";
@@ -506,7 +452,6 @@ int main(int argc, char *argv[])
 	SDL_CloseAudio();
 #endif
 	NativeShutdown();
-	net::Shutdown();
 	return ret;
 }
 

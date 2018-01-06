@@ -194,6 +194,7 @@ void __KernelShutdown()
 	CoreTiming::ClearPendingEvents();
 	CoreTiming::UnregisterAllEvents();
 	Reporting::Shutdown();
+	SaveState::Shutdown();
 
 	kernelRunning = false;
 }
@@ -601,7 +602,7 @@ KernelObject *KernelObjectPool::CreateByIDType(int type) {
 		return __KernelThreadEventHandlerObject();
 
 	default:
-		ERROR_LOG(COMMON, "Unable to load state: could not find object type %d.", type);
+		ERROR_LOG(SAVESTATE, "Unable to load state: could not find object type %d.", type);
 		return NULL;
 	}
 }

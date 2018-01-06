@@ -16,6 +16,7 @@
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
 #include <algorithm>
+
 #include "base/stringutil.h"
 #include "Common/Common.h"
 #include "Core/FileLoaders/HTTPFileLoader.h"
@@ -61,12 +62,7 @@ void HTTPFileLoader::Prepare() {
 				size_pos = header.find_first_not_of(' ', size_pos);
 			}
 			if (size_pos != header.npos) {
-				// TODO: Find a way to get this to work right on Symbian?
-#ifndef __SYMBIAN32__
 				filesize_ = atoll(&header[size_pos]);
-#else
-				filesize_ = atoi(&header[size_pos]);
-#endif
 			}
 		}
 		if (startsWithNoCase(header, "Accept-Ranges:")) {

@@ -17,9 +17,10 @@
 
 #pragma once
 
+#include <functional>
 #include <vector>
-#include "base/functional.h"
-#include "base/mutex.h"
+#include <mutex>
+
 #include "ui/view.h"
 #include "ui/ui_screen.h"
 
@@ -81,6 +82,4 @@ protected:
 
 	UI::TextView *lastKeyEvent_;
 	UI::TextView *lastLastKeyEvent_;
-
-	recursive_mutex eventLock_;
 };

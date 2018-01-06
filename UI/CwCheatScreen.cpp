@@ -166,7 +166,7 @@ UI::EventReturn CwCheatScreen::OnEnableAll(UI::EventParams &params) {
 }
 
 UI::EventReturn CwCheatScreen::OnAddCheat(UI::EventParams &params) {
-	screenManager()->finishDialog(this, DR_OK);
+	TriggerFinish(DR_OK);
 	g_Config.bReloadCheats = true;
 	return UI::EVENT_DONE;
 }
@@ -176,8 +176,12 @@ UI::EventReturn CwCheatScreen::OnEditCheatFile(UI::EventParams &params) {
 	if (MIPSComp::jit) {
 		MIPSComp::jit->ClearCache();
 	}
-	screenManager()->finishDialog(this, DR_OK);
+	TriggerFinish(DR_OK);
+#if PPSSPP_PLATFORM(UWP)
+	LaunchBrowser(activeCheatFile.c_str());
+#else
 	File::openIniFile(activeCheatFile);
+#endif
 	return UI::EVENT_DONE;
 }
 
@@ -206,7 +210,6 @@ UI::EventReturn CwCheatScreen::OnImportCheat(UI::EventParams &params) {
 			title.push_back(line);
 			getline(fs, line);
 			title.push_back(line);
-			getline(fs, line);
 			do {
 				if (finished == false){
 					getline(fs, line);
@@ -263,7 +266,7 @@ UI::EventReturn CwCheatScreen::OnImportCheat(UI::EventParams &params) {
 	fs.close();
 	g_Config.bReloadCheats = true;
 	//Need a better way to refresh the screen, rather than exiting and having to re-enter.
-	screenManager()->finishDialog(this, DR_OK);
+	TriggerFinish(DR_OK);
 	return UI::EVENT_DONE;
 }
 
@@ -274,8 +277,10 @@ UI::EventReturn CwCheatScreen::OnCheckBox(UI::EventParams &params) {
 void CwCheatScreen::processFileOn(std::string activatedCheat) {
 	std::fstream fs;
 	for (size_t i = 0; i < cheatList.size(); i++) {
-		if (cheatList[i].substr(4) == activatedCheat) {
-			cheatList[i] = "_C1 " + activatedCheat;
+		if (cheatList[i].length() >= 4) {
+			if (cheatList[i].substr(4) == activatedCheat) {
+				cheatList[i] = "_C1 " + activatedCheat;
+			}
 		}
 	}
 
@@ -293,8 +298,10 @@ void CwCheatScreen::processFileOn(std::string activatedCheat) {
 void CwCheatScreen::processFileOff(std::string deactivatedCheat) {
 	std::fstream fs;
 	for (size_t i = 0; i < cheatList.size(); i++) {
-		if (cheatList[i].substr(4) == deactivatedCheat) {
-			cheatList[i] = "_C0 " + deactivatedCheat;
+		if (cheatList[i].length() >= 4) {
+			if (cheatList[i].substr(4) == deactivatedCheat) {
+				cheatList[i] = "_C0 " + deactivatedCheat;
+			}
 		}
 	}
 

@@ -17,10 +17,8 @@
 
 #ifdef _WIN32
 #include "Common/CommonWindows.h"
-#ifndef _XBOX
  // timeval already defined in xtl.h
 #include <Winsock2.h>
-#endif
 #else
 #include <sys/time.h>
 #endif
@@ -113,7 +111,7 @@ time_t rtc_timegm(struct tm *tm)
 	return _mkgmtime(tm);
 }
 
-#elif (defined(__GLIBC__) && !defined(ANDROID)) || defined(BLACKBERRY) || defined(__SYMBIAN32__)
+#elif (defined(__GLIBC__) && !defined(__ANDROID__))
 #define rtc_timegm timegm
 #else
 

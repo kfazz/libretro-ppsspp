@@ -16,6 +16,8 @@
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
 #include <algorithm>
+
+#include "ppsspp_config.h"
 #include "base/colorutil.h"
 #include "base/timeutil.h"
 #include "gfx_es2/draw_buffer.h"
@@ -47,6 +49,9 @@ GameScreen::~GameScreen() {
 void GameScreen::CreateViews() {
 	GameInfo *info = g_gameInfoCache->GetInfo(NULL, gamePath_, GAMEINFO_WANTBG | GAMEINFO_WANTSIZE);
 
+	if (info && !info->id.empty())
+		saveDirs = info->GetSaveDataDirectories(); // Get's very heavy, let's not do it in update()
+
 	I18NCategory *di = GetI18NCategory("Dialog");
 	I18NCategory *ga = GetI18NCategory("Game");
 	I18NCategory *pa = GetI18NCategory("Pause");
@@ -65,7 +70,7 @@ void GameScreen::CreateViews() {
 
 	leftColumn->Add(new Choice(di->T("Back"), "", false, new AnchorLayoutParams(150, WRAP_CONTENT, 10, NONE, NONE, 10)))->OnClick.Handle(this, &GameScreen::OnSwitchBack);
 	if (info) {
-		texvGameIcon_ = leftColumn->Add(new Thin3DTextureView(0, IS_DEFAULT, new AnchorLayoutParams(144 * 2, 80 * 2, 10, 10, NONE, NONE)));
+		texvGameIcon_ = leftColumn->Add(new TextureView(0, IS_DEFAULT, new AnchorLayoutParams(144 * 2, 80 * 2, 10, 10, NONE, NONE)));
 
 		LinearLayout *infoLayout = new LinearLayout(ORIENT_VERTICAL, new AnchorLayoutParams(10, 200, NONE, NONE));
 		leftColumn->Add(infoLayout);
@@ -124,6 +129,9 @@ void GameScreen::CreateViews() {
 		btnDeleteSaveData_ = nullptr;
 	}
 
+	if (info && !info->IsPending()) {
+		otherChoices_.clear();
+	}
 
 	rightColumnItems->Add(AddOtherChoice(new Choice(ga->T("Delete Game"))))->OnClick.Handle(this, &GameScreen::OnDeleteGame);
 	if (host->CanCreateShortcut()) {
@@ -147,9 +155,11 @@ UI::Choice *GameScreen::AddOtherChoice(UI::Choice *choice) {
 	return choice;
 }
 
-UI::EventReturn GameScreen::OnCreateConfig(UI::EventParams &e)
-{
-	GameInfo *info = g_gameInfoCache->GetInfo(NULL, gamePath_,0);
+UI::EventReturn GameScreen::OnCreateConfig(UI::EventParams &e) {
+	GameInfo *info = g_gameInfoCache->GetInfo(nullptr, gamePath_, 0);
+	if (!info) {
+		return UI::EVENT_SKIPPED;
+	}
 	g_Config.createGameConfig(info->id);
 	g_Config.saveGameConfig(info->id);
 	info->hasConfig = true;
@@ -158,11 +168,12 @@ UI::EventReturn GameScreen::OnCreateConfig(UI::EventParams &e)
 	return UI::EVENT_DONE;
 }
 
-void GameScreen::CallbackDeleteConfig(bool yes)
-{
-	if (yes)
-	{
-		GameInfo *info = g_gameInfoCache->GetInfo(NULL, gamePath_, 0);
+void GameScreen::CallbackDeleteConfig(bool yes) {
+	if (yes) {
+		GameInfo *info = g_gameInfoCache->GetInfo(nullptr, gamePath_, 0);
+		if (!info) {
+			return;
+		}
 		g_Config.deleteGameConfig(info->id);
 		info->hasConfig = false;
 		screenManager()->RecreateAllViews();
@@ -175,31 +186,31 @@ UI::EventReturn GameScreen::OnDeleteConfig(UI::EventParams &e)
 	I18NCategory *ga = GetI18NCategory("Game");
 	screenManager()->push(
 		new PromptScreen(di->T("DeleteConfirmGameConfig", "Do you really want to delete the settings for this game?"), ga->T("ConfirmDelete"), di->T("Cancel"),
-		std::bind(&GameScreen::CallbackDeleteConfig, this, placeholder::_1)));
+		std::bind(&GameScreen::CallbackDeleteConfig, this, std::placeholders::_1)));
 
 	return UI::EVENT_DONE;
 }
 
-void GameScreen::update(InputState &input) {
-	UIScreen::update(input);
+void GameScreen::update() {
+	UIScreen::update();
 
 	I18NCategory *ga = GetI18NCategory("Game");
 
-	Thin3DContext *thin3d = screenManager()->getThin3DContext();
+	Draw::DrawContext *thin3d = screenManager()->getDrawContext();
 
 	GameInfo *info = g_gameInfoCache->GetInfo(thin3d, gamePath_, GAMEINFO_WANTBG | GAMEINFO_WANTSIZE);
 
 	if (tvTitle_)
 		tvTitle_->SetText(info->GetTitle() + " (" + info->id + ")");
-	if (info->iconTexture && texvGameIcon_)	{
-		texvGameIcon_->SetTexture(info->iconTexture);
+	if (info->icon.texture && texvGameIcon_) {
+		texvGameIcon_->SetTexture(info->icon.texture->GetTexture());
 		// Fade the icon with the background.
-		double loadTime = info->timeIconWasLoaded;
-		if (info->pic1Texture) {
-			loadTime = std::max(loadTime, info->timePic1WasLoaded);
+		double loadTime = info->icon.timeLoaded;
+		if (info->pic1.texture) {
+			loadTime = std::max(loadTime, info->pic1.timeLoaded);
 		}
-		if (info->pic0Texture) {
-			loadTime = std::max(loadTime, info->timePic0WasLoaded);
+		if (info->pic0.texture) {
+			loadTime = std::max(loadTime, info->pic0.timeLoaded);
 		}
 		uint32_t color = whiteAlpha(ease((time_now_d() - loadTime) * 3));
 		texvGameIcon_->SetColor(color);
@@ -234,7 +245,6 @@ void GameScreen::update(InputState &input) {
 		btnDeleteGameConfig_->SetVisibility(info->hasConfig ? UI::V_VISIBLE : UI::V_GONE);
 		btnCreateGameConfig_->SetVisibility(info->hasConfig ? UI::V_GONE : UI::V_VISIBLE);
 
-		std::vector<std::string> saveDirs = info->GetSaveDataDirectories();
 		if (saveDirs.size()) {
 			btnDeleteSaveData_->SetVisibility(UI::V_VISIBLE);
 		}
@@ -248,7 +258,7 @@ void GameScreen::update(InputState &input) {
 }
 
 UI::EventReturn GameScreen::OnShowInFolder(UI::EventParams &e) {
-#ifdef _WIN32
+#if defined(_WIN32) && !PPSSPP_PLATFORM(UWP)
 	std::string str = std::string("explorer.exe /select,\"") + ReplaceAll(gamePath_, "/", "\\") + "\"";
 	_wsystem(ConvertUTF8ToWString(str).c_str());
 #endif
@@ -261,7 +271,7 @@ UI::EventReturn GameScreen::OnCwCheat(UI::EventParams &e) {
 }
 
 UI::EventReturn GameScreen::OnSwitchBack(UI::EventParams &e) {
-	screenManager()->finishDialog(this, DR_OK);
+	TriggerFinish(DR_OK);
 	return UI::EVENT_DONE;
 }
 
@@ -285,11 +295,10 @@ UI::EventReturn GameScreen::OnDeleteSaveData(UI::EventParams &e) {
 	GameInfo *info = g_gameInfoCache->GetInfo(NULL, gamePath_, GAMEINFO_WANTBG | GAMEINFO_WANTSIZE);
 	if (info) {
 		// Check that there's any savedata to delete
-		std::vector<std::string> saveDirs = info->GetSaveDataDirectories();
 		if (saveDirs.size()) {
 			screenManager()->push(
 				new PromptScreen(di->T("DeleteConfirmAll", "Do you really want to delete all\nyour save data for this game?"), ga->T("ConfirmDelete"), di->T("Cancel"),
-				std::bind(&GameScreen::CallbackDeleteSaveData, this, placeholder::_1)));
+				std::bind(&GameScreen::CallbackDeleteSaveData, this, std::placeholders::_1)));
 		}
 	}
 
@@ -313,7 +322,7 @@ UI::EventReturn GameScreen::OnDeleteGame(UI::EventParams &e) {
 	if (info) {
 		screenManager()->push(
 			new PromptScreen(di->T("DeleteConfirmGame", "Do you really want to delete this game\nfrom your device? You can't undo this."), ga->T("ConfirmDelete"), di->T("Cancel"),
-			std::bind(&GameScreen::CallbackDeleteGame, this, placeholder::_1)));
+			std::bind(&GameScreen::CallbackDeleteGame, this, std::placeholders::_1)));
 	}
 
 	return UI::EVENT_DONE;

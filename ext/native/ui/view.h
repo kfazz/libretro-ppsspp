@@ -7,16 +7,15 @@
 // Works very similarly to Android, there's a Measure pass and a Layout pass which you don't
 // really need to care about if you just use the standard containers and widgets.
 
-#include <string>
-#include <vector>
-#include <map>
 #include <cmath>
 #include <cstdio>
+#include <functional>
+#include <map>
 #include <memory>
+#include <string>
+#include <vector>
 
 #include "base/logging.h"
-#include "base/functional.h"
-#include "base/mutex.h"
 #include "base/basictypes.h"
 #include "gfx/texture_atlas.h"
 #include "math/lin/matrix4x4.h"
@@ -25,20 +24,17 @@
 
 #undef small
 
-#ifdef __SYMBIAN32__
-#define unique_ptr auto_ptr
-#endif
-
 struct KeyInput;
 struct TouchInput;
 struct AxisInput;
-struct InputState;
 
 class DrawBuffer;
 class Texture;
 class UIContext;
 
-class Thin3DTexture;
+namespace Draw {
+	class Texture;
+}
 
 
 // I don't generally like namespaces but I think we do need one for UI, so many potentially-clashing names.
@@ -121,8 +117,10 @@ struct Theme {
 	Style itemHighlightedStyle;
 
 	Style headerStyle;
+	Style infoStyle;
 
 	Style popupTitle;
+	Style popupStyle;
 };
 
 // The four cardinal directions should be enough, plus Prev/Next in "element order".
@@ -255,7 +253,7 @@ public:
 	// This is suggested for use in most cases. Autobinds, allowing for neat syntax.
 	template<class T>
 	T *Handle(T *thiz, EventReturn (T::* theCallback)(EventParams &e)) {
-		Add(std::bind(theCallback, thiz, placeholder::_1));
+		Add(std::bind(theCallback, thiz, std::placeholders::_1));
 		return thiz;
 	}
 
@@ -365,7 +363,7 @@ public:
 	virtual bool Key(const KeyInput &input) { return false; }
 	virtual void Touch(const TouchInput &input) {}
 	virtual void Axis(const AxisInput &input) {}
-	virtual void Update(const InputState &input_state) {}
+	virtual void Update() {}
 
 	// If this view covers these coordinates, it should add itself and its children to the list.
 	virtual void Query(float x, float y, std::vector<View *> &list);
@@ -459,7 +457,7 @@ public:
 	bool Key(const KeyInput &input) override { return false; }
 	void Touch(const TouchInput &input) override {}
 	bool CanBeFocused() const override { return false; }
-	void Update(const InputState &input_state) override {}
+	void Update() override {}
 };
 
 
@@ -518,7 +516,7 @@ public:
 	void Draw(UIContext &dc) override;
 	bool Key(const KeyInput &input) override;
 	void Touch(const TouchInput &input) override;
-	void Update(const InputState &input_state) override;
+	void Update() override;
 	void GetContentDimensions(const UIContext &dc, float &w, float &h) const override;
 	void SetShowPercent(bool s) { showPercent_ = s; }
 
@@ -548,7 +546,7 @@ public:
 	void Draw(UIContext &dc) override;
 	bool Key(const KeyInput &input) override;
 	void Touch(const TouchInput &input) override;
-	void Update(const InputState &input_state) override;
+	void Update() override;
 	void GetContentDimensions(const UIContext &dc, float &w, float &h) const override;
 
 	// OK to call this from the outside after having modified *value_
@@ -763,7 +761,7 @@ public:
 	void SetText(const std::string &text) { text_ = text; }
 	const std::string &GetText() const { return text_; }
 	void SetSmall(bool small) { small_ = small; }
-	void SetTextColor(uint32_t color) { textColor_ = color; }
+	void SetTextColor(uint32_t color) { textColor_ = color; hasTextColor_ = true; }
 	void SetShadow(bool shadow) { shadow_ = shadow; }
 	void SetFocusable(bool focusable) { focusable_ = focusable; }
 	void SetClip(bool clip) { clip_ = clip; }
@@ -774,6 +772,7 @@ private:
 	std::string text_;
 	int textAlign_;
 	uint32_t textColor_;
+	bool hasTextColor_ = false;
 	bool small_;
 	bool shadow_;
 	bool focusable_;
@@ -784,6 +783,7 @@ class TextEdit : public View {
 public:
 	TextEdit(const std::string &text, const std::string &placeholderText, LayoutParams *layoutParams = 0);
 	void SetText(const std::string &text) { text_ = text; caret_ = (int)text_.size(); }
+	void SetTextColor(uint32_t color) { textColor_ = color; hasTextColor_ = true; }
 	const std::string &GetText() const { return text_; }
 	void SetMaxLen(size_t maxLen) { maxLen_ = maxLen; }
 
@@ -801,9 +801,11 @@ private:
 	std::string text_;
 	std::string undo_;
 	std::string placeholderText_;
+	uint32_t textColor_;
+	bool hasTextColor_ = false;
 	int caret_;
 	size_t maxLen_;
-	bool ctrlDown_;  // TODO: Make some global mechanism for this.
+	bool ctrlDown_ = false;  // TODO: Make some global mechanism for this.
 	// TODO: Selections
 };
 
@@ -827,19 +829,19 @@ private:
 
 // TextureView takes a texture that is assumed to be alive during the lifetime
 // of the view.
-class Thin3DTextureView : public InertView {
+class TextureView : public InertView {
 public:
-	Thin3DTextureView(Thin3DTexture *texture, ImageSizeMode sizeMode, LayoutParams *layoutParams = 0)
+	TextureView(Draw::Texture *texture, ImageSizeMode sizeMode, LayoutParams *layoutParams = 0)
 		: InertView(layoutParams), texture_(texture), color_(0xFFFFFFFF), sizeMode_(sizeMode) {}
 
 	void GetContentDimensions(const UIContext &dc, float &w, float &h) const override;
 	void Draw(UIContext &dc) override;
 
-	void SetTexture(Thin3DTexture *texture) { texture_ = texture; }
+	void SetTexture(Draw::Texture *texture) { texture_ = texture; }
 	void SetColor(uint32_t color) { color_ = color; }
 
 private:
-	Thin3DTexture *texture_;
+	Draw::Texture *texture_;
 	uint32_t color_;
 	ImageSizeMode sizeMode_;
 };

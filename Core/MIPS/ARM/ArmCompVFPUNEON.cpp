@@ -25,7 +25,8 @@
 // are below Q8 (D16, S32) using regular VFP instructions but really not sure
 // if it's worth it.
 
-
+#include "ppsspp_config.h"
+#if PPSSPP_ARCH(ARM)
 
 #include <cmath>
 
@@ -898,7 +899,7 @@ void ArmJit::CompNEON_Vmscl(MIPSOpcode op) {
 
 	MatrixSize msz = GetMtxSize(op);
 
-	bool overlap = GetMatrixOverlap(_VD, _VS, msz);
+	bool overlap = GetMatrixOverlap(_VD, _VS, msz) != OVERLAP_NONE;
 	if (overlap) {
 		DISABLE;
 	}
@@ -1452,3 +1453,5 @@ void ArmJit::CompNEON_Vbfy(MIPSOpcode op) {
 
 }
 // namespace MIPSComp
+
+#endif // PPSSPP_ARCH(ARM)

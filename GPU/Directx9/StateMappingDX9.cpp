@@ -22,7 +22,10 @@
 #include "Core/System.h"
 #include "Core/Config.h"
 #include "Core/Reporting.h"
-#include "GPU/Directx9/StateMappingDX9.h"
+
+#include "gfx/d3d9_shader.h"
+#include "gfx/d3d9_state.h"
+
 #include "GPU/Directx9/GPU_DX9.h"
 #include "GPU/Directx9/ShaderManagerDX9.h"
 #include "GPU/Directx9/TextureCacheDX9.h"
@@ -47,6 +50,8 @@ static const D3DBLEND dxBlendFactorLookup[(size_t)BlendFactor::COUNT] = {
 	D3DBLEND_BLENDFACTOR,
 	D3DBLEND_INVBLENDFACTOR,
 #if 0   // TODO: Requires D3D9Ex
+	D3DBLEND_SRCCOLOR2,
+	D3DBLEND_INVSRCCOLOR2,
 	D3DBLEND_SRCCOLOR2,
 	D3DBLEND_INVSRCCOLOR2,
 #else
@@ -85,37 +90,9 @@ static const D3DSTENCILOP stencilOps[] = {
 	D3DSTENCILOP_KEEP, // reserved
 };
 
-bool DrawEngineDX9::ApplyShaderBlending() {
-	if (gstate_c.featureFlags & GPU_SUPPORTS_ANY_FRAMEBUFFER_FETCH) {
-		return true;
-	}
-
-	static const int MAX_REASONABLE_BLITS_PER_FRAME = 24;
-
-	static int lastFrameBlit = -1;
-	static int blitsThisFrame = 0;
-	if (lastFrameBlit != gpuStats.numFlips) {
-		if (blitsThisFrame > MAX_REASONABLE_BLITS_PER_FRAME) {
-			WARN_LOG_REPORT_ONCE(blendingBlit, G3D, "Lots of blits needed for obscure blending: %d per frame, blend %d/%d/%d", blitsThisFrame, gstate.getBlendFuncA(), gstate.getBlendFuncB(), gstate.getBlendEq());
-		}
-		blitsThisFrame = 0;
-		lastFrameBlit = gpuStats.numFlips;
-	}
-	++blitsThisFrame;
-	if (blitsThisFrame > MAX_REASONABLE_BLITS_PER_FRAME * 2) {
-		WARN_LOG_ONCE(blendingBlit2, G3D, "Skipping additional blits needed for obscure blending: %d per frame, blend %d/%d/%d", blitsThisFrame, gstate.getBlendFuncA(), gstate.getBlendFuncB(), gstate.getBlendEq());
-		return false;
-	}
-
-	fboTexNeedBind_ = true;
-
-	shaderManager_->DirtyUniform(DIRTY_SHADERBLEND);
-	return true;
-}
-
 inline void DrawEngineDX9::ResetShaderBlending() {
 	if (fboTexBound_) {
-		pD3Ddevice->SetTexture(1, nullptr);
+		device_->SetTexture(1, nullptr);
 		fboTexBound_ = false;
 	}
 }
@@ -123,13 +100,13 @@ inline void DrawEngineDX9::ResetShaderBlending() {
 void DrawEngineDX9::ApplyDrawState(int prim) {
 	// TODO: All this setup is soon so expensive that we'll need dirty flags, or simply do it in the command writes where we detect dirty by xoring. Silly to do all this work on every drawcall.
 
-	if (gstate_c.textureChanged != TEXCHANGE_UNCHANGED && !gstate.isModeClear() && gstate.isTextureMapEnabled()) {
+	if (gstate_c.IsDirty(DIRTY_TEXTURE_IMAGE | DIRTY_TEXTURE_PARAMS) && !gstate.isModeClear() && gstate.isTextureMapEnabled()) {
 		textureCache_->SetTexture();
-		gstate_c.textureChanged = TEXCHANGE_UNCHANGED;
+		gstate_c.Clean(DIRTY_TEXTURE_IMAGE | DIRTY_TEXTURE_PARAMS);
 		if (gstate_c.needShaderTexClamp) {
 			// We will rarely need to set this, so let's do it every time on use rather than in runloop.
 			// Most of the time non-framebuffer textures will be used which can be clamped themselves.
-			shaderManager_->DirtyUniform(DIRTY_TEXCLAMP);
+			gstate_c.Dirty(DIRTY_TEXCLAMP);
 		}
 	}
 
@@ -172,7 +149,7 @@ void DrawEngineDX9::ApplyDrawState(int prim) {
 			dxBlendFactorLookup[(size_t)blendState.srcColor], dxBlendFactorLookup[(size_t)blendState.dstColor],
 			dxBlendFactorLookup[(size_t)blendState.srcAlpha], dxBlendFactorLookup[(size_t)blendState.dstAlpha]);
 		if (blendState.dirtyShaderBlend) {
-			shaderManager_->DirtyUniform(DIRTY_SHADERBLEND);
+			gstate_c.Dirty(DIRTY_SHADERBLEND);
 		}
 		if (blendState.useBlendColor) {
 			dxstate.blendColor.setDWORD(blendState.blendColor);
@@ -295,10 +272,10 @@ void DrawEngineDX9::ApplyDrawState(int prim) {
 
 	dxstate.viewport.set(vpAndScissor.viewportX, vpAndScissor.viewportY, vpAndScissor.viewportW, vpAndScissor.viewportH, depthMin, depthMax);
 	if (vpAndScissor.dirtyProj) {
-		shaderManager_->DirtyUniform(DIRTY_PROJMATRIX);
+		gstate_c.Dirty(DIRTY_PROJMATRIX);
 	}
 	if (vpAndScissor.dirtyDepth) {
-		shaderManager_->DirtyUniform(DIRTY_DEPTHRANGE);
+		gstate_c.Dirty(DIRTY_DEPTHRANGE);
 	}
 }
 
@@ -310,10 +287,10 @@ void DrawEngineDX9::ApplyDrawStateLate() {
 
 		if (fboTexNeedBind_) {
 			// Note that this is positions, not UVs, that we need the copy from.
-			framebufferManager_->BindFramebufferColor(1, nullptr, BINDFBCOLOR_MAY_COPY);
+			framebufferManager_->BindFramebufferAsColorTexture(1, framebufferManager_->GetCurrentRenderVFB(), BINDFBCOLOR_MAY_COPY);
 			// If we are rendering at a higher resolution, linear is probably best for the dest color.
-			pD3Ddevice->SetSamplerState(1, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
-			pD3Ddevice->SetSamplerState(1, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+			device_->SetSamplerState(1, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+			device_->SetSamplerState(1, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
 			fboTexBound_ = true;
 			fboTexNeedBind_ = false;
 		}

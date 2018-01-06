@@ -15,6 +15,9 @@
 // Official git repository and contact information can be found at
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
+#include "ppsspp_config.h"
+#if PPSSPP_ARCH(ARM64)
+
 #include "base/logging.h"
 #include "profiler/profiler.h"
 #include "Common/ChunkFile.h"
@@ -143,10 +146,6 @@ void Arm64Jit::ClearCache() {
 	GenerateFixedCode(jo);
 }
 
-void Arm64Jit::InvalidateCache() {
-	blocks.Clear();
-}
-
 void Arm64Jit::InvalidateCacheAt(u32 em_address, int length) {
 	blocks.InvalidateICache(em_address, length);
 }
@@ -187,11 +186,11 @@ void Arm64Jit::CompileDelaySlot(int flags) {
 void Arm64Jit::Compile(u32 em_address) {
 	PROFILE_THIS_SCOPE("jitc");
 	if (GetSpaceLeft() < 0x10000 || blocks.IsFull()) {
-		INFO_LOG(JIT, "Space left: %i", GetSpaceLeft());
+		INFO_LOG(JIT, "Space left: %d", (int)GetSpaceLeft());
 		ClearCache();
 	}
 
-	BeginWrite();
+	BeginWrite(4);
 
 	int block_num = blocks.AllocateBlock(em_address);
 	JitBlock *b = blocks.GetBlock(block_num);
@@ -199,6 +198,9 @@ void Arm64Jit::Compile(u32 em_address) {
 	blocks.FinalizeBlock(block_num, jo.enableBlocklink);
 
 	EndWrite();
+
+	// Don't forget to zap the newly written instructions in the instruction cache!
+	FlushIcache();
 
 	bool cleanSlate = false;
 
@@ -333,9 +335,6 @@ const u8 *Arm64Jit::DoJit(u32 em_address, JitBlock *b) {
 	if (dontLogBlocks > 0)
 		dontLogBlocks--;
 
-	// Don't forget to zap the newly written instructions in the instruction cache!
-	FlushIcache();
-
 	if (js.lastContinuedPC == 0) {
 		b->originalSize = js.numInstructions;
 	} else {
@@ -403,7 +402,7 @@ void Arm64Jit::LinkBlock(u8 *exitPoint, const u8 *checkedEntry) {
 	}
 	ARM64XEmitter emit(exitPoint);
 	emit.B(checkedEntry);
-	// TODO: Write stuff after.
+	// TODO: Write stuff after, convering up the now-unused instructions.
 	emit.FlushIcache();
 	if (PlatformIsWXExclusive()) {
 		ProtectMemoryPages(exitPoint, 32, MEM_PROT_READ | MEM_PROT_EXEC);
@@ -663,3 +662,5 @@ MIPSOpcode Arm64Jit::GetOriginalOp(MIPSOpcode op) {
 }
 
 }  // namespace
+
+#endif // PPSSPP_ARCH(ARM64)

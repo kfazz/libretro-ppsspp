@@ -15,6 +15,8 @@
 // Official git repository and contact information can be found at
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
+#include "ppsspp_config.h"
+
 #ifdef _WIN32
 #pragma warning(disable:4091)
 #include "Common/CommonWindows.h"
@@ -22,11 +24,11 @@
 #include <string>
 #include <codecvt>
 #endif
+#include <thread>
+#include <mutex>
 
 #include "math/math_util.h"
-#include "thread/thread.h"
 #include "thread/threadutil.h"
-#include "base/mutex.h"
 #include "util/text/utf8.h"
 
 #include "Core/MemMap.h"
@@ -78,11 +80,14 @@ static CoreParameter coreParameter;
 static FileLoader *loadedFile;
 static std::thread *cpuThread = nullptr;
 static std::thread::id cpuThreadID;
-static recursive_mutex cpuThreadLock;
-static condition_variable cpuThreadCond;
-static condition_variable cpuThreadReplyCond;
+static std::mutex cpuThreadLock;
+static std::condition_variable cpuThreadCond;
+static std::condition_variable cpuThreadReplyCond;
 static u64 cpuThreadUntil;
 bool audioInitialized;
+
+bool coreCollectDebugStats = false;
+bool coreCollectDebugStatsForced = false;
 
 // This can be read and written from ANYWHERE.
 volatile CoreState coreState = CORE_STEPPING;
@@ -131,17 +136,21 @@ bool IsOnSeparateCPUThread() {
 	}
 }
 
-void CPU_SetState(CPUThreadState to) {
-	lock_guard guard(cpuThreadLock);
+void CPU_SetStateNoLock(CPUThreadState to) {
 	cpuThreadState = to;
 	cpuThreadCond.notify_one();
 	cpuThreadReplyCond.notify_one();
 }
 
+void CPU_SetState(CPUThreadState to) {
+	std::lock_guard<std::mutex> guard(cpuThreadLock);
+	CPU_SetStateNoLock(to);
+}
+
 bool CPU_NextState(CPUThreadState from, CPUThreadState to) {
-	lock_guard guard(cpuThreadLock);
+	std::lock_guard<std::mutex> guard(cpuThreadLock);
 	if (cpuThreadState == from) {
-		CPU_SetState(to);
+		CPU_SetStateNoLock(to);
 		return true;
 	} else {
 		return false;
@@ -149,9 +158,9 @@ bool CPU_NextState(CPUThreadState from, CPUThreadState to) {
 }
 
 bool CPU_NextStateNot(CPUThreadState from, CPUThreadState to) {
-	lock_guard guard(cpuThreadLock);
+	std::lock_guard<std::mutex> guard(cpuThreadLock);
 	if (cpuThreadState != from) {
-		CPU_SetState(to);
+		CPU_SetStateNoLock(to);
 		return true;
 	} else {
 		return false;
@@ -170,10 +179,10 @@ bool CPU_HasPendingAction() {
 	return cpuThreadState != CPU_THREAD_RUNNING;
 }
 
-void CPU_WaitStatus(condition_variable &cond, bool (*pred)()) {
-	lock_guard guard(cpuThreadLock);
+void CPU_WaitStatus(std::condition_variable &cond, bool (*pred)()) {
+	std::unique_lock<std::mutex> guard(cpuThreadLock);
 	while (!pred()) {
-		cond.wait(cpuThreadLock);
+		cond.wait(guard);
 	}
 }
 
@@ -211,15 +220,15 @@ void CPU_Init() {
 	Replacement_Init();
 
 	switch (type) {
-	case FILETYPE_PSP_ISO:
-	case FILETYPE_PSP_ISO_NP:
-	case FILETYPE_PSP_DISC_DIRECTORY:
+	case IdentifiedFileType::PSP_ISO:
+	case IdentifiedFileType::PSP_ISO_NP:
+	case IdentifiedFileType::PSP_DISC_DIRECTORY:
 		InitMemoryForGameISO(loadedFile);
 		break;
-	case FILETYPE_PSP_PBP:
+	case IdentifiedFileType::PSP_PBP:
 		InitMemoryForGamePBP(loadedFile);
 		break;
-	case FILETYPE_PSP_PBP_DIRECTORY:
+	case IdentifiedFileType::PSP_PBP_DIRECTORY:
 		// This is normal for homebrew.
 		// ERROR_LOG(LOADER, "PBP directory resolution failed.");
 		break;
@@ -361,6 +370,13 @@ void Core_UpdateState(CoreState newState) {
 	Core_UpdateSingleStep();
 }
 
+static void Core_UpdateCollectDebugStats(bool flag) {
+	if (coreCollectDebugStats != flag) {
+		coreCollectDebugStats = flag;
+		mipsr4k.ClearJitCache();
+	}
+}
+
 void System_Wake() {
 	// Ping the threads so they check coreState.
 	CPU_NextStateNot(CPU_THREAD_NOT_RUNNING, CPU_THREAD_SHUTDOWN);
@@ -379,12 +395,18 @@ bool PSP_InitStart(const CoreParameter &coreParam, std::string *error_string) {
 		return false;
 	}
 
-#if defined(_WIN32) && defined(_M_X64)
-	INFO_LOG(BOOT, "PPSSPP %s Windows 64 bit", PPSSPP_GIT_VERSION);
-#elif defined(_WIN32) && !defined(_M_X64)
-	INFO_LOG(BOOT, "PPSSPP %s Windows 32 bit", PPSSPP_GIT_VERSION);
+#ifdef GOLD
+	const char *gold = " Gold";
 #else
-	INFO_LOG(BOOT, "PPSSPP %s", PPSSPP_GIT_VERSION);
+	const char *gold = "";
+#endif
+
+#if defined(_WIN32) && defined(_M_X64)
+	INFO_LOG(BOOT, "PPSSPP%s %s Windows 64 bit", gold, PPSSPP_GIT_VERSION);
+#elif defined(_WIN32) && !defined(_M_X64)
+	INFO_LOG(BOOT, "PPSSPP%s %s Windows 32 bit", gold, PPSSPP_GIT_VERSION);
+#else
+	INFO_LOG(BOOT, "PPSSPP%s %s", gold, PPSSPP_GIT_VERSION);
 #endif
 
 	GraphicsContext *temp = coreParameter.graphicsContext;
@@ -505,6 +527,8 @@ void PSP_EndHostFrame() {
 }
 
 void PSP_RunLoopUntil(u64 globalticks) {
+	Core_UpdateCollectDebugStats(g_Config.bShowDebugStats || g_Config.bLogFrameDrops);
+
 	SaveState::Process();
 	if (coreState == CORE_POWERDOWN || coreState == CORE_ERROR) {
 		return;
@@ -616,10 +640,13 @@ void InitSysDirectories() {
 	g_Config.flash0Directory = path + "flash0/";
 
 	// Detect the "My Documents"(XP) or "Documents"(on Vista/7/8) folder.
+#if PPSSPP_PLATFORM(UWP)
+	// We set g_Config.memStickDirectory outside.
+
+#else
 	wchar_t myDocumentsPath[MAX_PATH];
 	const HRESULT result = SHGetFolderPath(NULL, CSIDL_PERSONAL, NULL, SHGFP_TYPE_CURRENT, myDocumentsPath);
 	const std::string myDocsPath = ConvertWStringToUTF8(myDocumentsPath) + "/PPSSPP/";
-
 	const std::string installedFile = path + "installed.txt";
 	const bool installed = File::Exists(installedFile);
 
@@ -669,6 +696,19 @@ void InitSysDirectories() {
 	// Clean up our mess.
 	if (File::Exists(testFile))
 		File::Delete(testFile);
+#endif
+
+	// Create the default directories that a real PSP creates. Good for homebrew so they can
+	// expect a standard environment. Skipping THEME though, that's pointless.
+	File::CreateDir(g_Config.memStickDirectory + "PSP");
+	File::CreateDir(g_Config.memStickDirectory + "PSP/COMMON");
+	File::CreateDir(g_Config.memStickDirectory + "PSP/GAME");
+	File::CreateDir(g_Config.memStickDirectory + "PSP/SAVEDATA");
+	File::CreateDir(g_Config.memStickDirectory + "PSP/PPSSPP_STATE");
+#ifdef ANDROID
+	// Avoid media scanners in PPSSPP_STATE directory
+	File::CreateEmptyFile(g_Config.memStickDirectory + "PSP/PPSSPP_STATE/.nomedia");
+#endif
 
 	if (g_Config.currentDirectory.empty()) {
 		g_Config.currentDirectory = GetSysDirectory(DIRECTORY_GAME);

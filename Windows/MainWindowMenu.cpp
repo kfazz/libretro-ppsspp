@@ -1,6 +1,9 @@
 #include <map>
 #include <string>
 
+#include "CommonWindows.h"
+#include <shellapi.h>
+
 #include "resource.h"
 
 #include "i18n/i18n.h"
@@ -11,11 +14,11 @@
 #include "Common/Log.h"
 #include "Common/LogManager.h"
 #include "Common/ConsoleListener.h"
-#include "GPU/GLES/TextureScaler.h"
-#include "GPU/GLES/TextureCache.h"
+#include "GPU/GLES/TextureScalerGLES.h"
+#include "GPU/GLES/TextureCacheGLES.h"
 #include "UI/OnScreenDisplay.h"
 #include "GPU/Common/PostShader.h"
-#include "GPU/GLES/Framebuffer.h"
+#include "GPU/GLES/FramebufferManagerGLES.h"
 #include "Core/Config.h"
 #include "Core/FileSystems/MetaFileSystem.h"
 #include "UI/OnScreenDisplay.h"
@@ -63,7 +66,12 @@ namespace MainWindow {
 		EnableMenuItem(menu, ID_DEBUG_LOADSYMFILE, menuEnable);
 		EnableMenuItem(menu, ID_DEBUG_SAVESYMFILE, menuEnable);
 		EnableMenuItem(menu, ID_DEBUG_RESETSYMBOLTABLE, menuEnable);
+		EnableMenuItem(menu, ID_DEBUG_TAKESCREENSHOT, menuEnable);
+		EnableMenuItem(menu, ID_DEBUG_SHOWDEBUGSTATISTICS, menuEnable);
 		EnableMenuItem(menu, ID_DEBUG_EXTRACTFILE, menuEnable);
+
+		// While playing, this pop up doesn't work - and probably doesn't make sense.
+		EnableMenuItem(menu, ID_OPTIONS_LANGUAGE, state == UISTATE_INGAME ? MF_GRAYED : MF_ENABLED);
 	}
 
 	// These are used as an offset
@@ -130,6 +138,7 @@ namespace MainWindow {
 		const std::wstring visitMainWebsite = ConvertUTF8ToWString(des->T("www.ppsspp.org"));
 		const std::wstring visitForum = ConvertUTF8ToWString(des->T("PPSSPP Forums"));
 		const std::wstring buyGold = ConvertUTF8ToWString(des->T("Buy Gold"));
+		const std::wstring gitHub = ConvertUTF8ToWString(des->T("GitHub"));
 		const std::wstring aboutPPSSPP = ConvertUTF8ToWString(des->T("About PPSSPP..."));
 
 		// Simply remove the old help menu and create a new one.
@@ -142,6 +151,7 @@ namespace MainWindow {
 		AppendMenu(helpMenu, MF_STRING | MF_BYCOMMAND, ID_HELP_OPENFORUM, visitForum.c_str());
 		// Repeat the process for other languages, if necessary.
 		AppendMenu(helpMenu, MF_STRING | MF_BYCOMMAND, ID_HELP_BUYGOLD, buyGold.c_str());
+		AppendMenu(helpMenu, MF_STRING | MF_BYCOMMAND, ID_HELP_GITHUB, gitHub.c_str());
 		AppendMenu(helpMenu, MF_SEPARATOR, 0, 0);
 		AppendMenu(helpMenu, MF_STRING | MF_BYCOMMAND, ID_HELP_ABOUT, aboutPPSSPP.c_str());
 	}
@@ -165,6 +175,7 @@ namespace MainWindow {
 		RemoveMenu(optionsMenu, SUBMENU_CUSTOM_SHADERS, MF_BYPOSITION);
 		InsertMenu(optionsMenu, SUBMENU_CUSTOM_SHADERS, MF_POPUP | MF_STRING | MF_BYPOSITION, (UINT_PTR)shaderMenu, key.c_str());
 
+		ReloadAllPostShaderInfo();
 		std::vector<ShaderInfo> info = GetAllPostShaderInfo();
 		availableShaders.clear();
 
@@ -288,6 +299,7 @@ namespace MainWindow {
 		TranslateSubMenu(menu, "Window Size", MENU_OPTIONS, SUBMENU_WINDOW_SIZE);
 		// Skip window size 1x-4x..
 		TranslateSubMenu(menu, "Backend", MENU_OPTIONS, SUBMENU_RENDERING_BACKEND);
+		TranslateMenuItem(menu, ID_OPTIONS_DIRECT3D11);
 		TranslateMenuItem(menu, ID_OPTIONS_DIRECT3D9);
 		TranslateMenuItem(menu, ID_OPTIONS_OPENGL);
 		TranslateSubMenu(menu, "Rendering Mode", MENU_OPTIONS, SUBMENU_RENDERING_MODE);
@@ -691,10 +703,10 @@ namespace MainWindow {
 		case ID_TEXTURESCALING_4X:  setTexScalingMultiplier(TEXSCALING_4X); break;
 		case ID_TEXTURESCALING_5X:  setTexScalingMultiplier(TEXSCALING_MAX); break;
 
-		case ID_TEXTURESCALING_XBRZ:            setTexScalingType(TextureScaler::XBRZ); break;
-		case ID_TEXTURESCALING_HYBRID:          setTexScalingType(TextureScaler::HYBRID); break;
-		case ID_TEXTURESCALING_BICUBIC:         setTexScalingType(TextureScaler::BICUBIC); break;
-		case ID_TEXTURESCALING_HYBRID_BICUBIC:  setTexScalingType(TextureScaler::HYBRID_BICUBIC); break;
+		case ID_TEXTURESCALING_XBRZ:            setTexScalingType(TextureScalerCommon::XBRZ); break;
+		case ID_TEXTURESCALING_HYBRID:          setTexScalingType(TextureScalerCommon::HYBRID); break;
+		case ID_TEXTURESCALING_BICUBIC:         setTexScalingType(TextureScalerCommon::BICUBIC); break;
+		case ID_TEXTURESCALING_HYBRID_BICUBIC:  setTexScalingType(TextureScalerCommon::HYBRID_BICUBIC); break;
 
 		case ID_TEXTURESCALING_DEPOSTERIZE:
 			g_Config.bTexDeposterize = !g_Config.bTexDeposterize;
@@ -703,6 +715,12 @@ namespace MainWindow {
 
 		case ID_OPTIONS_DIRECT3D9:
 			g_Config.iGPUBackend = GPU_BACKEND_DIRECT3D9;
+			g_Config.bRestartRequired = true;
+			PostMessage(MainWindow::GetHWND(), WM_CLOSE, 0, 0);
+			break;
+
+		case ID_OPTIONS_DIRECT3D11:
+			g_Config.iGPUBackend = GPU_BACKEND_DIRECT3D11;
 			g_Config.bRestartRequired = true;
 			PostMessage(MainWindow::GetHWND(), WM_CLOSE, 0, 0);
 			break;
@@ -925,6 +943,10 @@ namespace MainWindow {
 			ShellExecute(NULL, L"open", L"http://forums.ppsspp.org/", NULL, NULL, SW_SHOWNORMAL);
 			break;
 
+		case ID_HELP_GITHUB:
+			ShellExecute(NULL, L"open", L"https://github.com/hrydgard/ppsspp/", NULL, NULL, SW_SHOWNORMAL);
+			break;
+
 		case ID_HELP_ABOUT:
 			DialogManager::EnableAll(FALSE);
 			DialogBox(hInst, (LPCTSTR)IDD_ABOUTBOX, hWnd, (DLGPROC)About);
@@ -957,7 +979,6 @@ namespace MainWindow {
 				g_Config.sPostShaderName = availableShaders[index];
 
 				NativeMessageReceived("gpu resized", "");
-
 				break;
 			}
 
@@ -1071,7 +1092,7 @@ namespace MainWindow {
 			CheckMenuItem(menu, texscalingitems[i], MF_BYCOMMAND | ((i == g_Config.iTexScalingLevel) ? MF_CHECKED : MF_UNCHECKED));
 		}
 
-		if (!gl_extensions.OES_texture_npot) {
+		if (g_Config.iGPUBackend == (int)GPUBackend::OPENGL && !gl_extensions.OES_texture_npot) {
 			EnableMenuItem(menu, ID_TEXTURESCALING_3X, MF_GRAYED);
 			EnableMenuItem(menu, ID_TEXTURESCALING_5X, MF_GRAYED);
 		} else {
@@ -1085,11 +1106,11 @@ namespace MainWindow {
 			ID_TEXTURESCALING_BICUBIC,
 			ID_TEXTURESCALING_HYBRID_BICUBIC,
 		};
-		if (g_Config.iTexScalingType < TextureScaler::XBRZ)
-			g_Config.iTexScalingType = TextureScaler::XBRZ;
+		if (g_Config.iTexScalingType < TextureScalerCommon::XBRZ)
+			g_Config.iTexScalingType = TextureScalerCommon::XBRZ;
 
-		else if (g_Config.iTexScalingType > TextureScaler::HYBRID_BICUBIC)
-			g_Config.iTexScalingType = TextureScaler::HYBRID_BICUBIC;
+		else if (g_Config.iTexScalingType > TextureScalerCommon::HYBRID_BICUBIC)
+			g_Config.iTexScalingType = TextureScalerCommon::HYBRID_BICUBIC;
 
 		for (int i = 0; i < ARRAY_SIZE(texscalingtypeitems); i++) {
 			CheckMenuItem(menu, texscalingtypeitems[i], MF_BYCOMMAND | ((i == g_Config.iTexScalingType) ? MF_CHECKED : MF_UNCHECKED));
@@ -1182,27 +1203,43 @@ namespace MainWindow {
 		switch (g_Config.iGPUBackend) {
 		case GPU_BACKEND_DIRECT3D9:
 			EnableMenuItem(menu, ID_OPTIONS_DIRECT3D9, MF_GRAYED);
+			EnableMenuItem(menu, ID_OPTIONS_DIRECT3D11, MF_ENABLED);
 			EnableMenuItem(menu, ID_OPTIONS_OPENGL, MF_ENABLED);
 			EnableMenuItem(menu, ID_OPTIONS_VULKAN, MF_ENABLED);
 			CheckMenuItem(menu, ID_OPTIONS_DIRECT3D9, MF_CHECKED);
+			CheckMenuItem(menu, ID_OPTIONS_DIRECT3D11, MF_UNCHECKED);
 			CheckMenuItem(menu, ID_OPTIONS_OPENGL, MF_UNCHECKED);
 			CheckMenuItem(menu, ID_OPTIONS_VULKAN, MF_UNCHECKED);
 			break;
 		case GPU_BACKEND_OPENGL:
 			EnableMenuItem(menu, ID_OPTIONS_DIRECT3D9, MF_ENABLED);
+			EnableMenuItem(menu, ID_OPTIONS_DIRECT3D11, MF_ENABLED);
 			EnableMenuItem(menu, ID_OPTIONS_OPENGL, MF_GRAYED);
 			EnableMenuItem(menu, ID_OPTIONS_VULKAN, MF_ENABLED);
 			CheckMenuItem(menu, ID_OPTIONS_DIRECT3D9, MF_UNCHECKED);
+			CheckMenuItem(menu, ID_OPTIONS_DIRECT3D11, MF_UNCHECKED);
 			CheckMenuItem(menu, ID_OPTIONS_OPENGL, MF_CHECKED);
 			CheckMenuItem(menu, ID_OPTIONS_VULKAN, MF_UNCHECKED);
 			break;
 		case GPU_BACKEND_VULKAN:
 			EnableMenuItem(menu, ID_OPTIONS_DIRECT3D9, MF_ENABLED);
+			EnableMenuItem(menu, ID_OPTIONS_DIRECT3D11, MF_ENABLED);
 			EnableMenuItem(menu, ID_OPTIONS_OPENGL, MF_ENABLED);
 			EnableMenuItem(menu, ID_OPTIONS_VULKAN, MF_GRAYED);
 			CheckMenuItem(menu, ID_OPTIONS_DIRECT3D9, MF_UNCHECKED);
+			CheckMenuItem(menu, ID_OPTIONS_DIRECT3D11, MF_UNCHECKED);
 			CheckMenuItem(menu, ID_OPTIONS_OPENGL, MF_UNCHECKED);
 			CheckMenuItem(menu, ID_OPTIONS_VULKAN, MF_CHECKED);
+			break;
+		case GPU_BACKEND_DIRECT3D11:
+			EnableMenuItem(menu, ID_OPTIONS_DIRECT3D9, MF_ENABLED);
+			EnableMenuItem(menu, ID_OPTIONS_DIRECT3D11, MF_GRAYED);
+			EnableMenuItem(menu, ID_OPTIONS_OPENGL, MF_ENABLED);
+			EnableMenuItem(menu, ID_OPTIONS_VULKAN, MF_ENABLED);
+			CheckMenuItem(menu, ID_OPTIONS_DIRECT3D9, MF_UNCHECKED);
+			CheckMenuItem(menu, ID_OPTIONS_DIRECT3D11, MF_CHECKED);
+			CheckMenuItem(menu, ID_OPTIONS_OPENGL, MF_UNCHECKED);
+			CheckMenuItem(menu, ID_OPTIONS_VULKAN, MF_UNCHECKED);
 			break;
 		}
 
@@ -1236,7 +1273,11 @@ namespace MainWindow {
 		{
 			W32Util::CenterWindow(hDlg);
 			HWND versionBox = GetDlgItem(hDlg, IDC_VERSION);
+#ifdef GOLD
+			std::string windowText = "PPSSPP Gold ";
+#else
 			std::string windowText = "PPSSPP ";
+#endif
 			windowText.append(PPSSPP_GIT_VERSION);
 			SetWindowText(versionBox, ConvertUTF8ToWString(windowText).c_str());
 		}

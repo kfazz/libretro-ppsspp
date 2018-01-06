@@ -18,6 +18,7 @@
 #include <cmath>
 #include <algorithm>
 
+#include "ppsspp_config.h"
 #include "base/colorutil.h"
 #include "base/display.h"
 #include "base/timeutil.h"
@@ -47,6 +48,7 @@
 #include "UI/Store.h"
 #include "UI/ui_atlas.h"
 #include "Core/Config.h"
+#include "Core/Loaders.h"
 #include "GPU/GPUInterface.h"
 #include "i18n/i18n.h"
 
@@ -131,7 +133,7 @@ public:
 		return Clickable::Key(key);
 	}
 
-	void Update(const InputState &input_state) override {
+	void Update() override {
 		// Hold button for 1.5 seconds to launch the game options
 		if (holdEnabled_ && holdStart_ != 0.0 && holdStart_ < time_now_d() - 1.5) {
 			TriggerOnHoldClick();
@@ -149,14 +151,14 @@ public:
 private:
 	void TriggerOnHoldClick() {
 		holdStart_ = 0.0;
-		UI::EventParams e;
+		UI::EventParams e{};
 		e.v = this;
 		e.s = gamePath_;
 		down_ = false;
 		OnHoldClick.Trigger(e);
 	}
 	void TriggerOnHighlight(int focusFlags) {
-		UI::EventParams e;
+		UI::EventParams e{};
 		e.v = this;
 		e.s = gamePath_;
 		e.a = focusFlags;
@@ -173,13 +175,13 @@ private:
 };
 
 void GameButton::Draw(UIContext &dc) {
-	GameInfo *ginfo = g_gameInfoCache->GetInfo(dc.GetThin3DContext(), gamePath_, 0);
-	Thin3DTexture *texture = 0;
+	GameInfo *ginfo = g_gameInfoCache->GetInfo(dc.GetDrawContext(), gamePath_, 0);
+	Draw::Texture *texture = 0;
 	u32 color = 0, shadowColor = 0;
 	using namespace UI;
 
-	if (ginfo->iconTexture) {
-		texture = ginfo->iconTexture;
+	if (ginfo->icon.texture) {
+		texture = ginfo->icon.texture->GetTexture();
 	}
 
 	int x = bounds_.x;
@@ -205,8 +207,8 @@ void GameButton::Draw(UIContext &dc) {
 	}
 
 	if (texture) {
-		color = whiteAlpha(ease((time_now_d() - ginfo->timeIconWasLoaded) * 2));
-		shadowColor = blackAlpha(ease((time_now_d() - ginfo->timeIconWasLoaded) * 2));
+		color = whiteAlpha(ease((time_now_d() - ginfo->icon.timeLoaded) * 2));
+		shadowColor = blackAlpha(ease((time_now_d() - ginfo->icon.timeLoaded) * 2));
 		float tw = texture->Width();
 		float th = texture->Height();
 
@@ -251,7 +253,7 @@ void GameButton::Draw(UIContext &dc) {
 
 	if (texture) {
 		dc.Draw()->Flush();
-		dc.GetThin3DContext()->SetTexture(0, texture);
+		dc.GetDrawContext()->BindTexture(0, texture);
 		if (holdStart_ != 0.0) {
 			double time_held = time_now_d() - holdStart_;
 			int holdFrameCount = (int)(time_held * 60.0f);
@@ -420,7 +422,7 @@ UI::EventReturn GameBrowser::LastClick(UI::EventParams &e) {
 }
 
 UI::EventReturn GameBrowser::HomeClick(UI::EventParams &e) {
-#ifdef ANDROID
+#ifdef __ANDROID__
 	path_.SetPath(g_Config.memStickDirectory);
 #elif defined(USING_QT_UI)
 	I18NCategory *mm = GetI18NCategory("MainMenu");
@@ -430,13 +432,15 @@ UI::EventReturn GameBrowser::HomeClick(UI::EventParams &e) {
 	else
 		return UI::EVENT_DONE;
 #elif defined(_WIN32)
+#if PPSSPP_PLATFORM(UWP)
+	// TODO UWP
+#else
 	I18NCategory *mm = GetI18NCategory("MainMenu");
 	std::string folder = W32Util::BrowseForFolder(MainWindow::GetHWND(), mm->T("Choose folder"));
 	if (!folder.size())
 		return UI::EVENT_DONE;
 	path_.SetPath(folder);
-#elif defined(BLACKBERRY)
-	path_.SetPath(std::string(getenv("PERIMETER_HOME")) + "/shared/misc");
+#endif
 #else
 	path_.SetPath(getenv("HOME"));
 #endif
@@ -671,7 +675,7 @@ const std::string GameBrowser::GetBaseName(const std::string &path) {
 
 UI::EventReturn GameBrowser::GameButtonClick(UI::EventParams &e) {
 	GameButton *button = static_cast<GameButton *>(e.v);
-	UI::EventParams e2;
+	UI::EventParams e2{};
 	e2.s = button->GamePath();
 	// Insta-update - here we know we are already on the right thread.
 	OnChoice.Trigger(e2);
@@ -680,7 +684,7 @@ UI::EventReturn GameBrowser::GameButtonClick(UI::EventParams &e) {
 
 UI::EventReturn GameBrowser::GameButtonHoldClick(UI::EventParams &e) {
 	GameButton *button = static_cast<GameButton *>(e.v);
-	UI::EventParams e2;
+	UI::EventParams e2{};
 	e2.s = button->GamePath();
 	// Insta-update - here we know we are already on the right thread.
 	OnHoldChoice.Trigger(e2);
@@ -854,12 +858,16 @@ void MainScreen::CreateViews() {
 	gold->OnClick.Handle(this, &MainScreen::OnSupport);
 	gold->SetIcon(I_ICONGOLD);
 #endif
+
+#if !PPSSPP_PLATFORM(UWP)
+	// Having an exit button is against UWP guidelines.
 	rightColumnItems->Add(new Spacer(25.0));
 	rightColumnItems->Add(new Choice(mm->T("Exit")))->OnClick.Handle(this, &MainScreen::OnExit);
+#endif
 
 	if (vertical) {
 		root_ = new LinearLayout(ORIENT_VERTICAL);
-		rightColumn->ReplaceLayoutParams(new LinearLayoutParams(FILL_PARENT, WRAP_CONTENT));
+		rightColumn->ReplaceLayoutParams(new LinearLayoutParams(FILL_PARENT, WRAP_CONTENT, 0.75));
 		leftColumn->ReplaceLayoutParams(new LinearLayoutParams(FILL_PARENT, WRAP_CONTENT, 1.0));
 		root_->Add(rightColumn);
 		root_->Add(leftColumn);
@@ -902,7 +910,7 @@ UI::EventReturn MainScreen::OnAllowStorage(UI::EventParams &e) {
 }
 
 UI::EventReturn MainScreen::OnDownloadUpgrade(UI::EventParams &e) {
-#ifdef ANDROID
+#ifdef __ANDROID__
 	// Go to app store
 #ifdef GOLD
 	LaunchBrowser("market://details?id=org.ppsspp.ppssppgold");
@@ -946,8 +954,8 @@ void MainScreen::sendMessage(const char *message, const char *value) {
 	}
 }
 
-void MainScreen::update(InputState &input) {
-	UIScreen::update(input);
+void MainScreen::update() {
+	UIScreen::update();
 	UpdateUIState(UISTATE_MENU);
 	bool vertical = UseVerticalLayout();
 	if (vertical != lastVertical_) {
@@ -969,13 +977,13 @@ UI::EventReturn MainScreen::OnLoadFile(UI::EventParams &e) {
 		g_Config.Save();
 		screenManager()->switchScreen(new EmuScreen(fileName.toStdString()));
 	}
+#elif PPSSPP_PLATFORM(UWP)
+	System_SendMessage("browse_file", "");
 #elif defined(USING_WIN_UI)
 	MainWindow::BrowseAndBoot("");
 #endif
 	return UI::EVENT_DONE;
 }
-
-extern void DrawBackground(UIContext &dc, float alpha);
 
 void MainScreen::DrawBackground(UIContext &dc) {
 	UIScreenWithBackground::DrawBackground(dc);
@@ -1002,22 +1010,22 @@ bool MainScreen::DrawBackgroundFor(UIContext &dc, const std::string &gamePath, f
 
 	GameInfo *ginfo = 0;
 	if (!gamePath.empty()) {
-		ginfo = g_gameInfoCache->GetInfo(dc.GetThin3DContext(), gamePath, GAMEINFO_WANTBG);
+		ginfo = g_gameInfoCache->GetInfo(dc.GetDrawContext(), gamePath, GAMEINFO_WANTBG);
 		// Loading texture data may bind a texture.
 		dc.RebindTexture();
 
 		// Let's not bother if there's no picture.
-		if (!ginfo || (!ginfo->pic1Texture && !ginfo->pic0Texture)) {
+		if (!ginfo || (!ginfo->pic1.texture && !ginfo->pic0.texture)) {
 			return false;
 		}
 	} else {
 		return false;
 	}
 
-	if (ginfo->pic1Texture) {
-		dc.GetThin3DContext()->SetTexture(0, ginfo->pic1Texture);
-	} else if (ginfo->pic0Texture) {
-		dc.GetThin3DContext()->SetTexture(0, ginfo->pic0Texture);
+	if (ginfo->pic1.texture) {
+		dc.GetDrawContext()->BindTexture(0, ginfo->pic1.texture->GetTexture());
+	} else if (ginfo->pic0.texture) {
+		dc.GetDrawContext()->BindTexture(0, ginfo->pic0.texture->GetTexture());
 	}
 
 	uint32_t color = whiteAlpha(ease(progress)) & 0xFFc0c0c0;
@@ -1036,7 +1044,7 @@ UI::EventReturn MainScreen::OnGameSelected(UI::EventParams &e) {
 #endif
 	GameInfo *ginfo = 0;
 	ginfo = g_gameInfoCache->GetInfo(nullptr, path, GAMEINFO_WANTBG);
-	if (ginfo && ginfo->fileType == FILETYPE_PSP_SAVEDATA_DIRECTORY) {
+	if (ginfo && ginfo->fileType == IdentifiedFileType::PSP_SAVEDATA_DIRECTORY) {
 		return UI::EVENT_DONE;
 	}
 
@@ -1118,7 +1126,7 @@ UI::EventReturn MainScreen::OnHomebrewStore(UI::EventParams &e) {
 }
 
 UI::EventReturn MainScreen::OnSupport(UI::EventParams &e) {
-#ifdef ANDROID
+#ifdef __ANDROID__
 	LaunchBrowser("market://details?id=org.ppsspp.ppssppgold");
 #else
 	LaunchBrowser("http://central.ppsspp.org/buygold");
@@ -1145,7 +1153,7 @@ UI::EventReturn MainScreen::OnExit(UI::EventParams &e) {
 	// However, let's make sure the config was saved, since it may not have been.
 	g_Config.Save();
 
-#ifdef ANDROID
+#ifdef __ANDROID__
 #ifdef ANDROID_NDK_PROFILER
 	moncleanup();
 #endif
@@ -1236,19 +1244,19 @@ void UmdReplaceScreen::CreateViews() {
 	root_->Add(rightColumn);
 }
 
-void UmdReplaceScreen::update(InputState &input) {
+void UmdReplaceScreen::update() {
 	UpdateUIState(UISTATE_PAUSEMENU);
-	UIScreen::update(input);
+	UIScreen::update();
 }
 
 UI::EventReturn UmdReplaceScreen::OnGameSelected(UI::EventParams &e) {
 	__UmdReplace(e.s);
-	screenManager()->finishDialog(this, DR_OK);
+	TriggerFinish(DR_OK);
 	return UI::EVENT_DONE;
 }
 
 UI::EventReturn UmdReplaceScreen::OnCancel(UI::EventParams &e) {
-	screenManager()->finishDialog(this, DR_CANCEL);
+	TriggerFinish(DR_CANCEL);
 	return UI::EVENT_DONE;
 }
 
@@ -1259,6 +1267,6 @@ UI::EventReturn UmdReplaceScreen::OnGameSettings(UI::EventParams &e) {
 
 UI::EventReturn UmdReplaceScreen::OnGameSelectedInstant(UI::EventParams &e) {
 	__UmdReplace(e.s);
-	screenManager()->finishDialog(this, DR_OK);
+	TriggerFinish(DR_OK);
 	return UI::EVENT_DONE;
 }

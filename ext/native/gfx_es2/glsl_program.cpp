@@ -49,7 +49,7 @@ GLSLProgram *glsl_create(const char *vshader, const char *fshader, std::string *
 		delete program;
 		return 0;
 	}
-	register_gl_resource_holder(program);
+	register_gl_resource_holder(program, "glsl_program", 0);
 	return program;
 }
 
@@ -70,12 +70,12 @@ GLSLProgram *glsl_create_source(const char *vshader_src, const char *fshader_src
 		delete program;
 		return 0;
 	}
-	register_gl_resource_holder(program);
+	register_gl_resource_holder(program, "glsl_program_src", 0);
 	return program;
 }
 
 // Not wanting to change ReadLocalFile semantics.
-// Needs to use delete [], not delete like auto_ptr, and can't use unique_ptr because of Symbian.
+// TODO: Use C++11 unique_ptr, remove delete[]
 struct AutoCharArrayBuf {
 	AutoCharArrayBuf(char *buf = nullptr) : buf_(buf) {
 	}
@@ -262,13 +262,21 @@ void glsl_destroy(GLSLProgram *program) {
 	delete program;
 }
 
+static const GLSLProgram *curProgram;
+
 void glsl_bind(const GLSLProgram *program) {
 	if (program)
 		glUseProgram(program->program_);
 	else
 		glUseProgram(0);
+	curProgram = program;
 }
 
 void glsl_unbind() {
 	glUseProgram(0);
+	curProgram = nullptr;
+}
+
+const GLSLProgram *glsl_get_program() {
+	return curProgram;
 }

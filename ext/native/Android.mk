@@ -74,6 +74,7 @@ LOCAL_SRC_FILES :=\
     gfx_es2/gl3stub.c \
     gfx_es2/draw_buffer.cpp.arm \
     gfx_es2/draw_text.cpp.arm \
+  	gfx/GLStateCache.cpp.arm \
     gfx/gl_debug_log.cpp \
     gfx/gl_lost_manager.cpp \
     gfx/texture_atlas.cpp \
@@ -89,7 +90,6 @@ LOCAL_SRC_FILES :=\
     ui/ui_screen.cpp \
     ui/ui_context.cpp \
     ui/screen.cpp \
-    ui/virtual_input.cpp \
     util/text/utf8.cpp \
     util/text/parsers.cpp \
     util/text/wrap_text.cpp \

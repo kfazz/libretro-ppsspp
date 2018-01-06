@@ -15,6 +15,9 @@
 // Official git repository and contact information can be found at
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
+#include "ppsspp_config.h"
+#if PPSSPP_ARCH(ARM64)
+
 #include "profiler/profiler.h"
 
 #include "Core/Reporting.h"
@@ -566,6 +569,9 @@ void Arm64Jit::Comp_JumpReg(MIPSOpcode op)
 	
 void Arm64Jit::Comp_Syscall(MIPSOpcode op)
 {
+	if (op.encoding == 0x03FFFFcc) {
+		WARN_LOG(JIT, "Encountered bad syscall instruction at %08x (%08x)", js.compilerPC, op.encoding);
+	}
 	if (!g_Config.bSkipDeadbeefFilling)
 	{
 		// All of these will be overwritten with DEADBEEF anyway.
@@ -599,7 +605,7 @@ void Arm64Jit::Comp_Syscall(MIPSOpcode op)
 	// Skip the CallSyscall where possible.
 	void *quickFunc = GetQuickSyscallFunc(op);
 	if (quickFunc) {
-		MOVI2R(X0, (uintptr_t)GetSyscallInfo(op));
+		MOVI2R(X0, (uintptr_t)GetSyscallFuncPointer(op));
 		// Already flushed, so X1 is safe.
 		QuickCallFunction(X1, quickFunc);
 	} else {
@@ -622,3 +628,5 @@ void Arm64Jit::Comp_Break(MIPSOpcode op)
 }
 
 }   // namespace Mipscomp
+
+#endif // PPSSPP_ARCH(ARM64)

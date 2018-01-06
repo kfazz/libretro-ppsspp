@@ -15,6 +15,8 @@
 // Official SVN repository and contact information can be found at
 // http://code.google.com/p/dolphin-emu/
 
+#include "ppsspp_config.h"
+
 #include "Common.h"
 #include "MemoryUtil.h"
 #include "StringUtils.h"
@@ -48,23 +50,9 @@ static SYSTEM_INFO sys_info;
 #define MEM_PAGE_MASK ((MEM_PAGE_SIZE)-1)
 #define round_page(x) ((((uintptr_t)(x)) + MEM_PAGE_MASK) & ~(MEM_PAGE_MASK))
 
-#ifdef __SYMBIAN32__
-#include <e32std.h>
-#define CODECHUNK_SIZE 1024*1024*20
-static RChunk* g_code_chunk = NULL;
-static RHeap* g_code_heap = NULL;
-static u8* g_next_ptr = NULL;
-static u8* g_orig_ptr = NULL;
-
-void ResetExecutableMemory(void* ptr) {
-	// Just reset the ptr to the base
-	g_next_ptr = g_orig_ptr;
-}
-#endif
-
 #ifdef _WIN32
 // Win32 flags are odd...
-uint32_t ConvertProtFlagsWin32(uint32_t flags) {
+static uint32_t ConvertProtFlagsWin32(uint32_t flags) {
 	uint32_t protect = 0;
 	switch (flags) {
 	case 0: protect = PAGE_NOACCESS; break;
@@ -81,7 +69,7 @@ uint32_t ConvertProtFlagsWin32(uint32_t flags) {
 
 #else
 
-uint32_t ConvertProtFlagsUnix(uint32_t flags) {
+static uint32_t ConvertProtFlagsUnix(uint32_t flags) {
 	uint32_t protect = 0;
 	if (flags & MEM_PROT_READ)
 		protect |= PROT_READ;
@@ -131,10 +119,13 @@ static void *SearchForFreeMem(size_t size) {
 void *AllocateExecutableMemory(size_t size) {
 #if defined(_WIN32)
 	void *ptr;
+	DWORD prot = PAGE_EXECUTE_READWRITE;
+	if (PlatformIsWXExclusive())
+		prot = PAGE_READWRITE;
+	if (sys_info.dwPageSize == 0)
+		GetSystemInfo(&sys_info);
 #if defined(_M_X64)
 	if ((uintptr_t)&hint_location > 0xFFFFFFFFULL) {
-		if (sys_info.dwPageSize == 0)
-			GetSystemInfo(&sys_info);
 
 		size_t aligned_size = round_page(size);
 		ptr = SearchForFreeMem(aligned_size);
@@ -145,27 +136,20 @@ void *AllocateExecutableMemory(size_t size) {
 			ptr = SearchForFreeMem(aligned_size);
 		}
 		if (ptr) {
-			ptr = VirtualAlloc(ptr, aligned_size, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+			ptr = VirtualAlloc(ptr, aligned_size, MEM_RESERVE | MEM_COMMIT, prot);
 		} else {
 			ERROR_LOG(COMMON, "Unable to find nearby executable memory for jit");
 		}
 	}
 	else
 #endif
-		ptr = VirtualAlloc(0, size, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
-#elif defined(__SYMBIAN32__)
-	//This function may be called more than once, and we want to create only one big
-	//memory chunk for all the executable code for the JIT
-	if( g_code_chunk == NULL && g_code_heap == NULL)
 	{
-		g_code_chunk = new RChunk();
-		g_code_chunk->CreateLocalCode(CODECHUNK_SIZE, CODECHUNK_SIZE + 3*GetMemoryProtectPageSize());
-		g_code_heap = UserHeap::ChunkHeap(*g_code_chunk, CODECHUNK_SIZE, 1, CODECHUNK_SIZE + 3*GetMemoryProtectPageSize());
-		g_next_ptr = reinterpret_cast<u8*>(g_code_heap->AllocZ(CODECHUNK_SIZE));
-		g_orig_ptr = g_next_ptr;
+#if PPSSPP_PLATFORM(UWP)
+		ptr = VirtualAllocFromApp(0, size, MEM_RESERVE | MEM_COMMIT, prot);
+#else
+		ptr = VirtualAlloc(0, size, MEM_RESERVE | MEM_COMMIT, prot);
+#endif
 	}
-	void* ptr = (void*)g_next_ptr;
-	g_next_ptr += size;
 #else
 	static char *map_hint = 0;
 #if defined(_M_X64)
@@ -182,7 +166,12 @@ void *AllocateExecutableMemory(size_t size) {
 		map_hint -= round_page(size); /* round down to the next page if we're in high memory */
 	}
 #endif
-	void* ptr = mmap(map_hint, size, PROT_READ | PROT_WRITE	| PROT_EXEC,
+
+	int prot = PROT_READ | PROT_WRITE | PROT_EXEC;
+	if (PlatformIsWXExclusive())
+		prot = PROT_READ | PROT_WRITE;  // POST_EXEC is added later in this case.
+
+	void* ptr = mmap(map_hint, size, prot,
 		MAP_ANON | MAP_PRIVATE
 #if defined(_M_X64) && defined(MAP_32BIT)
 		| ((uintptr_t) map_hint == 0 ? MAP_32BIT : 0)
@@ -191,7 +180,7 @@ void *AllocateExecutableMemory(size_t size) {
 
 #endif /* defined(_WIN32) */
 
-#if !defined(_WIN32) && !defined(__SYMBIAN32__)
+#if !defined(_WIN32)
 	static const void *failed_result = MAP_FAILED;
 #else
 	static const void *failed_result = nullptr;
@@ -199,6 +188,7 @@ void *AllocateExecutableMemory(size_t size) {
 
 	if (ptr == failed_result) {
 		ptr = nullptr;
+		ERROR_LOG(MEMMAP, "Failed to allocate executable memory (%d)", (int)size);
 		PanicAlert("Failed to allocate executable memory\n%s", GetLastErrorMsg());
 	}
 #if defined(_M_X64) && !defined(_WIN32)
@@ -213,26 +203,33 @@ void *AllocateExecutableMemory(size_t size) {
 		}
 	}
 #endif
-
 	return ptr;
 }
 
 void *AllocateMemoryPages(size_t size, uint32_t memProtFlags) {
-	size = (size + 4095) & (~4095);
+	size = round_page(size);
 #ifdef _WIN32
+	if (sys_info.dwPageSize == 0)
+		GetSystemInfo(&sys_info);
 	uint32_t protect = ConvertProtFlagsWin32(memProtFlags);
+#if PPSSPP_PLATFORM(UWP)
+	void* ptr = VirtualAllocFromApp(0, size, MEM_COMMIT, protect);
+#else
 	void* ptr = VirtualAlloc(0, size, MEM_COMMIT, protect);
-#elif defined(__SYMBIAN32__)
-	void* ptr = malloc(size);
+#endif
+	if (!ptr)
+		PanicAlert("Failed to allocate raw memory");
 #else
 	uint32_t protect = ConvertProtFlagsUnix(memProtFlags);
-	void* ptr = mmap(0, size, protect, MAP_ANON | MAP_PRIVATE, -1, 0);
+	void *ptr = mmap(0, size, protect, MAP_ANON | MAP_PRIVATE, -1, 0);
+	if (ptr == MAP_FAILED) {
+		ERROR_LOG(MEMMAP, "Failed to allocate memory pages: errno=%d", errno);
+		return nullptr;
+	}
 #endif
 
 	// printf("Mapped memory at %p (size %ld)\n", ptr,
 	//	(unsigned long)size);
-	if (ptr == NULL)
-		PanicAlert("Failed to allocate raw memory");
 	return ptr;
 }
 
@@ -241,11 +238,8 @@ void *AllocateAlignedMemory(size_t size, size_t alignment) {
 	void* ptr =  _aligned_malloc(size,alignment);
 #else
 	void* ptr = NULL;
-#ifdef ANDROID
+#ifdef __ANDROID__
 	ptr = memalign(alignment, size);
-#elif defined(__SYMBIAN32__)
-	// On Symbian, alignment won't matter as NEON isn't supported.
-	ptr = malloc(size);
 #else
 	if (posix_memalign(&ptr, alignment, size) != 0)
 		ptr = NULL;
@@ -264,12 +258,11 @@ void *AllocateAlignedMemory(size_t size, size_t alignment) {
 void FreeMemoryPages(void *ptr, size_t size) {
 	if (!ptr)
 		return;
-	size = (size + 4095) & (~4095);
+	uintptr_t page_size = GetMemoryProtectPageSize();
+	size = (size + page_size - 1) & (~(page_size - 1));
 #ifdef _WIN32
 	if (!VirtualFree(ptr, 0, MEM_RELEASE))
 		PanicAlert("FreeMemoryPages failed!\n%s", GetLastErrorMsg());
-#elif defined(__SYMBIAN32__)
-	free(ptr);
 #else
 	munmap(ptr, size);
 #endif
@@ -288,7 +281,7 @@ void FreeAlignedMemory(void* ptr) {
 bool PlatformIsWXExclusive() {
 	// Only iOS really needs this mode currently. Even without block linking, still should be much faster than IR JIT.
 	// This might also come in useful for UWP (Universal Windows Platform) if I'm understanding things correctly.
-#ifdef IOS
+#if defined(IOS) || PPSSPP_PLATFORM(UWP)
 	return true;
 #else
 	// Returning true here lets you test the W^X path on Windows and other non-W^X platforms.
@@ -296,31 +289,49 @@ bool PlatformIsWXExclusive() {
 #endif
 }
 
-void ProtectMemoryPages(const void* ptr, size_t size, uint32_t memProtFlags) {
-	VERBOSE_LOG(JIT, "ProtectMemoryPages: %p (%d) : r%d w%d x%d", ptr, (int)size, (memProtFlags & MEM_PROT_READ) != 0, (memProtFlags & MEM_PROT_WRITE) != 0, (memProtFlags & MEM_PROT_EXEC) != 0);
+bool ProtectMemoryPages(const void* ptr, size_t size, uint32_t memProtFlags) {
+	VERBOSE_LOG(JIT, "ProtectMemoryPages: %p (%d) : r%d w%d x%d", ptr, (int)size,
+			(memProtFlags & MEM_PROT_READ) != 0, (memProtFlags & MEM_PROT_WRITE) != 0, (memProtFlags & MEM_PROT_EXEC) != 0);
 
 	if (PlatformIsWXExclusive()) {
-		if ((memProtFlags & (MEM_PROT_WRITE | MEM_PROT_EXEC)) == (MEM_PROT_WRITE | MEM_PROT_EXEC))
+		if ((memProtFlags & (MEM_PROT_WRITE | MEM_PROT_EXEC)) == (MEM_PROT_WRITE | MEM_PROT_EXEC)) {
+			ERROR_LOG(MEMMAP, "Bad memory protection %d!", memProtFlags);
 			PanicAlert("Bad memory protect : W^X is in effect, can't both write and exec");
+		}
 	}
 	// Note - VirtualProtect will affect the full pages containing the requested range.
 	// mprotect does not seem to, at least not on Android unless I made a mistake somewhere, so we manually round.
 #ifdef _WIN32
 	uint32_t protect = ConvertProtFlagsWin32(memProtFlags);
+
+#if PPSSPP_PLATFORM(UWP)
 	DWORD oldValue;
-	if (!VirtualProtect((void *)ptr, size, protect, &oldValue))
+	if (!VirtualProtectFromApp((void *)ptr, size, protect, &oldValue)) {
 		PanicAlert("WriteProtectMemory failed!\n%s", GetLastErrorMsg());
-#elif defined(__SYMBIAN32__)
-	// Do nothing
+		return false;
+	}
+#else
+	DWORD oldValue;
+	if (!VirtualProtect((void *)ptr, size, protect, &oldValue)) {
+		PanicAlert("WriteProtectMemory failed!\n%s", GetLastErrorMsg());
+		return false;
+	}
+#endif
+	return true;
 #else
 	uint32_t protect = ConvertProtFlagsUnix(memProtFlags);
-	uint32_t page_size = GetMemoryProtectPageSize();
+	uintptr_t page_size = GetMemoryProtectPageSize();
 
 	uintptr_t start = (uintptr_t)ptr;
 	uintptr_t end = (uintptr_t)ptr + size;
 	start &= ~(page_size - 1);
 	end = (end + page_size - 1) & ~(page_size - 1);
-	mprotect((void *)start, end - start, protect);
+	int retval = mprotect((void *)start, end - start, protect);
+	if (retval != 0) {
+		ERROR_LOG(MEMMAP, "mprotect failed (%p)! errno=%d (%s)", (void *)start, errno, strerror(errno));
+		return false;
+	}
+	return true;
 #endif
 }
 

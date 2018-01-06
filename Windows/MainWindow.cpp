@@ -23,11 +23,14 @@
 
 #include "Common/CommonWindows.h"
 #include "Common/KeyMap.h"
+#include "Common/OSVersion.h"
+
 #include <Windowsx.h>
 
 #include <map>
 #include <string>
 
+#include "base/display.h"
 #include "base/NativeApp.h"
 #include "Globals.h"
 
@@ -93,7 +96,6 @@ struct VerySleepy_AddrInfo {
 
 static RECT g_normalRC = {0};
 static std::wstring windowTitle;
-extern InputState input_state;
 extern ScreenManager *screenManager;
 
 #define TIMER_CURSORUPDATE 1
@@ -124,7 +126,6 @@ namespace MainWindow
 	bool noFocusPause = false;	// TOGGLE_PAUSE state to override pause on lost focus
 
 #define MAX_LOADSTRING 100
-	const TCHAR *szTitle = TEXT("PPSSPP");
 	const TCHAR *szWindowClass = TEXT("PPSSPPWnd");
 	const TCHAR *szDisplayClass = TEXT("PPSSPPDisplay");
 
@@ -203,15 +204,6 @@ namespace MainWindow
 		rcOuter.top = g_Config.iWindowY;
 	}
 
-	static bool IsWindowSmall() {
-		// Can't take this from config as it will not be set if windows is maximized.
-		RECT rc;
-		GetWindowRect(hwndMain, &rc);
-		int width = rc.right - rc.left;
-		int height = rc.bottom - rc.top;
-		return g_Config.IsPortrait() ? (height < 480 + 80) : (width < 480 + 80);
-	} 
-
 	void SetWindowSize(int zoom) {
 		AssertCurrentThreadName("Main");
 		RECT rc, rcOuter;
@@ -272,6 +264,8 @@ namespace MainWindow
 		// Moves the internal display window to match the inner size of the main window.
 		MoveWindow(hwndDisplay, 0, 0, width, height, TRUE);
 
+		INFO_LOG(SYSTEM, "New width/height: %dx%d", width, height);
+
 		// Setting pixelWidth to be too small could have odd consequences.
 		if (width >= 4 && height >= 4) {
 			// The framebuffer manager reads these once per frame, hopefully safe enough.. should really use a mutex or some
@@ -280,7 +274,9 @@ namespace MainWindow
 			PSP_CoreParameter().pixelHeight = height;
 		}
 
-		if (UpdateScreenScale(width, height, IsWindowSmall())) {
+		INFO_LOG(SYSTEM, "Pixel width/height: %dx%d", PSP_CoreParameter().pixelWidth, PSP_CoreParameter().pixelHeight);
+
+		if (UpdateScreenScale(width, height)) {
 			NativeMessageReceived("gpu resized", "");
 		}
 
@@ -398,7 +394,12 @@ namespace MainWindow
 		if (g_Config.iWindowWidth <= 0 || g_Config.iWindowHeight <= 0) {
 			RECT rcInner = rc, rcOuter;
 			bool portrait = g_Config.IsPortrait();
-			GetWindowRectAtResolution(2 * (portrait ? 272 : 480), 2 * (portrait ? 480 : 272), rcInner, rcOuter);
+
+			// We want to adjust for DPI but still get an integer pixel scaling ratio.
+			double dpi_scale = 96.0 / System_GetPropertyInt(SYSPROP_DISPLAY_DPI);
+			int scale = (int)ceil(2.0 / dpi_scale);
+
+			GetWindowRectAtResolution(scale * (portrait ? 272 : 480), scale * (portrait ? 480 : 272), rcInner, rcOuter);
 			rc.right = rc.left + (rcOuter.right - rcOuter.left);
 			rc.bottom = rc.top + (rcOuter.bottom - rcOuter.top);
 			g_Config.iWindowWidth = rc.right - rc.left;
@@ -516,8 +517,6 @@ namespace MainWindow
 	}
 
 	LRESULT CALLBACK DisplayProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
-		// Only apply a factor > 1 in windowed mode.
-		int factor = !IsZoomed(GetHWND()) && !g_Config.bFullScreen && IsWindowSmall() ? 2 : 1;
 		static bool firstErase = true;
 
 		switch (message) {
@@ -542,28 +541,23 @@ namespace MainWindow
 			// Then never erase, let the OpenGL drawing take care of everything.
 			return 1;
 
-		// Poor man's touch - mouse input. We send the data both as an input_state pointer,
-		// and as asynchronous touch events for minimal latency.
+		// Poor man's touch - mouse input. We send the data  asynchronous touch events for minimal latency.
 		case WM_LBUTTONDOWN:
 			if (!touchHandler.hasTouch() ||
 				(GetMessageExtraInfo() & MOUSEEVENTF_MASK_PLUS_PENTOUCH) != MOUSEEVENTF_FROMTOUCH_NOPEN)
 			{
 				// Hack: Take the opportunity to show the cursor.
 				mouseButtonDown = true;
-				{
-					lock_guard guard(input_state.lock);
-					input_state.mouse_valid = true;
-					input_state.pointer_down[0] = true;
 
-					input_state.pointer_x[0] = GET_X_LPARAM(lParam) * factor; 
-					input_state.pointer_y[0] = GET_Y_LPARAM(lParam) * factor;
-				}
+				float x = GET_X_LPARAM(lParam) * g_dpi_scale;
+				float y = GET_Y_LPARAM(lParam) * g_dpi_scale;
+				WindowsRawInput::SetMousePos(x, y);
 
 				TouchInput touch;
 				touch.id = 0;
 				touch.flags = TOUCH_DOWN;
-				touch.x = input_state.pointer_x[0];
-				touch.y = input_state.pointer_y[0];
+				touch.x = x;
+				touch.y = y;
 				NativeTouch(touch);
 				SetCapture(hWnd);
 
@@ -596,18 +590,16 @@ namespace MainWindow
 				prevCursorX = cursorX;
 				prevCursorY = cursorY;
 
-				{
-					lock_guard guard(input_state.lock);
-					input_state.pointer_x[0] = GET_X_LPARAM(lParam) * factor; 
-					input_state.pointer_y[0] = GET_Y_LPARAM(lParam) * factor;
-				}
+				float x = GET_X_LPARAM(lParam) * g_dpi_scale;
+				float y = GET_Y_LPARAM(lParam) * g_dpi_scale;
+				WindowsRawInput::SetMousePos(x, y);
 
 				if (wParam & MK_LBUTTON) {
 					TouchInput touch;
 					touch.id = 0;
 					touch.flags = TOUCH_MOVE;
-					touch.x = input_state.pointer_x[0];
-					touch.y = input_state.pointer_y[0];
+					touch.x = x;
+					touch.y = y;
 					NativeTouch(touch);
 				}
 			}
@@ -619,17 +611,16 @@ namespace MainWindow
 			{
 				// Hack: Take the opportunity to hide the cursor.
 				mouseButtonDown = false;
-				{
-					lock_guard guard(input_state.lock);
-					input_state.pointer_down[0] = false;
-					input_state.pointer_x[0] = GET_X_LPARAM(lParam) * factor; 
-					input_state.pointer_y[0] = GET_Y_LPARAM(lParam) * factor;
-				}
+
+				float x = GET_X_LPARAM(lParam) * g_dpi_scale;
+				float y = GET_Y_LPARAM(lParam) * g_dpi_scale;
+				WindowsRawInput::SetMousePos(x, y);
+
 				TouchInput touch;
 				touch.id = 0;
 				touch.flags = TOUCH_UP;
-				touch.x = input_state.pointer_x[0];
-				touch.y = input_state.pointer_y[0];
+				touch.x = x;
+				touch.y = y;
 				NativeTouch(touch);
 				ReleaseCapture();
 			}
@@ -650,6 +641,10 @@ namespace MainWindow
 	LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)	{
 		switch (message) {
 		case WM_CREATE:
+			if (!DoesVersionMatchWindows(6, 0, 0, 0, true)) {
+				// Remove the D3D11 choice on versions below XP
+				RemoveMenu(GetMenu(hWnd), ID_OPTIONS_DIRECT3D11, MF_BYCOMMAND);
+			}
 			break;
 			
 		case WM_GETMINMAXINFO:
@@ -868,6 +863,7 @@ namespace MainWindow
 			break;
 
 		case WM_USER_UPDATE_UI:
+			// This also calls ChangeMenu
 			TranslateMenus(hwndMain, menu);
 			break;
 

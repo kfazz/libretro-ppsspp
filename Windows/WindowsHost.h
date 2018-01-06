@@ -21,8 +21,8 @@
 #include <list>
 #include <memory>
 
-extern float mouseDeltaX;
-extern float mouseDeltaY;
+extern float g_mouseDeltaX;
+extern float g_mouseDeltaY;
 
 class GraphicsContext;
 
@@ -41,7 +41,7 @@ public:
 
 	// If returns false, will return a null context
 	bool InitGraphics(std::string *error_message, GraphicsContext **ctx) override;
-	void PollControllers(InputState &input_state) override;
+	void PollControllers() override;
 	void ShutdownGraphics() override;
 
 	void InitSound() override;

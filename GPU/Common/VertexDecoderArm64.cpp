@@ -15,6 +15,9 @@
 // Official git repository and contact information can be found at
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
+#include "ppsspp_config.h"
+#if PPSSPP_ARCH(ARM64)
+
 // This allows highlighting to work.  Yay.
 #ifdef __INTELLISENSE__
 #define ARM64
@@ -89,16 +92,19 @@ static const JitLookup jitLookup[] = {
 	{&VertexDecoder::Step_WeightsU16Skin, &VertexDecoderJitCache::Jit_WeightsU16Skin},
 	{&VertexDecoder::Step_WeightsFloatSkin, &VertexDecoderJitCache::Jit_WeightsFloatSkin},
 
-	{&VertexDecoder::Step_TcU8, &VertexDecoderJitCache::Jit_TcU8},
-	{&VertexDecoder::Step_TcU16, &VertexDecoderJitCache::Jit_TcU16},
 	{&VertexDecoder::Step_TcFloat, &VertexDecoderJitCache::Jit_TcFloat},
+	{&VertexDecoder::Step_TcU8ToFloat, &VertexDecoderJitCache::Jit_TcU8ToFloat},
+	{&VertexDecoder::Step_TcU16ToFloat, &VertexDecoderJitCache::Jit_TcU16ToFloat},
 	{&VertexDecoder::Step_TcU16Double, &VertexDecoderJitCache::Jit_TcU16Double},
+
 	{&VertexDecoder::Step_TcU8Prescale, &VertexDecoderJitCache::Jit_TcU8Prescale},
 	{&VertexDecoder::Step_TcU16Prescale, &VertexDecoderJitCache::Jit_TcU16Prescale},
 	{&VertexDecoder::Step_TcFloatPrescale, &VertexDecoderJitCache::Jit_TcFloatPrescale},
+
 	{&VertexDecoder::Step_TcU16Through, &VertexDecoderJitCache::Jit_TcU16Through},
 	{&VertexDecoder::Step_TcFloatThrough, &VertexDecoderJitCache::Jit_TcFloatThrough},
 	{&VertexDecoder::Step_TcU16ThroughDouble, &VertexDecoderJitCache::Jit_TcU16ThroughDouble},
+	// {&VertexDecoder::Step_TcU16ThroughToFloat, &VertexDecoderJitCache::Jit_TcU16ThroughToFloat},
 
 	{&VertexDecoder::Step_NormalS8, &VertexDecoderJitCache::Jit_NormalS8},
 	{&VertexDecoder::Step_NormalS16, &VertexDecoderJitCache::Jit_NormalS16},
@@ -112,9 +118,11 @@ static const JitLookup jitLookup[] = {
 	{&VertexDecoder::Step_Color4444, &VertexDecoderJitCache::Jit_Color4444},
 	{&VertexDecoder::Step_Color565, &VertexDecoderJitCache::Jit_Color565},
 	{&VertexDecoder::Step_Color5551, &VertexDecoderJitCache::Jit_Color5551},
+
 	{&VertexDecoder::Step_PosS8Through, &VertexDecoderJitCache::Jit_PosS8Through},
 	{&VertexDecoder::Step_PosS16Through, &VertexDecoderJitCache::Jit_PosS16Through},
 	{&VertexDecoder::Step_PosFloatThrough, &VertexDecoderJitCache::Jit_PosFloat},
+
 	{&VertexDecoder::Step_PosS8, &VertexDecoderJitCache::Jit_PosS8},
 	{&VertexDecoder::Step_PosS16, &VertexDecoderJitCache::Jit_PosS16},
 	{&VertexDecoder::Step_PosFloat, &VertexDecoderJitCache::Jit_PosFloat},
@@ -170,10 +178,9 @@ JittedVertexDecoder VertexDecoderJitCache::Compile(const VertexDecoder &dec, int
 
 	// if (skinning) log = true;
 
-	BitSet32 regs_to_save(Arm64Gen::ALL_CALLEE_SAVED);
-	BitSet32 regs_to_save_fp(Arm64Gen::ALL_CALLEE_SAVED_FP);
-	ABI_PushRegisters(regs_to_save);
-	fp.ABI_PushRegisters(regs_to_save_fp);
+	uint64_t regs_to_save = Arm64Gen::ALL_CALLEE_SAVED;
+	uint64_t regs_to_save_fp = Arm64Gen::ALL_CALLEE_SAVED_FP;
+	fp.ABI_PushRegisters(regs_to_save, regs_to_save_fp);
 
 	// Keep the scale/offset in a few fp registers if we need it.
 	if (prescaleStep) {
@@ -242,12 +249,13 @@ JittedVertexDecoder VertexDecoderJitCache::Compile(const VertexDecoder &dec, int
 	const u8 *loopStart = GetCodePtr();
 	for (int i = 0; i < dec.numSteps_; i++) {
 		if (!CompileStep(dec, i)) {
+			EndWrite();
 			// Reset the code ptr (effectively undoing what we generated) and return zero to indicate that we failed.
 			SetCodePtr(const_cast<u8 *>(start));
 			char temp[1024] = {0};
 			dec.ToString(temp);
-			WARN_LOG(HLE, "Could not compile vertex decoder, failed at step %d: %s", i, temp);
-			return 0;
+			ERROR_LOG(G3D, "Could not compile vertex decoder, failed at step %d: %s", i, temp);
+			return nullptr;
 		}
 	}
 
@@ -273,8 +281,7 @@ JittedVertexDecoder VertexDecoderJitCache::Compile(const VertexDecoder &dec, int
 		STRH(INDEX_UNSIGNED, boundsMaxVReg, scratchReg64, offsetof(KnownVertexBounds, maxV));
 	}
 
-	fp.ABI_PopRegisters(regs_to_save_fp);
-	ABI_PopRegisters(regs_to_save);
+	fp.ABI_PopRegisters(regs_to_save, regs_to_save_fp);
 
 	RET();
 
@@ -284,14 +291,14 @@ JittedVertexDecoder VertexDecoderJitCache::Compile(const VertexDecoder &dec, int
 		char temp[1024] = { 0 };
 		dec.ToString(temp);
 		ILOG("=== %s (%d bytes) ===", temp, (int)(GetCodePtr() - start));
-		std::vector<std::string> lines = DisassembleArm64(start, GetCodePtr() - start);
+		std::vector<std::string> lines = DisassembleArm64(start, (int)(GetCodePtr() - start));
 		for (auto line : lines) {
 			ILOG("%s", line.c_str());
 		}
-		ILOG("==========", temp);
+		ILOG("==========");
 	}
 
-	*jittedSize = GetCodePtr() - start;
+	*jittedSize = (int)(GetCodePtr() - start);
 	EndWrite();
 	return (JittedVertexDecoder)start;
 }
@@ -575,16 +582,6 @@ void VertexDecoderJitCache::Jit_Color5551() {
 	CSEL(fullAlphaReg, fullAlphaReg, WZR, CC_EQ);
 }
 
-void VertexDecoderJitCache::Jit_TcU8() {
-	LDURH(tempReg1, srcReg, dec_->tcoff);
-	STR(INDEX_UNSIGNED, tempReg1, dstReg, dec_->decFmt.uvoff);
-}
-
-void VertexDecoderJitCache::Jit_TcU16() {
-	LDUR(tempReg1, srcReg, dec_->tcoff);
-	STR(INDEX_UNSIGNED, tempReg1, dstReg, dec_->decFmt.uvoff);
-}
-
 void VertexDecoderJitCache::Jit_TcU16Through() {
 	LDRH(INDEX_UNSIGNED, tempReg1, srcReg, dec_->tcoff);
 	LDRH(INDEX_UNSIGNED, tempReg2, srcReg, dec_->tcoff + 2);
@@ -639,12 +636,27 @@ void VertexDecoderJitCache::Jit_TcU8Prescale() {
 	fp.STUR(64, neonScratchRegD, dstReg, dec_->decFmt.uvoff);
 }
 
+void VertexDecoderJitCache::Jit_TcU8ToFloat() {
+	fp.LDUR(16, neonScratchRegD, srcReg, dec_->tcoff);
+	fp.UXTL(8, neonScratchRegQ, neonScratchRegD); // Widen to 16-bit
+	fp.UXTL(16, neonScratchRegQ, neonScratchRegD); // Widen to 32-bit
+	fp.UCVTF(32, neonScratchRegD, neonScratchRegD, 7);
+	fp.STUR(64, neonScratchRegD, dstReg, dec_->decFmt.uvoff);
+}
+
 void VertexDecoderJitCache::Jit_TcU16Prescale() {
 	fp.LDUR(32, neonScratchRegD, srcReg, dec_->tcoff);
 	fp.UXTL(16, neonScratchRegQ, neonScratchRegD); // Widen to 32-bit
 	fp.UCVTF(32, neonScratchRegD, neonScratchRegD);
 	fp.FMUL(32, neonScratchRegD, neonScratchRegD, neonUVScaleReg);  // TODO: FMLA
 	fp.FADD(32, neonScratchRegD, neonScratchRegD, neonUVOffsetReg);
+	fp.STUR(64, neonScratchRegD, dstReg, dec_->decFmt.uvoff);
+}
+
+void VertexDecoderJitCache::Jit_TcU16ToFloat() {
+	fp.LDUR(32, neonScratchRegD, srcReg, dec_->tcoff);
+	fp.UXTL(16, neonScratchRegQ, neonScratchRegD); // Widen to 32-bit
+	fp.UCVTF(32, neonScratchRegD, neonScratchRegD, 15);
 	fp.STUR(64, neonScratchRegD, dstReg, dec_->decFmt.uvoff);
 }
 
@@ -783,3 +795,5 @@ void VertexDecoderJitCache::Jit_WriteMatrixMul(int outOff, bool pos) {
 	}
 	fp.STUR(128, accNEON, dstReg, outOff);
 }
+
+#endif // PPSSPP_ARCH(ARM64)

@@ -19,7 +19,6 @@
 #include "Log.h"
 #include "LogManager.h"
 #include "base/NativeApp.h"
-#include "input/input_state.h"
 #include "base/timeutil.h"
 
 #include "Compare.h"
@@ -34,39 +33,35 @@
 #include "android/android-ndk-profiler/prof.h"
 #endif
 
-class PrintfLogger : public LogListener
-{
+class PrintfLogger : public LogListener {
 public:
-	void Log(LogTypes::LOG_LEVELS level, const char *msg)
-	{
-		switch (level)
-		{
+	void Log(const LogMessage &message) {
+		switch (message.level) {
 		case LogTypes::LVERBOSE:
-			fprintf(stderr, "V %s", msg);
+			fprintf(stderr, "V %s", message.msg.c_str());
 			break;
 		case LogTypes::LDEBUG:
-			fprintf(stderr, "D %s", msg);
+			fprintf(stderr, "D %s", message.msg.c_str());
 			break;
 		case LogTypes::LINFO:
-			fprintf(stderr, "I %s", msg);
+			fprintf(stderr, "I %s", message.msg.c_str());
 			break;
 		case LogTypes::LERROR:
-			fprintf(stderr, "E %s", msg);
+			fprintf(stderr, "E %s", message.msg.c_str());
 			break;
 		case LogTypes::LWARNING:
-			fprintf(stderr, "W %s", msg);
+			fprintf(stderr, "W %s", message.msg.c_str());
 			break;
 		case LogTypes::LNOTICE:
 		default:
-			fprintf(stderr, "N %s", msg);
+			fprintf(stderr, "N %s", message.msg.c_str());
 			break;
 		}
 	}
 };
 
-struct InputState;
 // Temporary hacks around annoying linking errors.
-void NativeUpdate(InputState &input_state) { }
+void NativeUpdate() { }
 void NativeRender(GraphicsContext *graphicsContext) { }
 void NativeResized() { }
 
@@ -205,7 +200,7 @@ int main(int argc, const char* argv[])
 	bool verbose = false;
 	const char *stateToLoad = 0;
 	GPUCore gpuCore = GPUCORE_NULL;
-	CPUCore cpuCore = CPU_CORE_JIT;
+	CPUCore cpuCore = CPUCore::JIT;
 	
 	std::vector<std::string> testFilenames;
 	const char *mountIso = 0;
@@ -230,11 +225,11 @@ int main(int argc, const char* argv[])
 		else if (!strcmp(argv[i], "-l") || !strcmp(argv[i], "--log"))
 			fullLog = true;
 		else if (!strcmp(argv[i], "-i"))
-			cpuCore = CPU_CORE_INTERPRETER;
+			cpuCore = CPUCore::INTERPRETER;
 		else if (!strcmp(argv[i], "-j"))
-			cpuCore = CPU_CORE_JIT;
+			cpuCore = CPUCore::JIT;
 		else if (!strcmp(argv[i], "--ir"))
-			cpuCore = CPU_CORE_IRJIT;
+			cpuCore = CPUCore::IR_JIT;
 		else if (!strcmp(argv[i], "-c") || !strcmp(argv[i], "--compare"))
 			autoCompare = true;
 		else if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "--verbose"))
@@ -301,10 +296,10 @@ int main(int argc, const char* argv[])
 
 	for (int i = 0; i < LogTypes::NUMBER_OF_LOGS; i++) {
 		LogTypes::LOG_TYPE type = (LogTypes::LOG_TYPE)i;
-		logman->SetEnable(type, fullLog);
+		logman->SetEnabled(type, fullLog);
 		logman->SetLogLevel(type, LogTypes::LDEBUG);
-		logman->AddListener(type, printfLogger);
 	}
+	logman->AddListener(printfLogger);
 
 	CoreParameter coreParameter;
 	coreParameter.cpuCore = cpuCore;
@@ -358,9 +353,7 @@ int main(int argc, const char* argv[])
 	InitSysDirectories();
 #endif
 
-#if defined(ANDROID)
-#elif defined(BLACKBERRY) || defined(__SYMBIAN32__)
-#elif !defined(_WIN32)
+#if !defined(__ANDROID__) && !defined(_WIN32)
 	g_Config.memStickDirectory = std::string(getenv("HOME")) + "/.ppsspp/";
 #endif
 
@@ -377,7 +370,7 @@ int main(int argc, const char* argv[])
 	if (screenshotFilename != 0)
 		headlessHost->SetComparisonScreenshot(screenshotFilename);
 
-#ifdef ANDROID
+#ifdef __ANDROID__
 	// For some reason the debugger installs it with this name?
 	if (File::Exists("/data/app/org.ppsspp.ppsspp-2.apk")) {
 		VFSRegister("", new ZipAssetReader("/data/app/org.ppsspp.ppsspp-2.apk", "assets/"));

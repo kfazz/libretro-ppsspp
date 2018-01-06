@@ -21,8 +21,6 @@
 
 #include <string>
 
-#include "base/mutex.h"
-
 #include "Common/ChunkFile.h"
 #include "Common/CommonTypes.h"
 
@@ -47,9 +45,12 @@ public:
 	void GetAudioDebugStats(AudioDebugStats *stats);
 
 protected:
+	void UpdateBufferSize();
 	void SetInputSampleRate(unsigned int rate);
 
-	unsigned m_input_sample_rate;
+	int m_bufsize;
+	int m_lowwatermark;
+	unsigned int m_input_sample_rate;
 	int16_t *m_buffer;
 	volatile u32 m_indexW;
 	volatile u32 m_indexR;

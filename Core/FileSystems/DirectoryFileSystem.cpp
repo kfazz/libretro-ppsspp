@@ -15,6 +15,8 @@
 // Official git repository and contact information can be found at
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
+#include "ppsspp_config.h"
+
 #include <limits>
 #include "file/free.h"
 #include "file/zip_read.h"
@@ -36,13 +38,10 @@
 #include <dirent.h>
 #include <unistd.h>
 #include <sys/stat.h>
-#if defined(ANDROID)
+#if defined(__ANDROID__)
 #include <sys/types.h>
 #include <sys/vfs.h>
 #define statvfs statfs
-#elif defined(__SYMBIAN32__)
-#include <mw/QSystemStorageInfo>
-QTM_USE_NAMESPACE
 #else
 #include <sys/statvfs.h>
 #endif
@@ -177,10 +176,9 @@ bool DirectoryFileHandle::Open(std::string &basePath, std::string &fileName, Fil
 	error = 0;
 
 #if HOST_IS_CASE_SENSITIVE
-	if (access & (FILEACCESS_APPEND|FILEACCESS_CREATE|FILEACCESS_WRITE))
-	{
+	if (access & (FILEACCESS_APPEND|FILEACCESS_CREATE|FILEACCESS_WRITE)) {
 		DEBUG_LOG(FILESYS, "Checking case for path %s", fileName.c_str());
-		if ( ! FixPathCase(basePath, fileName, FPC_PATH_MUST_EXIST) )
+		if (!FixPathCase(basePath, fileName, FPC_PATH_MUST_EXIST) )
 			return false;  // or go on and attempt (for a better error code than just 0?)
 	}
 	// else we try fopen first (in case we're lucky) before simulating case insensitivity
@@ -211,12 +209,21 @@ bool DirectoryFileHandle::Open(std::string &basePath, std::string &fileName, Fil
 		sharemode |= FILE_SHARE_WRITE;
 	}
 	if (access & FILEACCESS_CREATE) {
-		openmode = OPEN_ALWAYS;
+		if (access & FILEACCESS_EXCL) {
+			openmode = CREATE_NEW;
+		} else {
+			openmode = OPEN_ALWAYS;
+		}
 	} else {
 		openmode = OPEN_EXISTING;
 	}
-	//Let's do it!
+
+	// Let's do it!
+#if PPSSPP_PLATFORM(UWP)
+	hFile = CreateFile2(ConvertUTF8ToWString(fullName).c_str(), desired, sharemode, openmode, nullptr);
+#else
 	hFile = CreateFile(ConvertUTF8ToWString(fullName).c_str(), desired, sharemode, 0, openmode, 0, 0);
+#endif
 	bool success = hFile != INVALID_HANDLE_VALUE;
 	if (!success) {
 		DWORD w32err = GetLastError();
@@ -224,7 +231,11 @@ bool DirectoryFileHandle::Open(std::string &basePath, std::string &fileName, Fil
 		if (w32err == ERROR_SHARING_VIOLATION) {
 			// Sometimes, the file is locked for write, let's try again.
 			sharemode |= FILE_SHARE_WRITE;
+#if PPSSPP_PLATFORM(UWP)
+			hFile = CreateFile2(ConvertUTF8ToWString(fullName).c_str(), desired, sharemode, openmode, nullptr);
+#else
 			hFile = CreateFile(ConvertUTF8ToWString(fullName).c_str(), desired, sharemode, 0, openmode, 0, 0);
+#endif
 			success = hFile != INVALID_HANDLE_VALUE;
 			if (!success) {
 				w32err = GetLastError();
@@ -253,6 +264,9 @@ bool DirectoryFileHandle::Open(std::string &basePath, std::string &fileName, Fil
 	if (access & FILEACCESS_CREATE) {
 		flags |= O_CREAT;
 	}
+	if (access & FILEACCESS_EXCL) {
+		flags |= O_EXCL;
+	}
 
 	hFile = open(fullName.c_str(), flags, 0666);
 	bool success = hFile != -1;
@@ -260,7 +274,7 @@ bool DirectoryFileHandle::Open(std::string &basePath, std::string &fileName, Fil
 
 #if HOST_IS_CASE_SENSITIVE
 	if (!success && !(access & FILEACCESS_CREATE)) {
-		if ( ! FixPathCase(basePath,fileName, FPC_PATH_MUST_EXIST) )
+		if (!FixPathCase(basePath,fileName, FPC_PATH_MUST_EXIST) )
 			return 0;  // or go on and attempt (for a better error code than just 0?)
 		fullName = GetLocalPath(basePath,fileName); 
 		const char *fullNameC = fullName.c_str();
@@ -280,6 +294,8 @@ bool DirectoryFileHandle::Open(std::string &basePath, std::string &fileName, Fil
 
 #ifndef _WIN32
 	if (success) {
+		// Reject directories, even if we succeed in opening them.
+		// TODO: Might want to do this stat first...
 		struct stat st;
 		if (fstat(hFile, &st) == 0 && S_ISDIR(st.st_mode)) {
 			close(hFile);
@@ -375,8 +391,12 @@ size_t DirectoryFileHandle::Seek(s32 position, FileMove type)
 	case FILEMOVE_CURRENT:  moveMethod = FILE_CURRENT;  break;
 	case FILEMOVE_END:      moveMethod = FILE_END;      break;
 	}
-	DWORD newPos = SetFilePointer(hFile, (LONG)position, 0, moveMethod);
-	return newPos;
+
+	LARGE_INTEGER distance;
+	distance.QuadPart = position;
+	LARGE_INTEGER cursor;
+	DWORD newPos = SetFilePointerEx(hFile, distance, &cursor, moveMethod);
+	return cursor.QuadPart;
 #else
 	int moveMethod = 0;
 	switch (type) {
@@ -507,7 +527,7 @@ int DirectoryFileSystem::RenameFile(const std::string &from, const std::string &
 	const char * fullToC = fullTo.c_str();
 
 #ifdef _WIN32
-	bool retValue = (MoveFile(ConvertUTF8ToWString(fullFrom).c_str(), ConvertUTF8ToWString(fullToC).c_str()) == TRUE);
+	bool retValue = (MoveFileEx(ConvertUTF8ToWString(fullFrom).c_str(), ConvertUTF8ToWString(fullToC).c_str(), 0) == TRUE);
 #else
 	bool retValue = (0 == rename(fullFrom.c_str(), fullToC));
 #endif
@@ -737,7 +757,7 @@ std::vector<PSPFileInfo> DirectoryFileSystem::GetDirListing(std::string path) {
 
 	std::string w32path = GetLocalPath(path) + "\\*.*";
 
-	hFind = FindFirstFile(ConvertUTF8ToWString(w32path).c_str(), &findData);
+	hFind = FindFirstFileEx(ConvertUTF8ToWString(w32path).c_str(), FindExInfoStandard, &findData, FindExSearchNameMatch, NULL, 0);
 
 	if (hFind == INVALID_HANDLE_VALUE) {
 		return myVector; //the empty list

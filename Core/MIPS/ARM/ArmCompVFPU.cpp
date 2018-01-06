@@ -15,6 +15,9 @@
 // Official git repository and contact information can be found at
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
+#include "ppsspp_config.h"
+#if PPSSPP_ARCH(ARM)
+
 #include <cmath>
 #include "math/math_util.h"
 
@@ -153,7 +156,7 @@ namespace MIPSComp
 			} else {
 				fpr.MapRegV(vregs[i], MAP_DIRTY | MAP_NOINIT);
 				fpr.SpillLockV(vregs[i]);
-				MOVI2F(fpr.V(vregs[i]), constantArray[regnum + (abs<<2)], SCRATCHREG1, (bool)negate);
+				MOVI2F(fpr.V(vregs[i]), constantArray[regnum + (abs<<2)], SCRATCHREG1, negate != 0);
 			}
 		}
 	}
@@ -650,7 +653,7 @@ namespace MIPSComp
 		VectorSize sz = GetVecSize(op);
 
 		// TODO: Force read one of them into regs? probably not.
-		u8 sregs[4], tregs[4], dregs[1];
+		u8 sregs[4], dregs[1];
 		GetVectorRegsPrefixS(sregs, sz, vs);
 		GetVectorRegsPrefixD(dregs, V_Single, vd);
 
@@ -2168,6 +2171,10 @@ namespace MIPSComp
 			DISABLE;
 		}
 
+#if PPSSPP_ARCH(ARM_HARDFP)
+		DISABLE;
+#endif
+
 		int vd = _VD;
 		int vs = _VS;
 
@@ -2323,3 +2330,5 @@ namespace MIPSComp
 		DISABLE;
 	}
 }
+
+#endif // PPSSPP_ARCH(ARM)

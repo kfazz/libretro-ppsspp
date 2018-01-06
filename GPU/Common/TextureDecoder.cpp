@@ -28,7 +28,7 @@
 // TODO: Move some common things into here.
 
 #ifdef _M_SSE
-#include <xmmintrin.h>
+#include <emmintrin.h>
 #if _M_SSE >= 0x401
 #include <smmintrin.h>
 #endif
@@ -109,7 +109,7 @@ u32 QuickTexHashNonSSE(const void *checkp, u32 size) {
 			u32 x32[4];
 			u16 x16[8];
 		};
-		u32x4_u16x8 cursor = {0, 0, 0, 0};
+		u32x4_u16x8 cursor{};
 		u32x4_u16x8 cursor2;
 		static const u16 update[8] = {0x2455U, 0x2455U, 0x2455U, 0x2455U, 0x2455U, 0x2455U, 0x2455U, 0x2455U};
 
@@ -152,7 +152,7 @@ u32 QuickTexHashNonSSE(const void *checkp, u32 size) {
 }
 
 static u32 QuickTexHashBasic(const void *checkp, u32 size) {
-#if defined(ARM) && defined(__GNUC__)
+#if PPSSPP_ARCH(ARM) && defined(__GNUC__)
 	__builtin_prefetch(checkp, 0, 0);
 
 	u32 check;
@@ -251,55 +251,59 @@ void DoSwizzleTex16(const u32 *ysrcp, u8 *texptr, int bxc, int byc, u32 pitch) {
 void DoUnswizzleTex16Basic(const u8 *texptr, u32 *ydestp, int bxc, int byc, u32 pitch) {
 	// ydestp is in 32-bits, so this is convenient.
 	const u32 pitchBy32 = pitch >> 2;
+
 #ifdef _M_SSE
-	const __m128i *src = (const __m128i *)texptr;
-	// The pitch parameter is in bytes, so shift down for 128-bit.
-	// Note: it's always aligned to 16 bytes, so this is safe.
-	const u32 pitchBy128 = pitch >> 4;
-	for (int by = 0; by < byc; by++) {
-		__m128i *xdest = (__m128i *)ydestp;
-		for (int bx = 0; bx < bxc; bx++) {
-			__m128i *dest = xdest;
-			for (int n = 0; n < 2; n++) {
-				// Textures are always 16-byte aligned so this is fine.
-				__m128i temp1 = _mm_load_si128(src);
-				__m128i temp2 = _mm_load_si128(src + 1);
-				__m128i temp3 = _mm_load_si128(src + 2);
-				__m128i temp4 = _mm_load_si128(src + 3);
-				_mm_store_si128(dest, temp1);
-				dest += pitchBy128;
-				_mm_store_si128(dest, temp2);
-				dest += pitchBy128;
-				_mm_store_si128(dest, temp3);
-				dest += pitchBy128;
-				_mm_store_si128(dest, temp4);
-				dest += pitchBy128;
-				src += 4;
+	if (((uintptr_t)ydestp & 0xF) == 0) {
+		const __m128i *src = (const __m128i *)texptr;
+		// The pitch parameter is in bytes, so shift down for 128-bit.
+		// Note: it's always aligned to 16 bytes, so this is safe.
+		const u32 pitchBy128 = pitch >> 4;
+		for (int by = 0; by < byc; by++) {
+			__m128i *xdest = (__m128i *)ydestp;
+			for (int bx = 0; bx < bxc; bx++) {
+				__m128i *dest = xdest;
+				for (int n = 0; n < 2; n++) {
+					// Textures are always 16-byte aligned so this is fine.
+					__m128i temp1 = _mm_load_si128(src);
+					__m128i temp2 = _mm_load_si128(src + 1);
+					__m128i temp3 = _mm_load_si128(src + 2);
+					__m128i temp4 = _mm_load_si128(src + 3);
+					_mm_store_si128(dest, temp1);
+					dest += pitchBy128;
+					_mm_store_si128(dest, temp2);
+					dest += pitchBy128;
+					_mm_store_si128(dest, temp3);
+					dest += pitchBy128;
+					_mm_store_si128(dest, temp4);
+					dest += pitchBy128;
+					src += 4;
+				}
+				xdest++;
 			}
-			xdest++;
+			ydestp += pitchBy32 * 8;
 		}
-		ydestp += pitchBy32 * 8;
-	}
-#else
-	const u32 *src = (const u32 *)texptr;
-	for (int by = 0; by < byc; by++) {
-		u32 *xdest = ydestp;
-		for (int bx = 0; bx < bxc; bx++) {
-			u32 *dest = xdest;
-			for (int n = 0; n < 8; n++) {
-				memcpy(dest, src, 16);
-				dest += pitchBy32;
-				src += 4;
-			}
-			xdest += 4;
-		}
-		ydestp += pitchBy32 * 8;
-	}
+	} else
 #endif
+	{
+		const u32 *src = (const u32 *)texptr;
+		for (int by = 0; by < byc; by++) {
+			u32 *xdest = ydestp;
+			for (int bx = 0; bx < bxc; bx++) {
+				u32 *dest = xdest;
+				for (int n = 0; n < 8; n++) {
+					memcpy(dest, src, 16);
+					dest += pitchBy32;
+					src += 4;
+				}
+				xdest += 4;
+			}
+			ydestp += pitchBy32 * 8;
+		}
+	}
 }
 
 #ifndef _M_SSE
-#ifndef ARM64
+#if !PPSSPP_ARCH(ARM64)
 QuickTexHashFunc DoQuickTexHash = &QuickTexHashBasic;
 QuickTexHashFunc StableQuickTexHash = &QuickTexHashNonSSE;
 UnswizzleTex16Func DoUnswizzleTex16 = &DoUnswizzleTex16Basic;
@@ -310,12 +314,12 @@ ReliableHash64Func DoReliableHash64 = &XXH64;
 
 // This has to be done after CPUDetect has done its magic.
 void SetupTextureDecoder() {
-#ifdef HAVE_ARMV7
+#if PPSSPP_ARCH(ARM_NEON) && !PPSSPP_ARCH(ARM64)
 	if (cpu_info.bNEON) {
 		DoQuickTexHash = &QuickTexHashNEON;
 		StableQuickTexHash = &QuickTexHashNEON;
 		DoUnswizzleTex16 = &DoUnswizzleTex16NEON;
-#ifndef IOS
+#if !PPSSPP_PLATFORM(IOS)
 		// Not sure if this is safe on iOS, it's had issues with xxhash.
 		DoReliableHash32 = &ReliableHash32NEON;
 #endif
@@ -328,7 +332,7 @@ static inline u32 makecol(int r, int g, int b, int a) {
 }
 
 // This could probably be done faster by decoding two or four blocks at a time with SSE/NEON.
-void DecodeDXT1Block(u32 *dst, const DXT1Block *src, int pitch, bool ignore1bitAlpha) {
+void DecodeDXT1Block(u32 *dst, const DXT1Block *src, int pitch, int height, bool ignore1bitAlpha) {
 	// S3TC Decoder
 	// Needs more speed and debugging.
 	u16 c1 = (src->color1);
@@ -356,7 +360,7 @@ void DecodeDXT1Block(u32 *dst, const DXT1Block *src, int pitch, bool ignore1bitA
 		colors[3] = makecol(red2, green2, blue2, 0);	// Color2 but transparent
 	}
 
-	for (int y = 0; y < 4; y++) {
+	for (int y = 0; y < height; y++) {
 		int val = src->lines[y];
 		for (int x = 0; x < 4; x++) {
 			dst[x] = colors[val & 3];
@@ -366,11 +370,11 @@ void DecodeDXT1Block(u32 *dst, const DXT1Block *src, int pitch, bool ignore1bitA
 	}
 }
 
-void DecodeDXT3Block(u32 *dst, const DXT3Block *src, int pitch)
+void DecodeDXT3Block(u32 *dst, const DXT3Block *src, int pitch, int height)
 {
-	DecodeDXT1Block(dst, &src->color, pitch, true);
+	DecodeDXT1Block(dst, &src->color, pitch, height, true);
 
-	for (int y = 0; y < 4; y++) {
+	for (int y = 0; y < height; y++) {
 		u32 line = src->alphaLines[y];
 		for (int x = 0; x < 4; x++) {
 			const u8 a4 = line & 0xF;
@@ -392,8 +396,8 @@ static inline u8 lerp6(const DXT5Block *src, int n) {
 }
 
 // The alpha channel is not 100% correct 
-void DecodeDXT5Block(u32 *dst, const DXT5Block *src, int pitch) {
-	DecodeDXT1Block(dst, &src->color, pitch, true);
+void DecodeDXT5Block(u32 *dst, const DXT5Block *src, int pitch, int height) {
+	DecodeDXT1Block(dst, &src->color, pitch, height, true);
 	u8 alpha[8];
 
 	alpha[0] = src->alpha1;
@@ -416,7 +420,7 @@ void DecodeDXT5Block(u32 *dst, const DXT5Block *src, int pitch) {
 
 	u64 data = ((u64)(u16)src->alphadata1 << 32) | (u32)src->alphadata2;
 
-	for (int y = 0; y < 4; y++) {
+	for (int y = 0; y < height; y++) {
 		for (int x = 0; x < 4; x++) {
 			dst[x] = (dst[x] & 0xFFFFFF) | (alpha[data & 7] << 24);
 			data >>= 3;
@@ -614,7 +618,7 @@ CheckAlphaResult CheckAlphaRGBA8888Basic(const u32 *pixelData, int stride, int w
 	if ((w & 3) == 0 && (stride & 3) == 0) {
 #ifdef _M_SSE
 		return CheckAlphaRGBA8888SSE2(pixelData, stride, w, h);
-#elif (defined(ARM) && defined(HAVE_ARMV7)) || defined(ARM64)
+#elif PPSSPP_ARCH(ARMV7) || PPSSPP_ARCH(ARM64)
 		if (cpu_info.bNEON) {
 			return CheckAlphaRGBA8888NEON(pixelData, stride, w, h);
 		}
@@ -648,7 +652,7 @@ CheckAlphaResult CheckAlphaABGR4444Basic(const u32 *pixelData, int stride, int w
 	if ((w & 7) == 0 && (stride & 7) == 0) {
 #ifdef _M_SSE
 		return CheckAlphaABGR4444SSE2(pixelData, stride, w, h);
-#elif (defined(ARM) && defined(HAVE_ARMV7)) || defined(ARM64)
+#elif PPSSPP_ARCH(ARMV7) || PPSSPP_ARCH(ARM64)
 		if (cpu_info.bNEON) {
 			return CheckAlphaABGR4444NEON(pixelData, stride, w, h);
 		}
@@ -685,7 +689,7 @@ CheckAlphaResult CheckAlphaABGR1555Basic(const u32 *pixelData, int stride, int w
 	if ((w & 7) == 0 && (stride & 7) == 0) {
 #ifdef _M_SSE
 		return CheckAlphaABGR1555SSE2(pixelData, stride, w, h);
-#elif (defined(ARM) && defined(HAVE_ARMV7)) || defined(ARM64)
+#elif PPSSPP_ARCH(ARMV7) || PPSSPP_ARCH(ARM64)
 		if (cpu_info.bNEON) {
 			return CheckAlphaABGR1555NEON(pixelData, stride, w, h);
 		}

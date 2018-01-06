@@ -17,7 +17,8 @@
 
 #pragma once
 
-#include "base/functional.h"
+#include <functional>
+
 #include "ui/ui_screen.h"
 #include "ui/viewgroup.h"
 #include "net/http_client.h"
@@ -61,11 +62,11 @@ public:
 	StoreScreen();
 	~StoreScreen();
 
-	virtual void update(InputState &input);
-	virtual std::string tag() const { return "store"; }
+	void update() override;
+	std::string tag() const override { return "store"; }
 
 protected:
-	virtual void CreateViews();
+	void CreateViews() override;
 	UI::EventReturn OnGameSelected(UI::EventParams &e);
 	UI::EventReturn OnRetry(UI::EventParams &e);
 	UI::EventReturn OnGameLaunch(UI::EventParams &e);
@@ -98,5 +99,6 @@ private:
 	std::string lang_;
 
 	UI::ViewGroup *productPanel_;
+	UI::TextView *titleText_;
 };
 

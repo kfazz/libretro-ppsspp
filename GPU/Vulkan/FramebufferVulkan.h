@@ -38,12 +38,6 @@ class ShaderManagerVulkan;
 class VulkanTexture;
 class VulkanPushBuffer;
 
-struct PostShaderUniforms {
-	float texelDelta[2]; float pad[2];
-	float pixelDelta[2]; float pad0[2];
-	float time[4];
-};
-
 static const char *ub_post_shader =
 R"(	vec2 texelDelta;
 	vec2 pixelDelta;
@@ -64,36 +58,21 @@ struct AsyncPBOVulkan {
 	bool reading;
 };
 
-struct CardboardSettings {
-	bool enabled;
-	float leftEyeXPosition;
-	float rightEyeXPosition;
-	float screenYPosition;
-	float screenWidth;
-	float screenHeight;
-};
-
 class FramebufferManagerVulkan : public FramebufferManagerCommon {
 public:
-	FramebufferManagerVulkan(VulkanContext *vulkan);
+	FramebufferManagerVulkan(Draw::DrawContext *draw, VulkanContext *vulkan);
 	~FramebufferManagerVulkan();
 
-	void SetTextureCache(TextureCacheVulkan *tc) {
-		textureCache_ = tc;
-	}
-	void SetShaderManager(ShaderManagerVulkan *sm) {
-		shaderManager_ = sm;
-	}
+	void SetTextureCache(TextureCacheVulkan *tc);
+	void SetShaderManager(ShaderManagerVulkan *sm);
 	void SetDrawEngine(DrawEngineVulkan *td) {
 		drawEngine_ = td;
 	}
 
-	void DrawPixels(VirtualFramebuffer *vfb, int dstX, int dstY, const u8 *srcPixels, GEBufferFormat srcPixelFormat, int srcStride, int width, int height) override;
-	void DrawFramebufferToOutput(const u8 *srcPixels, GEBufferFormat srcPixelFormat, int srcStride, bool applyPostShader) override;
-
 	// If texture != 0, will bind it.
 	// x,y,w,h are relative to destW, destH which fill out the target completely.
 	void DrawTexture(VulkanTexture *texture, float x, float y, float w, float h, float destW, float destH, float u0, float v0, float u1, float v1, VkPipeline pipeline, int uvRotation);
+	void DrawActiveTexture(float x, float y, float w, float h, float destW, float destH, float u0, float v0, float u1, float v1, int uvRotation, bool linearFilter) override;
 
 	void DestroyAllFBOs(bool forceDelete);
 
@@ -102,13 +81,13 @@ public:
 	void BeginFrameVulkan();  // there's a BeginFrame in the base class, which this calls
 	void EndFrame();
 
-	void Resized();
+	void Resized() override;
 	void DeviceLost();
-	void CopyDisplayToOutput();
+	void DeviceRestore(VulkanContext *vulkan);
 	int GetLineWidth();
-	void ReformatFramebufferFrom(VirtualFramebuffer *vfb, GEBufferFormat old);
+	void ReformatFramebufferFrom(VirtualFramebuffer *vfb, GEBufferFormat old) override;
 
-	void BlitFramebufferDepth(VirtualFramebuffer *src, VirtualFramebuffer *dst);
+	void BlitFramebufferDepth(VirtualFramebuffer *src, VirtualFramebuffer *dst) override;
 
 	// For use when texturing from a framebuffer.  May create a duplicate if target.
 	VulkanTexture *GetFramebufferColor(u32 fbRawAddress, VirtualFramebuffer *framebuffer, int flags);
@@ -121,20 +100,14 @@ public:
 
 	bool NotifyStencilUpload(u32 addr, int size, bool skipZero = false) override;
 
-	void DestroyFramebuf(VirtualFramebuffer *vfb) override;
-	void ResizeFramebufFBO(VirtualFramebuffer *vfb, u16 w, u16 h, bool force = false, bool skipCopy = false) override;
-
-	bool GetFramebuffer(u32 fb_address, int fb_stride, GEBufferFormat format, GPUDebugBuffer &buffer);
-	bool GetDepthbuffer(u32 fb_address, int fb_stride, u32 z_address, int z_stride, GPUDebugBuffer &buffer);
-	bool GetStencilbuffer(u32 fb_address, int fb_stride, GPUDebugBuffer &buffer);
-	static bool GetDisplayFramebuffer(GPUDebugBuffer &buffer);
+	bool GetFramebuffer(u32 fb_address, int fb_stride, GEBufferFormat format, GPUDebugBuffer &buffer, int maxRes) override;
+	bool GetDepthbuffer(u32 fb_address, int fb_stride, u32 z_address, int z_stride, GPUDebugBuffer &buffer) override;
+	bool GetStencilbuffer(u32 fb_address, int fb_stride, GPUDebugBuffer &buffer) override;
+	bool GetOutputFramebuffer(GPUDebugBuffer &buffer) override;
 
 	virtual void RebindFramebuffer() override;
 
 	// VulkanFBO *GetTempFBO(u16 w, u16 h, VulkanFBOColorDepth depth = VK_FBO_8888);
-
-	// Cardboard Settings Calculator
-	struct CardboardSettings * GetCardboardSettings(struct CardboardSettings * cardboardSettings);
 
 	// Pass management
 	// void BeginPassClear()
@@ -147,25 +120,22 @@ public:
 	}
 
 protected:
+	void Bind2DShader() override;
+	void BindPostShader(const PostShaderUniforms &uniforms) override;
+	void SetViewport2D(int x, int y, int w, int h) override;
 	void DisableState() override {}
 	void ClearBuffer(bool keepState = false) override;
 	void FlushBeforeCopy() override;
-	void DecimateFBOs() override;
 
 	// Used by ReadFramebufferToMemory and later framebuffer block copies
 	void BlitFramebuffer(VirtualFramebuffer *dst, int dstX, int dstY, VirtualFramebuffer *src, int srcX, int srcY, int w, int h, int bpp) override;
-
-	void NotifyRenderFramebufferCreated(VirtualFramebuffer *vfb) override;
-	void NotifyRenderFramebufferSwitched(VirtualFramebuffer *prevVfb, VirtualFramebuffer *vfb, bool isClearingDepth) override;
-	void NotifyRenderFramebufferUpdated(VirtualFramebuffer *vfb, bool vfbFormatChanged) override;
 	bool CreateDownloadTempBuffer(VirtualFramebuffer *nvfb) override;
 	void UpdateDownloadTempBuffer(VirtualFramebuffer *nvfb) override;
-
 
 private:
 
 	// The returned texture does not need to be free'd, might be returned from a pool (currently single entry)
-	VulkanTexture *MakePixelTexture(const u8 *srcPixels, GEBufferFormat srcPixelFormat, int srcStride, int width, int height);
+	void MakePixelTexture(const u8 *srcPixels, GEBufferFormat srcPixelFormat, int srcStride, int width, int height, float &u1, float &v1) override;
 	void DoNotifyDraw();
 
 	VkCommandBuffer AllocFrameCommandBuffer();
@@ -173,6 +143,9 @@ private:
 
 	void PackFramebufferAsync_(VirtualFramebuffer *vfb);
 	void PackFramebufferSync_(VirtualFramebuffer *vfb, int x, int y, int w, int h);
+
+	void InitDeviceObjects();
+	void DestroyDeviceObjects();
 
 	VulkanContext *vulkan_;
 
@@ -189,8 +162,8 @@ private:
 	u8 *convBuf_;
 	u32 convBufSize_;
 
-	TextureCacheVulkan *textureCache_;
-	ShaderManagerVulkan *shaderManager_;
+	TextureCacheVulkan *textureCacheVulkan_;
+	ShaderManagerVulkan *shaderManagerVulkan_;
 	DrawEngineVulkan *drawEngine_;
 
 	bool resized_;

@@ -40,6 +40,7 @@
 #include "GPU/Common/VertexDecoderCommon.h"
 #include "GPU/Common/DrawEngineCommon.h"
 #include "GPU/Common/GPUStateUtils.h"
+#include "GPU/Vulkan/StateMappingVulkan.h"
 
 struct DecVtxFormat;
 struct UVScale;
@@ -87,40 +88,11 @@ public:
 		framebufferManager_ = fbManager;
 	}
 
-	void Resized();  // TODO: Call
+	void DeviceLost();
+	void DeviceRestore(VulkanContext *vulkan);
 
 	void SetupVertexDecoder(u32 vertType);
 	void SetupVertexDecoderInternal(u32 vertType);
-
-	// This requires a SetupVertexDecoder call first.
-	int EstimatePerVertexCost() {
-		// TODO: This is transform cost, also account for rasterization cost somehow... although it probably
-		// runs in parallel with transform.
-
-		// Also, this is all pure guesswork. If we can find a way to do measurements, that would be great.
-
-		// GTA wants a low value to run smooth, GoW wants a high value (otherwise it thinks things
-		// went too fast and starts doing all the work over again).
-
-		int cost = 20;
-		if (gstate.isLightingEnabled()) {
-			cost += 10;
-
-			for (int i = 0; i < 4; i++) {
-				if (gstate.isLightChanEnabled(i))
-					cost += 10;
-			}
-		}
-
-		if (gstate.getUVGenMode() != GE_TEXMAP_TEXTURE_COORDS) {
-			cost += 20;
-		}
-		if (dec_ && dec_->morphcount > 1) {
-			cost += 5 * dec_->morphcount;
-		}
-
-		return cost;
-	}
 
 	// So that this can be inlined
 	void Flush(VkCommandBuffer cmd) {
@@ -150,7 +122,7 @@ public:
 	void DirtyAllUBOs();
 
 	VulkanPushBuffer *GetPushBufferForTextureData() {
-		return frame_[curFrame_].pushUBO;
+		return frame_[curFrame_ & 1].pushUBO;
 	}
 
 	const DrawEngineVulkanStats &GetStats() const {
@@ -159,6 +131,11 @@ public:
 
 private:
 	struct FrameData;
+
+	void ConvertStateToVulkanKey(FramebufferManagerVulkan &fbManager, ShaderManagerVulkan *shaderManager, int prim, VulkanPipelineRasterStateKey &key, VulkanDynamicState &dynState);
+
+	void InitDeviceObjects();
+	void DestroyDeviceObjects();
 
 	void DecodeVerts(VulkanPushBuffer *push, uint32_t *bindOffset, VkBuffer *vkbuf);
 	void DecodeVertsStep(u8 *dest, int &i, int &decodedVerts);
@@ -200,6 +177,8 @@ private:
 		VulkanPushBuffer *pushIndex;
 		// We do rolling allocation and reset instead of caching across frames. That we might do later.
 		std::map<DescriptorSetKey, VkDescriptorSet> descSets;
+
+		void Destroy(VulkanContext *vulkan);
 	};
 
 	int curFrame_;
@@ -233,17 +212,17 @@ private:
 	TransformedVertex *transformedExpanded;
 
 	// Other
-	ShaderManagerVulkan *shaderManager_;
-	PipelineManagerVulkan *pipelineManager_;
-	TextureCacheVulkan *textureCache_;
-	FramebufferManagerVulkan *framebufferManager_;
+	ShaderManagerVulkan *shaderManager_ = nullptr;
+	PipelineManagerVulkan *pipelineManager_ = nullptr;
+	TextureCacheVulkan *textureCache_ = nullptr;
+	FramebufferManagerVulkan *framebufferManager_ = nullptr;
 
 	VkSampler depalSampler_;
 
 	enum { MAX_DEFERRED_DRAW_CALLS = 128 };
 
 	// State cache
-	uint32_t dirtyUniforms_;
+	uint64_t dirtyUniforms_;
 	uint32_t baseUBOOffset;
 	uint32_t lightUBOOffset;
 	uint32_t boneUBOOffset;
@@ -258,10 +237,61 @@ private:
 	DeferredDrawCall drawCalls[MAX_DEFERRED_DRAW_CALLS];
 	int numDrawCalls;
 	int vertexCountInDrawCalls;
-	UVScale *uvScale;
-
-	bool fboTexNeedBind_;
-	bool fboTexBound_;
+	UVScale uvScale[MAX_DEFERRED_DRAW_CALLS];
 
 	DrawEngineVulkanStats stats_;
+
+	// Hardware tessellation
+	class TessellationDataTransferVulkan : public TessellationDataTransfer {
+	private:
+		VulkanContext *vulkan;
+		VulkanTexture *data_tex[3];
+		VkSampler sampler;
+	public:
+		TessellationDataTransferVulkan(VulkanContext *vulkan) 
+			: TessellationDataTransfer(), vulkan(vulkan), data_tex(), sampler() {
+			for (int i = 0; i < 3; i++)
+				data_tex[i] = new VulkanTexture(vulkan);
+
+			CreateSampler();
+		}
+		~TessellationDataTransferVulkan() {
+			for (int i = 0; i < 3; i++)
+				delete data_tex[i];
+
+			vulkan->Delete().QueueDeleteSampler(sampler);
+		}
+		void SendDataToShader(const float *pos, const float *tex, const float *col, int size, bool hasColor, bool hasTexCoords) override;
+		void PrepareBuffers(float *&pos, float *&tex, float *&col, int size, bool hasColor, bool hasTexCoords) override;
+		VulkanTexture *GetTexture(int i) const { return data_tex[i]; }
+		VkSampler GetSampler() const { return sampler; }
+		void CreateSampler() {
+			VkSamplerCreateInfo samp = { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+			samp.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+			samp.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+			samp.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+			samp.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+			samp.compareOp = VK_COMPARE_OP_NEVER;
+			samp.flags = 0;
+			samp.magFilter =VK_FILTER_NEAREST;
+			samp.minFilter = VK_FILTER_NEAREST;
+			samp.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+
+			if (gstate_c.Supports(GPU_SUPPORTS_ANISOTROPY) && g_Config.iAnisotropyLevel > 0) {
+				// Docs say the min of this value and the supported max are used.
+				samp.maxAnisotropy = 1 << g_Config.iAnisotropyLevel;
+				samp.anisotropyEnable = true;
+			} else {
+				samp.maxAnisotropy = 1.0f;
+				samp.anisotropyEnable = false;
+			}
+
+			samp.maxLod = 1.0f;
+			samp.minLod = 0.0f;
+			samp.mipLodBias = 0.0f;
+
+			VkResult res = vkCreateSampler(vulkan->GetDevice(), &samp, nullptr, &sampler);
+			assert(res == VK_SUCCESS);
+		}
+	};
 };

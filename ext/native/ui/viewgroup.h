@@ -2,9 +2,9 @@
 
 #include <vector>
 #include <set>
+#include <mutex>
 
 #include "base/logging.h"
-#include "base/mutex.h"
 #include "math/geom2d.h"
 #include "input/gesture_detector.h"
 #include "ui/view.h"
@@ -32,7 +32,7 @@ public:
 	// By default, a container will layout to its own bounds.
 	virtual void Measure(const UIContext &dc, MeasureSpec horiz, MeasureSpec vert) override = 0;
 	virtual void Layout() override = 0;
-	virtual void Update(const InputState &input_state) override;
+	virtual void Update() override;
 	virtual void Query(float x, float y, std::vector<View *> &list) override;
 
 	virtual void Draw(UIContext &dc) override;
@@ -44,7 +44,7 @@ public:
 	// Takes ownership! DO NOT add a view to multiple parents!
 	template <class T>
 	T *Add(T *view) {
-		lock_guard guard(modifyLock_);
+		std::lock_guard<std::mutex> guard(modifyLock_);
 		views_.push_back(view);
 		return view;
 	}
@@ -69,6 +69,7 @@ public:
 	View *GetViewByIndex(int index) { return views_[index]; }
 	int GetNumSubviews() const { return (int)views_.size(); }
 	void SetHasDropShadow(bool has) { hasDropShadow_ = has; }
+	void SetDropShadowExpand(float s) { dropShadowExpand_ = s; }
 
 	void Lock() { modifyLock_.lock(); }
 	void Unlock() { modifyLock_.unlock(); }
@@ -77,10 +78,11 @@ public:
 	std::string Describe() const override { return "ViewGroup: " + View::Describe(); }
 
 protected:
-	recursive_mutex modifyLock_;  // Hold this when changing the subviews.
+	std::mutex modifyLock_;  // Hold this when changing the subviews.
 	std::vector<View *> views_;
 	View *defaultFocusView_;
 	Drawable bg_;
+	float dropShadowExpand_ = 0.0f;
 	bool hasDropShadow_;
 	bool clip_;
 };
@@ -244,7 +246,7 @@ public:
 	void ScrollToBottom();
 	void ScrollRelative(float distance);
 	bool CanScroll() const;
-	void Update(const InputState &input_state) override;
+	void Update() override;
 
 	// Override so that we can scroll to the active one after moving the focus.
 	bool SubviewFocused(View *view) override;
@@ -319,14 +321,7 @@ public:
 		return tabContents;
 	}
 
-	void SetCurrentTab(int tab) {
-		if (tab != currentTab_) {
-			tabs_[currentTab_]->SetVisibility(V_GONE);
-			currentTab_ = tab;
-			tabs_[currentTab_]->SetVisibility(V_VISIBLE);
-		}
-		tabStrip_->SetSelection(tab);
-	}
+	void SetCurrentTab(int tab);
 
 	int GetCurrentTab() const { return currentTab_; }
 	std::string Describe() const override { return "TabHolder: " + View::Describe(); }
@@ -408,14 +403,10 @@ private:
 };
 
 void LayoutViewHierarchy(const UIContext &dc, ViewGroup *root);
-void UpdateViewHierarchy(const InputState &input_state, ViewGroup *root);
+void UpdateViewHierarchy(ViewGroup *root);
 // Hooks arrow keys for navigation
 bool KeyEvent(const KeyInput &key, ViewGroup *root);
 bool TouchEvent(const TouchInput &touch, ViewGroup *root);
 bool AxisEvent(const AxisInput &axis, ViewGroup *root);
-
-void CaptureDrag(int id);
-void ReleaseDrag(int id);
-bool IsDragCaptured(int id);
 
 }  // namespace UI

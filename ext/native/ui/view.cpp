@@ -1,7 +1,7 @@
 #include <queue>
 #include <algorithm>
+#include <mutex>
 
-#include "base/mutex.h"
 #include "base/stringutil.h"
 #include "base/timeutil.h"
 #include "input/input_state.h"
@@ -20,7 +20,7 @@ namespace UI {
 static View *focusedView;
 static bool focusMovementEnabled;
 bool focusForced;
-static recursive_mutex mutex_;
+static std::recursive_mutex eventMutex_;  // needs recursivity!
 
 const float ITEM_HEIGHT = 64.f;
 const float MIN_TEXT_SCALE = 0.8f;
@@ -33,9 +33,8 @@ struct DispatchQueueItem {
 
 std::deque<DispatchQueueItem> g_dispatchQueue;
 
-
 void EventTriggered(Event *e, EventParams params) {
-	lock_guard guard(mutex_);
+	std::unique_lock<std::recursive_mutex> guard(eventMutex_);
 
 	DispatchQueueItem item;
 	item.e = e;
@@ -44,7 +43,7 @@ void EventTriggered(Event *e, EventParams params) {
 }
 
 void DispatchEvents() {
-	lock_guard guard(mutex_);
+	std::unique_lock<std::recursive_mutex> guard(eventMutex_);
 
 	while (!g_dispatchQueue.empty()) {
 		DispatchQueueItem item = g_dispatchQueue.back();
@@ -235,7 +234,7 @@ bool View::SetFocus() {
 }
 
 void Clickable::Click() {
-	UI::EventParams e;
+	UI::EventParams e{};
 	e.v = this;
 	OnClick.Trigger(e);
 };
@@ -300,7 +299,7 @@ bool IsAcceptKey(const KeyInput &key) {
 		if (key.deviceId == DEVICE_ID_KEYBOARD) {
 			return key.keyCode == NKCODE_SPACE || key.keyCode == NKCODE_ENTER || key.keyCode == NKCODE_Z;
 		} else {
-			return key.keyCode == NKCODE_BUTTON_A || key.keyCode == NKCODE_BUTTON_CROSS || key.keyCode == NKCODE_BUTTON_1;
+			return key.keyCode == NKCODE_BUTTON_A || key.keyCode == NKCODE_BUTTON_CROSS || key.keyCode == NKCODE_BUTTON_1 || key.keyCode == NKCODE_DPAD_CENTER;
 		}
 	} else {
 		return MatchesKeyDef(confirmKeys, key);
@@ -523,16 +522,16 @@ void Choice::Draw(UIContext &dc) {
 
 void InfoItem::Draw(UIContext &dc) {
 	Item::Draw(dc);
-	if (HasFocus()) {
-		UI::Style style = dc.theme->itemFocusedStyle;
-		style.background.color &= 0x7fffffff;
-		dc.FillRect(style.background, bounds_);
-	}
+
+	UI::Style style = HasFocus() ? dc.theme->itemFocusedStyle : dc.theme->infoStyle;
+	style.background.color &= 0x7fffffff;
+	dc.FillRect(style.background, bounds_);
+
 	int paddingX = 12;
 
 	dc.SetFontStyle(dc.theme->uiFont);
-	dc.DrawText(text_.c_str(), bounds_.x + paddingX, bounds_.centerY(), 0xFFFFFFFF, ALIGN_VCENTER);
-	dc.DrawText(rightText_.c_str(), bounds_.x2() - paddingX, bounds_.centerY(), 0xFFFFFFFF, ALIGN_VCENTER | ALIGN_RIGHT);
+	dc.DrawText(text_.c_str(), bounds_.x + paddingX, bounds_.centerY(), style.fgColor, ALIGN_VCENTER);
+	dc.DrawText(rightText_.c_str(), bounds_.x2() - paddingX, bounds_.centerY(), style.fgColor, ALIGN_VCENTER | ALIGN_RIGHT);
 // 	dc.Draw()->DrawImageStretch(dc.theme->whiteImage, bounds_.x, bounds_.y, bounds_.x2(), bounds_.y + 2, dc.theme->itemDownStyle.bgColor);
 }
 
@@ -544,8 +543,8 @@ ItemHeader::ItemHeader(const std::string &text, LayoutParams *layoutParams)
 
 void ItemHeader::Draw(UIContext &dc) {
 	dc.SetFontStyle(dc.theme->uiFontSmall);
-	dc.DrawText(text_.c_str(), bounds_.x + 4, bounds_.centerY(), 0xFFFFFFFF, ALIGN_LEFT | ALIGN_VCENTER);
-	dc.Draw()->DrawImageStretch(dc.theme->whiteImage, bounds_.x, bounds_.y2()-2, bounds_.x2(), bounds_.y2(), 0xFFFFFFFF);
+	dc.DrawText(text_.c_str(), bounds_.x + 4, bounds_.centerY(), dc.theme->headerStyle.fgColor, ALIGN_LEFT | ALIGN_VCENTER);
+	dc.Draw()->DrawImageStretch(dc.theme->whiteImage, bounds_.x, bounds_.y2()-2, bounds_.x2(), bounds_.y2(), dc.theme->headerStyle.fgColor);
 }
 
 void PopupHeader::Draw(UIContext &dc) {
@@ -698,7 +697,7 @@ void ImageView::Draw(UIContext &dc) {
 	dc.Draw()->DrawImage(atlasImage_, bounds_.x, bounds_.y, scale, 0xFFFFFFFF, ALIGN_TOPLEFT);
 }
 
-void Thin3DTextureView::GetContentDimensions(const UIContext &dc, float &w, float &h) const {
+void TextureView::GetContentDimensions(const UIContext &dc, float &w, float &h) const {
 	// TODO: involve sizemode
 	if (texture_) {
 		w = (float)texture_->Width();
@@ -709,11 +708,11 @@ void Thin3DTextureView::GetContentDimensions(const UIContext &dc, float &w, floa
 	}
 }
 
-void Thin3DTextureView::Draw(UIContext &dc) {
+void TextureView::Draw(UIContext &dc) {
 	// TODO: involve sizemode
 	if (texture_) {
 		dc.Flush();
-		dc.GetThin3DContext()->SetTexture(0, texture_);
+		dc.GetDrawContext()->BindTexture(0, texture_);
 		dc.Draw()->Rect(bounds_.x, bounds_.y, bounds_.w, bounds_.h, color_);
 		dc.Flush();
 		dc.RebindTexture();
@@ -757,14 +756,16 @@ void TextView::Draw(UIContext &dc) {
 		uint32_t shadowColor = 0x80000000;
 		dc.DrawTextRect(text_.c_str(), bounds_, shadowColor, textAlign_);
 	}
-	dc.DrawTextRect(text_.c_str(), bounds_, textColor_, textAlign_);
+	uint32_t textColor = hasTextColor_ ? textColor_ : dc.theme->infoStyle.fgColor;
+	dc.DrawTextRect(text_.c_str(), bounds_, textColor, textAlign_);
 	if (clip) {
 		dc.PopScissor();
 	}
 }
 
 TextEdit::TextEdit(const std::string &text, const std::string &placeholderText, LayoutParams *layoutParams)
-  : View(layoutParams), text_(text), undo_(text), placeholderText_(placeholderText), maxLen_(255), ctrlDown_(false) {
+  : View(layoutParams), text_(text), undo_(text), placeholderText_(placeholderText),
+    textColor_(0xFFFFFFFF), maxLen_(255) {
 	caret_ = (int)text_.size();
 }
 
@@ -773,6 +774,7 @@ void TextEdit::Draw(UIContext &dc) {
 	dc.SetFontStyle(dc.theme->uiFont);
 	dc.FillRect(HasFocus() ? UI::Drawable(0x80000000) : UI::Drawable(0x30000000), bounds_);
 
+	uint32_t textColor = hasTextColor_ ? textColor_ : dc.theme->infoStyle.fgColor;
 	float textX = bounds_.x;
 	float w, h;
 
@@ -781,10 +783,11 @@ void TextEdit::Draw(UIContext &dc) {
 
 	if (text_.empty()) {
 		if (placeholderText_.size()) {
-			dc.DrawTextRect(placeholderText_.c_str(), bounds_, 0x50FFFFFF, ALIGN_CENTER);
+			uint32_t c = textColor & 0x50FFFFFF;
+			dc.DrawTextRect(placeholderText_.c_str(), bounds_, c, ALIGN_CENTER);
 		}
 	} else {
-		dc.DrawTextRect(text_.c_str(), textBounds, 0xFFFFFFFF, ALIGN_VCENTER | ALIGN_LEFT);
+		dc.DrawTextRect(text_.c_str(), textBounds, textColor, ALIGN_VCENTER | ALIGN_LEFT);
 	}
 
 	if (HasFocus()) {
@@ -797,7 +800,7 @@ void TextEdit::Draw(UIContext &dc) {
 			// Scroll text to the left if the caret won't fit. Not ideal but looks better than not scrolling it.
 			textX -= caretX - bounds_.w;
 		}
-		dc.FillRect(UI::Drawable(0xFFFFFFFF), Bounds(caretX - 1, bounds_.y + 2, 3, bounds_.h - 4));
+		dc.FillRect(UI::Drawable(textColor), Bounds(caretX - 1, bounds_.y + 2, 3, bounds_.h - 4));
 	}
 	dc.PopScissor();
 }
@@ -875,7 +878,8 @@ bool TextEdit::Key(const KeyInput &input) {
 			break;
 		case NKCODE_ENTER:
 			{
-				EventParams e;
+				EventParams e{};
+				e.v = this;
 				e.s = text_;
 				OnEnter.Trigger(e);
 				break;
@@ -956,7 +960,7 @@ bool TextEdit::Key(const KeyInput &input) {
 	}
 
 	if (textChanged) {
-		UI::EventParams e;
+		UI::EventParams e{};
 		e.v = this;
 		OnTextChange.Trigger(e);
 	}
@@ -1072,7 +1076,7 @@ void Slider::Touch(const TouchInput &input) {
 		float relativeX = (input.x - (bounds_.x + paddingLeft_)) / (bounds_.w - paddingLeft_ - paddingRight_);
 		*value_ = floorf(relativeX * (maxValue_ - minValue_) + minValue_ + 0.5f);
 		Clamp();
-		EventParams params;
+		EventParams params{};
 		params.v = this;
 		params.a = (uint32_t)(*value_);
 		params.f = (float)(*value_);
@@ -1094,21 +1098,22 @@ void Slider::Clamp() {
 void Slider::Draw(UIContext &dc) {
 	bool focus = HasFocus();
 	uint32_t linecolor = dc.theme->popupTitle.fgColor;
-	uint32_t knobcolor = (down_ || focus) ? dc.theme->popupTitle.fgColor : 0xFFFFFFFF;
+	Style knobStyle = (down_ || focus) ? dc.theme->popupTitle : dc.theme->popupStyle;
+
 	float knobX = ((float)(*value_) - minValue_) / (maxValue_ - minValue_) * (bounds_.w - paddingLeft_ - paddingRight_) + (bounds_.x + paddingLeft_);
 	dc.FillRect(Drawable(linecolor), Bounds(bounds_.x + paddingLeft_, bounds_.centerY() - 2, knobX - (bounds_.x + paddingLeft_), 4));
 	dc.FillRect(Drawable(0xFF808080), Bounds(knobX, bounds_.centerY() - 2, (bounds_.x + bounds_.w - paddingRight_ - knobX), 4));
-	dc.Draw()->DrawImage(dc.theme->sliderKnob, knobX, bounds_.centerY(), 1.0f, knobcolor, ALIGN_CENTER);
+	dc.Draw()->DrawImage(dc.theme->sliderKnob, knobX, bounds_.centerY(), 1.0f, knobStyle.fgColor, ALIGN_CENTER);
 	char temp[64];
 	if (showPercent_)
 		sprintf(temp, "%i%%", *value_);
 	else
 		sprintf(temp, "%i", *value_);
 	dc.SetFontStyle(dc.theme->uiFont);
-	dc.DrawText(temp, bounds_.x2() - 22, bounds_.centerY(), 0xFFFFFFFF, ALIGN_CENTER);
+	dc.DrawText(temp, bounds_.x2() - 22, bounds_.centerY(), dc.theme->popupStyle.fgColor, ALIGN_CENTER);
 }
 
-void Slider::Update(const InputState &input_state) {
+void Slider::Update() {
 	if (repeat_ >= 0) {
 		repeat_++;
 	}
@@ -1184,7 +1189,7 @@ void SliderFloat::Touch(const TouchInput &input) {
 		float relativeX = (input.x - (bounds_.x + paddingLeft_)) / (bounds_.w - paddingLeft_ - paddingRight_);
 		*value_ = (relativeX * (maxValue_ - minValue_) + minValue_);
 		Clamp();
-		EventParams params;
+		EventParams params{};
 		params.v = this;
 		params.a = (uint32_t)(*value_);
 		params.f = (float)(*value_);
@@ -1205,19 +1210,19 @@ void SliderFloat::Clamp() {
 void SliderFloat::Draw(UIContext &dc) {
 	bool focus = HasFocus();
 	uint32_t linecolor = dc.theme->popupTitle.fgColor;
-	uint32_t knobcolor = (down_ || focus) ? dc.theme->popupTitle.fgColor : 0xFFFFFFFF;
+	Style knobStyle = (down_ || focus) ? dc.theme->popupTitle : dc.theme->popupStyle;
 
 	float knobX = (*value_ - minValue_) / (maxValue_ - minValue_) * (bounds_.w - paddingLeft_ - paddingRight_) + (bounds_.x + paddingLeft_);
 	dc.FillRect(Drawable(linecolor), Bounds(bounds_.x + paddingLeft_, bounds_.centerY() - 2, knobX - (bounds_.x + paddingLeft_), 4));
 	dc.FillRect(Drawable(0xFF808080), Bounds(knobX, bounds_.centerY() - 2, (bounds_.x + bounds_.w - paddingRight_ - knobX), 4));
-	dc.Draw()->DrawImage(dc.theme->sliderKnob, knobX, bounds_.centerY(), 1.0f, knobcolor, ALIGN_CENTER);
+	dc.Draw()->DrawImage(dc.theme->sliderKnob, knobX, bounds_.centerY(), 1.0f, knobStyle.fgColor, ALIGN_CENTER);
 	char temp[64];
 	sprintf(temp, "%0.2f", *value_);
 	dc.SetFontStyle(dc.theme->uiFont);
-	dc.DrawText(temp, bounds_.x2() - 22, bounds_.centerY(), 0xFFFFFFFF, ALIGN_CENTER);
+	dc.DrawText(temp, bounds_.x2() - 22, bounds_.centerY(), dc.theme->popupStyle.fgColor, ALIGN_CENTER);
 }
 
-void SliderFloat::Update(const InputState &input_state) {
+void SliderFloat::Update() {
 	if (repeat_ >= 0) {
 		repeat_++;
 	}

@@ -15,7 +15,8 @@
 // Official git repository and contact information can be found at
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
-#include "base/functional.h"
+#include <functional>
+
 #include "base/basictypes.h"
 #include "ext/vjson/json.h"
 
@@ -32,6 +33,7 @@
 #include "Core/Util/GameManager.h"
 #include "UI/EmuScreen.h"
 #include "UI/Store.h"
+#include "UI/TextureUtil.h"
 
 const std::string storeBaseUrl = "http://store.ppsspp.org/";
 
@@ -83,7 +85,7 @@ private:
 	std::shared_ptr<http::Download> download_;
 
 	std::string textureData_;
-	Thin3DTexture *texture_;
+	ManagedTexture *texture_;
 	bool textureFailed_;
 	float fixedSizeW_;
 	float fixedSizeH_;
@@ -115,7 +117,7 @@ void HttpImageFileView::SetFilename(std::string filename) {
 		textureFailed_ = false;
 		path_ = filename;
 		if (texture_) {
-			texture_->Release();
+			delete texture_;
 			texture_ = nullptr;
 		}
 	}
@@ -134,13 +136,14 @@ void HttpImageFileView::DownloadCompletedCallback(http::Download &download) {
 }
 
 void HttpImageFileView::Draw(UIContext &dc) {
+	using namespace Draw;
 	if (!texture_ && !textureFailed_ && !path_.empty() && !download_) {
-		download_ = downloader_->StartDownloadWithCallback(path_, "", std::bind(&HttpImageFileView::DownloadCompletedCallback, this, placeholder::_1));
+		download_ = downloader_->StartDownloadWithCallback(path_, "", std::bind(&HttpImageFileView::DownloadCompletedCallback, this, std::placeholders::_1));
 		download_->SetHidden(true);
 	}
 
 	if (!textureData_.empty()) {
-		texture_ = dc.GetThin3DContext()->CreateTextureFromFileData((const uint8_t *)(textureData_.data()), (int)textureData_.size(), DETECT);
+		texture_ = CreateTextureFromFileData(dc.GetDrawContext(), (const uint8_t *)(textureData_.data()), (int)textureData_.size(), DETECT);
 		if (!texture_)
 			textureFailed_ = true;
 		textureData_.clear();
@@ -154,7 +157,7 @@ void HttpImageFileView::Draw(UIContext &dc) {
 	// TODO: involve sizemode
 	if (texture_) {
 		dc.Flush();
-		dc.GetThin3DContext()->SetTexture(0, texture_);
+		dc.GetDrawContext()->BindTexture(0, texture_->GetTexture());
 		dc.Draw()->Rect(bounds_.x, bounds_.y, bounds_.w, bounds_.h, color_);
 		dc.Flush();
 		dc.RebindTexture();
@@ -172,12 +175,12 @@ public:
 	ProductItemView(const StoreEntry &entry, UI::LayoutParams *layoutParams = 0)
 		: UI::Choice(entry.name, layoutParams), entry_(entry) {}
 
-	virtual void GetContentDimensions(const UIContext &dc, float &w, float &h) const {
+	void GetContentDimensions(const UIContext &dc, float &w, float &h) const override {
 		w = 300;
 		h = 164;
 	}
-	virtual void Update(const InputState &input_state);
-	virtual void Draw(UIContext &dc);
+	void Update() override;
+	void Draw(UIContext &dc) override;
 
 	StoreEntry GetEntry() const { return entry_; }
 
@@ -190,25 +193,26 @@ void ProductItemView::Draw(UIContext &dc) {
 	// dc.DrawText(entry_.name.c_str(), bounds_.centerX(), bounds_.centerY(), 0xFFFFFFFF, ALIGN_CENTER);
 }
 
-void ProductItemView::Update(const InputState &input_state) {
-	View::Update(input_state);
+void ProductItemView::Update() {
+	View::Update();
 }
 
 // This is a "details" view of a game. Lets you install it.
 class ProductView : public UI::LinearLayout {
 public:
 	ProductView(const StoreEntry &entry)
-		: LinearLayout(UI::ORIENT_VERTICAL), entry_(entry), installButton_(0), wasInstalled_(false) {
+		: LinearLayout(UI::ORIENT_VERTICAL), entry_(entry) {
 		CreateViews();
 	}
 
-	virtual void Update(const InputState &input_state);
+	void Update() override;
 
 	UI::Event OnClickLaunch;
 
 private:
 	void CreateViews();
 	UI::EventReturn OnInstall(UI::EventParams &e);
+	UI::EventReturn OnCancel(UI::EventParams &e);
 	UI::EventReturn OnUninstall(UI::EventParams &e);
 	UI::EventReturn OnLaunchClick(UI::EventParams &e);
 
@@ -217,8 +221,9 @@ private:
 	}
 
 	StoreEntry entry_;
-	UI::Button *installButton_;
-	bool wasInstalled_;
+	UI::Button *installButton_ = nullptr;
+	UI::Button *cancelButton_ = nullptr;
+	bool wasInstalled_ = false;
 };
 
 void ProductView::CreateViews() {
@@ -232,6 +237,7 @@ void ProductView::CreateViews() {
 	Add(new TextView(entry_.author));
 
 	I18NCategory *st = GetI18NCategory("Store");
+	I18NCategory *di = GetI18NCategory("Dialog");
 	wasInstalled_ = IsGameInstalled();
 	if (!wasInstalled_) {
 		installButton_ = Add(new Button(st->T("Install")));
@@ -243,6 +249,10 @@ void ProductView::CreateViews() {
 		Add(new Button(st->T("Launch Game")))->OnClick.Handle(this, &ProductView::OnLaunchClick);
 	}
 
+	cancelButton_ = Add(new Button(di->T("Cancel")));
+	cancelButton_->OnClick.Handle(this, &ProductView::OnCancel);
+	cancelButton_->SetVisibility(V_GONE);
+
 	// Add star rating, comments etc?
 	Add(new TextView(entry_.description));
 
@@ -253,14 +263,16 @@ void ProductView::CreateViews() {
 	Add(new TextView(temp));
 }
 
-void ProductView::Update(const InputState &input_state) {
+void ProductView::Update() {
 	if (wasInstalled_ != IsGameInstalled()) {
 		CreateViews();
 	}
 	if (installButton_) {
-		installButton_->SetEnabled(!g_GameManager.IsInstallInProgress());
+		installButton_->SetEnabled(g_GameManager.GetState() == GameManagerState::IDLE);
 	}
-	View::Update(input_state);
+	if (cancelButton_ && g_GameManager.GetState() != GameManagerState::DOWNLOADING)
+		cancelButton_->SetVisibility(UI::V_GONE);
+	View::Update();
 }
 
 UI::EventReturn ProductView::OnInstall(UI::EventParams &e) {
@@ -275,8 +287,16 @@ UI::EventReturn ProductView::OnInstall(UI::EventParams &e) {
 	if (installButton_) {
 		installButton_->SetEnabled(false);
 	}
-	INFO_LOG(HLE, "Triggering install of %s", zipUrl.c_str());
+	if (cancelButton_) {
+		cancelButton_->SetVisibility(UI::V_VISIBLE);
+	}
+	INFO_LOG(SYSTEM, "Triggering install of %s", zipUrl.c_str());
 	g_GameManager.DownloadAndInstall(zipUrl);
+	return UI::EVENT_DONE;
+}
+
+UI::EventReturn ProductView::OnCancel(UI::EventParams &e) {
+	g_GameManager.CancelDownload();
 	return UI::EVENT_DONE;
 }
 
@@ -293,7 +313,8 @@ UI::EventReturn ProductView::OnLaunchClick(UI::EventParams &e) {
 	path = ReplaceAll(path, "\\", "/");
 #endif
 
-	UI::EventParams e2;
+	UI::EventParams e2{};
+	e2.v = e.v;
 	e2.s = path;
 	// Insta-update - here we know we are already on the right thread.
 	OnClickLaunch.Trigger(e2);
@@ -316,8 +337,8 @@ StoreScreen::~StoreScreen() {
 }
 
 // Handle async download tasks
-void StoreScreen::update(InputState &input) {
-	UIDialogScreenWithBackground::update(input);
+void StoreScreen::update() {
+	UIDialogScreenWithBackground::update();
 
 	g_DownloadManager.Update();
 
@@ -341,6 +362,19 @@ void StoreScreen::update(InputState &input) {
 
 		// Forget the listing.
 		listing_.reset();
+	}
+
+	const char *storeName = "PPSSPP Homebrew Store";
+	switch (g_GameManager.GetState()) {
+	case GameManagerState::DOWNLOADING:
+		titleText_->SetText(std::string(storeName) + " - downloading");
+		break;
+	case GameManagerState::INSTALLING:
+		titleText_->SetText(std::string(storeName) + " - installing");
+		break;
+	default:
+		titleText_->SetText(storeName);
+		break;
 	}
 }
 
@@ -388,7 +422,8 @@ void StoreScreen::CreateViews() {
 	// Top bar
 	LinearLayout *topBar = root_->Add(new LinearLayout(ORIENT_HORIZONTAL));
 	topBar->Add(new Button(di->T("Back")))->OnClick.Handle<UIScreen>(this, &UIScreen::OnBack);
-	topBar->Add(new TextView("PPSSPP Homebrew Store"));
+	titleText_ = new TextView("PPSSPP Homebrew Store");
+	topBar->Add(titleText_);
 	UI::Drawable solid(0xFFbd9939);
 	topBar->SetBG(solid);
 

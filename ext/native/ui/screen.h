@@ -14,16 +14,16 @@
 #pragma once
 
 #include <vector>
+#include <mutex>
 
 #include "base/basictypes.h"
 #include "base/logging.h"
 #include "base/NativeApp.h"
+#include "input/input_state.h"
 
 namespace UI {
 	class View;
 }
-
-struct InputState;
 
 enum DialogResult {
 	DR_OK,
@@ -35,7 +35,10 @@ enum DialogResult {
 
 class ScreenManager;
 class UIContext;
-class Thin3DContext;
+
+namespace Draw {
+	class DrawContext;
+}
 
 class Screen {
 public:
@@ -45,7 +48,7 @@ public:
 	}
 
 	virtual void onFinish(DialogResult reason) {}
-	virtual void update(InputState &input) {}
+	virtual void update() {}
 	virtual void preRender() {}
 	virtual void render() {}
 	virtual void postRender() {}
@@ -72,6 +75,8 @@ public:
 	virtual bool isTransparent() const { return false; }
 	virtual bool isTopLevel() const { return false; }
 
+	virtual TouchInput transformTouch(const TouchInput &touch) { return touch; }
+
 private:
 	ScreenManager *screenManager_;
 	DISALLOW_COPY_AND_ASSIGN(Screen);
@@ -93,13 +98,13 @@ public:
 	virtual ~ScreenManager();
 
 	void switchScreen(Screen *screen);
-	void update(InputState &input);
+	void update();
 
 	void setUIContext(UIContext *context) { uiContext_ = context; }
 	UIContext *getUIContext() { return uiContext_; }
 
-	void setThin3DContext(Thin3DContext *context) { thin3DContext_ = context; }
-	Thin3DContext *getThin3DContext() { return thin3DContext_; }
+	void setDrawContext(Draw::DrawContext *context) { thin3DContext_ = context; }
+	Draw::DrawContext *getDrawContext() { return thin3DContext_; }
 
 	void render();
 	void resized();
@@ -126,6 +131,8 @@ public:
 
 	Screen *topScreen() const;
 
+	std::mutex inputLock_;
+
 private:
 	void pop();
 	void switchToNext();
@@ -133,7 +140,7 @@ private:
 
 	Screen *nextScreen_;
 	UIContext *uiContext_;
-	Thin3DContext *thin3DContext_;
+	Draw::DrawContext *thin3DContext_;
 
 	const Screen *dialogFinished_;
 	DialogResult dialogResult_;

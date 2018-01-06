@@ -22,16 +22,16 @@
 #endif
 #endif
 
+#include "ppsspp_config.h"
+
 #include "FileUtil.h"
 #include "StringUtils.h"
 
 #ifdef _WIN32
 #include "CommonWindows.h"
-#ifndef _XBOX
 #include <shlobj.h>		// for SHGetFolderPath
 #include <shellapi.h>
 #include <commdlg.h>	// for GetSaveFileName
-#endif
 #include <io.h>
 #include <direct.h>		// getcwd
 #else
@@ -75,24 +75,6 @@
 #else
 #define DIR_SEP_CHRS "/"
 #endif
-
-// Hack
-#if defined(__SYMBIAN32__)
-static inline int readdir_r(DIR *dirp, struct dirent *entry, struct dirent **result) {
-	struct dirent *readdir_entry;
-
-	readdir_entry = readdir(dirp);
-	if (readdir_entry == NULL) {
-		*result = NULL;
-		return errno;
-	}
-
-	*entry = *readdir_entry;
-	*result = entry;
-	return 0;
-}
-#endif
-
 
 // This namespace has various generic functions related to files and paths.
 // The code still needs a ton of cleanup.
@@ -144,10 +126,17 @@ bool Exists(const std::string &filename) {
 	std::wstring copy = ConvertUTF8ToWString(fn);
 
 	// Make sure Windows will no longer handle critical errors, which means no annoying "No disk" dialog
+#if !PPSSPP_PLATFORM(UWP)
 	int OldMode = SetErrorMode(SEM_FAILCRITICALERRORS);
-	bool success = GetFileAttributes(copy.c_str()) != INVALID_FILE_ATTRIBUTES;
+#endif
+	WIN32_FILE_ATTRIBUTE_DATA data{};
+	if (!GetFileAttributesEx(copy.c_str(), GetFileExInfoStandard, &data) || data.dwFileAttributes == INVALID_FILE_ATTRIBUTES) {
+		return false;
+	}
+#if !PPSSPP_PLATFORM(UWP)
 	SetErrorMode(OldMode);
-	return success;
+#endif
+	return true;
 #else
 	struct stat64 file_info;
 	return stat64(fn.c_str(), &file_info) == 0;
@@ -162,11 +151,12 @@ bool IsDirectory(const std::string &filename)
 
 #if defined(_WIN32)
 	std::wstring copy = ConvertUTF8ToWString(fn);
-	DWORD result = GetFileAttributes(copy.c_str());
-	if (result == INVALID_FILE_ATTRIBUTES) {
+	WIN32_FILE_ATTRIBUTE_DATA data{};
+	if (!GetFileAttributesEx(copy.c_str(), GetFileExInfoStandard, &data) || data.dwFileAttributes == INVALID_FILE_ATTRIBUTES) {
 		WARN_LOG(COMMON, "GetFileAttributes failed on %s: %08x", fn.c_str(), GetLastError());
 		return false;
 	}
+	DWORD result = data.dwFileAttributes;
 	return (result & FILE_ATTRIBUTE_DIRECTORY) == FILE_ATTRIBUTE_DIRECTORY;
 #else
 	std::string copy(fn);
@@ -183,28 +173,24 @@ bool IsDirectory(const std::string &filename)
 
 // Deletes a given filename, return true on success
 // Doesn't supports deleting a directory
-bool Delete(const std::string &filename)
-{
+bool Delete(const std::string &filename) {
 	INFO_LOG(COMMON, "Delete: file %s", filename.c_str());
 
 	// Return true because we care about the file no 
 	// being there, not the actual delete.
-	if (!Exists(filename))
-	{
+	if (!Exists(filename)) {
 		WARN_LOG(COMMON, "Delete: %s does not exists", filename.c_str());
 		return true;
 	}
 
 	// We can't delete a directory
-	if (IsDirectory(filename))
-	{
+	if (IsDirectory(filename)) {
 		WARN_LOG(COMMON, "Delete failed: %s is a directory", filename.c_str());
 		return false;
 	}
 
 #ifdef _WIN32
-	if (!DeleteFile(ConvertUTF8ToWString(filename).c_str()))
-	{
+	if (!DeleteFile(ConvertUTF8ToWString(filename).c_str())) {
 		WARN_LOG(COMMON, "Delete: DeleteFile failed on %s: %s", 
 				 filename.c_str(), GetLastErrorMsg());
 		return false;
@@ -236,11 +222,7 @@ bool CreateDir(const std::string &path)
 	ERROR_LOG(COMMON, "CreateDir: CreateDirectory failed on %s: %i", path.c_str(), error);
 	return false;
 #else
-#ifdef BLACKBERRY
-	if (mkdir(path.c_str(), 0775) == 0)
-#else
 	if (mkdir(path.c_str(), 0755) == 0)
-#endif
 		return true;
 
 	int err = errno;
@@ -352,9 +334,14 @@ bool Copy(const std::string &srcFilename, const std::string &destFilename)
 	INFO_LOG(COMMON, "Copy: %s --> %s", 
 			srcFilename.c_str(), destFilename.c_str());
 #ifdef _WIN32
+#if PPSSPP_PLATFORM(UWP)
+	if (CopyFile2(ConvertUTF8ToWString(srcFilename).c_str(), ConvertUTF8ToWString(destFilename).c_str(), nullptr))
+		return true;
+	return false;
+#else
 	if (CopyFile(ConvertUTF8ToWString(srcFilename).c_str(), ConvertUTF8ToWString(destFilename).c_str(), FALSE))
 		return true;
-
+#endif
 	ERROR_LOG(COMMON, "Copy: failed %s --> %s: %s", 
 			srcFilename.c_str(), destFilename.c_str(), GetLastErrorMsg());
 	return false;
@@ -571,8 +558,13 @@ bool CreateEmptyFile(const std::string &filename)
 // Deletes the given directory and anything under it. Returns true on success.
 bool DeleteDirRecursively(const std::string &directory)
 {
+#if PPSSPP_PLATFORM(UWP)
+	return false;
+#else
 	INFO_LOG(COMMON, "DeleteDirRecursively: %s", directory.c_str());
+
 #ifdef _WIN32
+
 	// Find the first file in the directory.
 	WIN32_FIND_DATA ffd;
 	HANDLE hFind = FindFirstFile(ConvertUTF8ToWString(directory + "\\*").c_str(), &ffd);
@@ -637,9 +629,10 @@ bool DeleteDirRecursively(const std::string &directory)
 	closedir(dirp);
 #endif
 	File::DeleteDir(directory);
-		
 	return true;
+#endif
 }
+
 
 // Create directory and copy contents (does not overwrite existing files)
 void CopyDir(const std::string &source_path, const std::string &dest_path)
@@ -677,12 +670,17 @@ void CopyDir(const std::string &source_path, const std::string &dest_path)
 		else if (!File::Exists(dest)) File::Copy(source, dest);
 	}
 	closedir(dirp);
+#else
+	ERROR_LOG(COMMON, "CopyDir not supported on this platform");
 #endif
 }
 
 void openIniFile(const std::string fileName) {
 	std::string iniFile;
 #if defined(_WIN32)
+#if PPSSPP_PLATFORM(UWP)
+	// Do nothing.
+#else
 	iniFile = fileName;
 	// Can't rely on a .txt file extension to auto-open in the right editor,
 	// so let's find notepad
@@ -714,6 +712,7 @@ void openIniFile(const std::string fileName) {
 	}
 	CloseHandle(pi.hThread);
 	CloseHandle(pi.hProcess);
+#endif
 #elif !defined(MOBILE_DEVICE)
 #if defined(__APPLE__)
 	iniFile = "open ";
@@ -733,7 +732,6 @@ void openIniFile(const std::string fileName) {
 std::string GetCurrentDir()
 {
 	char *dir;
-#ifndef _XBOX
 	// Get the current working directory (getcwd uses malloc) 
 	if (!(dir = __getcwd(NULL, 0))) {
 
@@ -744,28 +742,19 @@ std::string GetCurrentDir()
 	std::string strDir = dir;
 	free(dir);
 	return strDir;
-#else
-	return "game:\\";
-#endif
 }
 
 // Sets the current directory to the given directory
 bool SetCurrentDir(const std::string &directory)
 {
-#ifndef _XBOX
 	return __chdir(directory.c_str()) == 0;
-#else
-	return false;
-#endif
 }
 
 const std::string &GetExeDirectory()
 {
 	static std::string ExePath;
 
-	if (ExePath.empty())
-#ifndef _XBOX
-	{
+	if (ExePath.empty()) {
 #ifdef _WIN32
 		TCHAR program_path[4096] = {0};
 		GetModuleFileName(NULL, program_path, ARRAY_SIZE(program_path) - 1);
@@ -811,10 +800,6 @@ const std::string &GetExeDirectory()
 	}
 
 	return ExePath;
-#else
-	static std::wstring ExePath = L"game:\\";
-	return ExePath;
-#endif
 }
 
 
@@ -902,7 +887,6 @@ bool IOFile::Flush()
 
 bool IOFile::Resize(u64 size)
 {
-#ifndef _XBOX
 	if (!IsOpen() || 0 !=
 #ifdef _WIN32
 		// ector: _chsize sucks, not 64-bit safe
@@ -916,10 +900,6 @@ bool IOFile::Resize(u64 size)
 		m_good = false;
 
 	return m_good;
-#else
-	// TODO: Implement.
-	return false;
-#endif
 }
 
 } // namespace

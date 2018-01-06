@@ -21,6 +21,7 @@
 #include "profiler/profiler.h"
 
 #include "Common/CPUDetect.h"
+#include "Common/MemoryUtil.h"
 #include "Core/Config.h"
 
 #include "GPU/Common/SplineCommon.h"
@@ -117,7 +118,6 @@ inline float bern1(float x) { return 3 * x * (1 - x) * (1 - x); }
 inline float bern2(float x) { return 3 * x * x * (1 - x); }
 inline float bern3(float x) { return x * x * x; }
 
-// Not sure yet if these have any use
 inline float bern0deriv(float x) { return -3 * (x - 1) * (x - 1); }
 inline float bern1deriv(float x) { return 9 * x * x - 12 * x + 3; }
 inline float bern2deriv(float x) { return 3 * (2 - 3 * x) * x; }
@@ -223,6 +223,41 @@ static void spline_knot(int n, int type, float *knot) {
 	}
 }
 
+// Prepare mesh of one patch for "Instanced Tessellation".
+static void TessellateSplinePatchHardware(u8 *&dest, u16 *indices, int &count, const SplinePatchLocal &spatch) {
+	SimpleVertex *&vertices = (SimpleVertex*&)dest;
+
+	float inv_u = 1.0f / (float)spatch.tess_u;
+	float inv_v = 1.0f / (float)spatch.tess_v;
+
+	// Generating simple input vertices for the spline-computing vertex shader.
+	for (int tile_v = 0; tile_v < spatch.tess_v + 1; ++tile_v) {
+		for (int tile_u = 0; tile_u < spatch.tess_u + 1; ++tile_u) {
+			SimpleVertex &vert = vertices[tile_v * (spatch.tess_u + 1) + tile_u];
+			vert.pos.x = (float)tile_u * inv_u;
+			vert.pos.y = (float)tile_v * inv_v;
+
+			// TODO: Move to shader uniform and unify this method spline and bezier if necessary.
+			// For compute normal
+			vert.nrm.x = inv_u;
+			vert.nrm.y = inv_v;
+		}
+	}
+
+	// Combine the vertices into triangles.
+	for (int tile_v = 0; tile_v < spatch.tess_v; ++tile_v) {
+		for (int tile_u = 0; tile_u < spatch.tess_u; ++tile_u) {
+			int idx0 = tile_v * (spatch.tess_u + 1) + tile_u;
+			int idx1 = tile_v * (spatch.tess_u + 1) + tile_u + 1;
+			int idx2 = (tile_v + 1) * (spatch.tess_u + 1) + tile_u;
+			int idx3 = (tile_v + 1) * (spatch.tess_u + 1) + tile_u + 1;
+
+			CopyQuadIndex(indices, spatch.primType, idx0, idx1, idx2, idx3);
+			count += 6;
+		}
+	}
+}
+
 static void _SplinePatchLowQuality(u8 *&dest, u16 *indices, int &count, const SplinePatchLocal &spatch, u32 origVertType) {
 	// Fast and easy way - just draw the control points, generate some very basic normal vector substitutes.
 	// Very inaccurate but okay for Loco Roco. Maybe should keep it as an option because it's fast.
@@ -319,7 +354,7 @@ static void SplinePatchFullQuality(u8 *&dest, u16 *indices, int &count, const Sp
 	spline_knot(spatch.count_u - 1, spatch.type_u, knot_u);
 	spline_knot(spatch.count_v - 1, spatch.type_v, knot_v);
 
-	// Increase tesselation based on the size. Should be approximately right?
+	// Increase tessellation based on the size. Should be approximately right?
 	int patch_div_s = (spatch.count_u - 3) * spatch.tess_u;
 	int patch_div_t = (spatch.count_v - 3) * spatch.tess_v;
 	if (quality > 1) {
@@ -332,7 +367,7 @@ static void SplinePatchFullQuality(u8 *&dest, u16 *indices, int &count, const Sp
 		}
 	}
 
-	// Downsample until it fits, in case crazy tesselation factors are sent.
+	// Downsample until it fits, in case crazy tessellation factors are sent.
 	while ((patch_div_s + 1) * (patch_div_t + 1) > maxVertices) {
 		patch_div_s /= 2;
 		patch_div_t /= 2;
@@ -421,7 +456,7 @@ static void SplinePatchFullQuality(u8 *&dest, u16 *indices, int &count, const Sp
 							char temp[512];
 							snprintf(temp, sizeof(temp), "count_u: %d count_v: %d patch_w: %d patch_h: %d  ii: %d  jj: %d  iu: %d  iv: %d  patch_div_s: %d  patch_div_t: %d\n", spatch.count_u, spatch.count_v, patch_w, patch_h, ii, jj, iu, iv, patch_div_s, patch_div_t);
 							OutputDebugStringA(temp);
-							DebugBreak();
+							Crash();
 						}*/
 						SimpleVertex *a = spatch.points[idx];
 						AccumulateWeighted(vert_pos, a->pos, fv);
@@ -508,7 +543,7 @@ static void SplinePatchFullQuality(u8 *&dest, u16 *indices, int &count, const Sp
 	}
 
 	GEPatchPrimType prim_type = spatch.primType;
-	// Tesselate.
+	// Tessellate.
 	for (int tile_v = 0; tile_v < patch_div_t; ++tile_v) {
 		for (int tile_u = 0; tile_u < patch_div_s; ++tile_u) {
 			int idx0 = tile_v * (patch_div_s + 1) + tile_u;
@@ -559,7 +594,7 @@ static void SplinePatchFullQualityDispatch(u8 *&dest, u16 *indices, int &count, 
 		SplinePatchFullQualityDispatch2<false>(dest, indices, count, spatch, origVertType, quality, maxVertices);
 }
 
-void TesselateSplinePatch(u8 *&dest, u16 *indices, int &count, const SplinePatchLocal &spatch, u32 origVertType, int maxVertexCount) {
+void TessellateSplinePatch(u8 *&dest, u16 *indices, int &count, const SplinePatchLocal &spatch, u32 origVertType, int maxVertexCount) {
 	switch (g_Config.iSplineBezierQuality) {
 	case LOW_QUALITY:
 		_SplinePatchLowQuality(dest, indices, count, spatch, origVertType);
@@ -659,14 +694,8 @@ struct PrecomputedCurves {
 	T *horiz4;
 };
 
-static void _BezierPatchHighQuality(u8 *&dest, u16 *&indices, int &count, int tess_u, int tess_v, const BezierPatch &patch, u32 origVertType, int maxVertices) {
+static void _BezierPatchHighQuality(u8 *&dest, u16 *&indices, int &count, int tess_u, int tess_v, const BezierPatch &patch, u32 origVertType) {
 	const float third = 1.0f / 3.0f;
-
-	// Downsample until it fits, in case crazy tesselation factors are sent.
-	while ((tess_u + 1) * (tess_v + 1) > maxVertices) {
-		tess_u /= 2;
-		tess_v /= 2;
-	}
 
 	// First compute all the vertices and put them in an array
 	SimpleVertex *&vertices = (SimpleVertex*&)dest;
@@ -767,19 +796,75 @@ static void _BezierPatchHighQuality(u8 *&dest, u16 *&indices, int &count, int te
 	dest += (tess_u + 1) * (tess_v + 1) * sizeof(SimpleVertex);
 }
 
-void TesselateBezierPatch(u8 *&dest, u16 *&indices, int &count, int tess_u, int tess_v, const BezierPatch &patch, u32 origVertType, int maxVertices) {
+// Prepare mesh of one patch for "Instanced Tessellation".
+static void TessellateBezierPatchHardware(u8 *&dest, u16 *indices, int &count, int tess_u, int tess_v, GEPatchPrimType primType) {
+	SimpleVertex *&vertices = (SimpleVertex*&)dest;
+
+	float inv_u = 1.0f / (float)tess_u;
+	float inv_v = 1.0f / (float)tess_v;
+
+	// Generating simple input vertices for the bezier-computing vertex shader.
+	for (int tile_v = 0; tile_v < tess_v + 1; ++tile_v) {
+		for (int tile_u = 0; tile_u < tess_u + 1; ++tile_u) {
+			SimpleVertex &vert = vertices[tile_v * (tess_u + 1) + tile_u];
+
+			vert.pos.x = (float)tile_u * inv_u;
+			vert.pos.y = (float)tile_v * inv_v;
+		}
+	}
+
+	// Combine the vertices into triangles.
+	for (int tile_v = 0; tile_v < tess_v; ++tile_v) {
+		for (int tile_u = 0; tile_u < tess_u; ++tile_u) {
+			int idx0 = tile_v * (tess_u + 1) + tile_u;
+			int idx1 = tile_v * (tess_u + 1) + tile_u + 1;
+			int idx2 = (tile_v + 1) * (tess_u + 1) + tile_u;
+			int idx3 = (tile_v + 1) * (tess_u + 1) + tile_u + 1;
+
+			CopyQuadIndex(indices, primType, idx0, idx1, idx2, idx3);
+			count += 6;
+		}
+	}
+}
+
+void TessellateBezierPatch(u8 *&dest, u16 *&indices, int &count, int tess_u, int tess_v, const BezierPatch &patch, u32 origVertType) {
 	switch (g_Config.iSplineBezierQuality) {
 	case LOW_QUALITY:
 		_BezierPatchLowQuality(dest, indices, count, tess_u, tess_v, patch, origVertType);
 		break;
 	case MEDIUM_QUALITY:
-		_BezierPatchHighQuality(dest, indices, count, tess_u / 2, tess_v / 2, patch, origVertType, maxVertices);
+		_BezierPatchHighQuality(dest, indices, count, tess_u / 2, tess_v / 2, patch, origVertType);
 		break;
 	case HIGH_QUALITY:
-		_BezierPatchHighQuality(dest, indices, count, tess_u, tess_v, patch, origVertType, maxVertices);
+		_BezierPatchHighQuality(dest, indices, count, tess_u, tess_v, patch, origVertType);
 		break;
 	}
 }
+
+class IndexConverter {
+private:
+	union {
+		const void *indices;
+		const u8 *indices8;
+		const u16 *indices16;
+		const u32 *indices32;
+	};
+	u32 indexType;
+public:
+	IndexConverter(u32 vertType, const void *indices) : indices(indices), indexType(vertType & GE_VTYPE_IDX_MASK) {}
+
+	inline u32 convert(u32 index) const {
+		switch (indexType) {
+		case GE_VTYPE_IDX_8BIT:
+			return indices8[index];
+		case GE_VTYPE_IDX_16BIT:
+			return indices16[index];
+		case GE_VTYPE_IDX_32BIT:
+			return indices32[index];
+		}
+		return index;
+	}
+};
 
 // This maps GEPatchPrimType to GEPrimitiveType.
 const GEPrimitiveType primType[] = { GE_PRIM_TRIANGLES, GE_PRIM_LINES, GE_PRIM_POINTS, GE_PRIM_POINTS };
@@ -790,11 +875,7 @@ void DrawEngineCommon::SubmitSpline(const void *control_points, const void *indi
 
 	u16 index_lower_bound = 0;
 	u16 index_upper_bound = count_u * count_v - 1;
-	bool indices_16bit = (vertType & GE_VTYPE_IDX_MASK) == GE_VTYPE_IDX_16BIT;
-	bool indices_32bit = (vertType & GE_VTYPE_IDX_MASK) == GE_VTYPE_IDX_32BIT;
-	const u8 *indices8 = (const u8 *)indices;
-	const u16 *indices16 = (const u16 *)indices;
-	const u32 *indices32 = (const u32 *)indices;
+	IndexConverter idxConv(vertType, indices);
 	if (indices)
 		GetIndexBounds(indices, count_u * count_v, vertType, &index_lower_bound, &index_upper_bound);
 
@@ -825,19 +906,7 @@ void DrawEngineCommon::SubmitSpline(const void *control_points, const void *indi
 
 	// Make an array of pointers to the control points, to get rid of indices.
 	for (int idx = 0; idx < count_u * count_v; idx++) {
-		if (indices) {
-			u32 ind;
-			if (indices_32bit) {
-				ind = indices32[idx];
-			} else if (indices_16bit) {
-				ind = indices16[idx];
-			} else {
-				ind = indices8[idx];
-			}
-			points[idx] = simplified_control_points + ind;
-		} else {
-			points[idx] = simplified_control_points + idx;
-		}
+		points[idx] = simplified_control_points + (indices ? idxConv.convert(idx) : idx);
 	}
 
 	int count = 0;
@@ -856,21 +925,44 @@ void DrawEngineCommon::SubmitSpline(const void *control_points, const void *indi
 	patch.primType = prim_type;
 	patch.patchFacing = patchFacing;
 
-	int maxVertexCount = SPLINE_BUFFER_SIZE / vertexSize;
-	TesselateSplinePatch(dest, quadIndices_, count, patch, origVertType, maxVertexCount);
+	if (g_Config.bHardwareTessellation && g_Config.bHardwareTransform && !g_Config.bSoftwareRendering) {
+	
+		float *pos = (float*)(decoded + 65536 * 18); // Size 4 float
+		float *tex = pos + count_u * count_v * 4; // Size 4 float
+		float *col = tex + count_u * count_v * 4; // Size 4 float
+		const bool hasColor = (origVertType & GE_VTYPE_COL_MASK) != 0;
+		const bool hasTexCoords = (origVertType & GE_VTYPE_TC_MASK) != 0;
 
+		tessDataTransfer->PrepareBuffers(pos, tex, col, count_u * count_v, hasColor, hasTexCoords);
+		for (int idx = 0; idx < count_u * count_v; idx++) {
+			memcpy(pos + idx * 4, points[idx]->pos.AsArray(), 3 * sizeof(float));
+			if (hasTexCoords)
+				memcpy(tex + idx * 4, points[idx]->uv, 2 * sizeof(float));
+			if (hasColor)
+				memcpy(col + idx * 4, Vec4f::FromRGBA(points[idx]->color_32).AsArray(), 4 * sizeof(float));
+		}
+		if (!hasColor)
+			memcpy(col, Vec4f::FromRGBA(points[0]->color_32).AsArray(), 4 * sizeof(float));
+
+		tessDataTransfer->SendDataToShader(pos, tex, col, count_u * count_v, hasColor, hasTexCoords);
+		TessellateSplinePatchHardware(dest, quadIndices_, count, patch);
+		numPatches = (count_u - 3) * (count_v - 3);
+	} else {
+		int maxVertexCount = SPLINE_BUFFER_SIZE / vertexSize;
+		TessellateSplinePatch(dest, quadIndices_, count, patch, origVertType, maxVertexCount);
+	}
 	delete[] points;
 
 	u32 vertTypeWithIndex16 = (vertType & ~GE_VTYPE_IDX_MASK) | GE_VTYPE_IDX_16BIT;
 
 	UVScale prevUVScale;
-	if (g_Config.bPrescaleUV && (origVertType & GE_VTYPE_TC_MASK) != 0) {
+	if ((origVertType & GE_VTYPE_TC_MASK) != 0) {
 		// We scaled during Normalize already so let's turn it off when drawing.
 		prevUVScale = gstate_c.uv;
 		gstate_c.uv.uScale = 1.0f;
 		gstate_c.uv.vScale = 1.0f;
-		gstate_c.uv.uOff = 0;
-		gstate_c.uv.vOff = 0;
+		gstate_c.uv.uOff = 0.0f;
+		gstate_c.uv.vOff = 0.0f;
 	}
 
 	int generatedBytesRead;
@@ -878,7 +970,7 @@ void DrawEngineCommon::SubmitSpline(const void *control_points, const void *indi
 
 	DispatchFlush();
 
-	if (g_Config.bPrescaleUV && (origVertType & GE_VTYPE_TC_MASK) != 0) {
+	if ((origVertType & GE_VTYPE_TC_MASK) != 0) {
 		gstate_c.uv = prevUVScale;
 	}
 }
@@ -890,11 +982,7 @@ void DrawEngineCommon::SubmitBezier(const void *control_points, const void *indi
 
 	u16 index_lower_bound = 0;
 	u16 index_upper_bound = count_u * count_v - 1;
-	bool indices_16bit = (vertType & GE_VTYPE_IDX_MASK) == GE_VTYPE_IDX_16BIT;
-	bool indices_32bit = (vertType & GE_VTYPE_IDX_MASK) == GE_VTYPE_IDX_32BIT;
-	const u8 *indices8 = (const u8 *)indices;
-	const u16 *indices16 = (const u16 *)indices;
-	const u32 *indices32 = (const u32 *)indices;
+	IndexConverter idxConv(vertType, indices);
 	if (indices)
 		GetIndexBounds(indices, count_u*count_v, vertType, &index_lower_bound, &index_upper_bound);
 
@@ -922,35 +1010,47 @@ void DrawEngineCommon::SubmitBezier(const void *control_points, const void *indi
 		ERROR_LOG(G3D, "Something went really wrong, vertex size: %i vs %i", vertexSize, (int)sizeof(SimpleVertex));
 	}
 
+
+	float *pos = (float*)(decoded + 65536 * 18); // Size 4 float
+	float *tex = pos + count_u * count_v * 4; // Size 4 float
+	float *col = tex + count_u * count_v * 4; // Size 4 float
+	const bool hasColor = (origVertType & GE_VTYPE_COL_MASK) != 0;
+	const bool hasTexCoords = (origVertType & GE_VTYPE_TC_MASK) != 0;
+
 	// Bezier patches share less control points than spline patches. Otherwise they are pretty much the same (except bezier don't support the open/close thing)
 	int num_patches_u = (count_u - 1) / 3;
 	int num_patches_v = (count_v - 1) / 3;
-	BezierPatch *patches = new BezierPatch[num_patches_u * num_patches_v];
-	for (int patch_u = 0; patch_u < num_patches_u; patch_u++) {
-		for (int patch_v = 0; patch_v < num_patches_v; patch_v++) {
-			BezierPatch& patch = patches[patch_u + patch_v * num_patches_u];
-			for (int point = 0; point < 16; ++point) {
-				int idx = (patch_u * 3 + point % 4) + (patch_v * 3 + point / 4) * count_u;
-				if (indices) {
-					u32 ind;
-					if (indices_32bit) {
-						ind = indices32[idx];
-					} else if (indices_16bit) {
-						ind = indices16[idx];
-					} else {
-						ind = indices8[idx];
-					}
-					patch.points[point] = simplified_control_points + ind;
-				} else {
-					patch.points[point] = simplified_control_points + idx;
+	BezierPatch *patches = nullptr;
+	if (g_Config.bHardwareTessellation && g_Config.bHardwareTransform && !g_Config.bSoftwareRendering) {
+		tessDataTransfer->PrepareBuffers(pos, tex, col, count_u * count_v, hasColor, hasTexCoords);
+		for (int idx = 0; idx < count_u * count_v; idx++) {
+			SimpleVertex *point = simplified_control_points + (indices ? idxConv.convert(idx) : idx);
+			memcpy(pos + idx * 4, point->pos.AsArray(), 3 * sizeof(float));
+			if (hasTexCoords)
+				memcpy(tex + idx * 4, point->uv, 2 * sizeof(float));
+			if (hasColor)
+				memcpy(col + idx * 4, Vec4f::FromRGBA(point->color_32).AsArray(), 4 * sizeof(float));
+		}
+		if (!hasColor) {
+			SimpleVertex *point = simplified_control_points + (indices ? idxConv.convert(0) : 0);
+			memcpy(col, Vec4f::FromRGBA(point->color_32).AsArray(), 4 * sizeof(float));
+		}
+	} else {
+		patches = new BezierPatch[num_patches_u * num_patches_v];
+		for (int patch_u = 0; patch_u < num_patches_u; patch_u++) {
+			for (int patch_v = 0; patch_v < num_patches_v; patch_v++) {
+				BezierPatch& patch = patches[patch_u + patch_v * num_patches_u];
+				for (int point = 0; point < 16; ++point) {
+					int idx = (patch_u * 3 + point % 4) + (patch_v * 3 + point / 4) * count_u;
+					patch.points[point] = simplified_control_points + (indices ? idxConv.convert(idx) : idx);
 				}
+				patch.u_index = patch_u * 3;
+				patch.v_index = patch_v * 3;
+				patch.index = patch_v * num_patches_u + patch_u;
+				patch.primType = prim_type;
+				patch.computeNormals = computeNormals;
+				patch.patchFacing = patchFacing;
 			}
-			patch.u_index = patch_u * 3;
-			patch.v_index = patch_v * 3;
-			patch.index = patch_v * num_patches_u + patch_u;
-			patch.primType = prim_type;
-			patch.computeNormals = computeNormals;
-			patch.patchFacing = patchFacing;
 		}
 	}
 
@@ -969,17 +1069,28 @@ void DrawEngineCommon::SubmitBezier(const void *control_points, const void *indi
 	}
 
 	u16 *inds = quadIndices_;
-	int maxVertices = SPLINE_BUFFER_SIZE / vertexSize;
-	for (int patch_idx = 0; patch_idx < num_patches_u*num_patches_v; ++patch_idx) {
-		const BezierPatch &patch = patches[patch_idx];
-		TesselateBezierPatch(dest, inds, count, tess_u, tess_v, patch, origVertType, maxVertices);
+	if (g_Config.bHardwareTessellation && g_Config.bHardwareTransform && !g_Config.bSoftwareRendering) {
+		tessDataTransfer->SendDataToShader(pos, tex, col, count_u * count_v, hasColor, hasTexCoords);
+		TessellateBezierPatchHardware(dest, inds, count, tess_u, tess_v, prim_type);
+		numPatches = num_patches_u * num_patches_v;
+	} else {
+		int maxVertices = SPLINE_BUFFER_SIZE / vertexSize;
+		// Downsample until it fits, in case crazy tessellation factors are sent.
+		while ((tess_u + 1) * (tess_v + 1) * num_patches_u * num_patches_v > maxVertices) {
+			tess_u /= 2;
+			tess_v /= 2;
+		}
+		for (int patch_idx = 0; patch_idx < num_patches_u*num_patches_v; ++patch_idx) {
+			const BezierPatch &patch = patches[patch_idx];
+			TessellateBezierPatch(dest, inds, count, tess_u, tess_v, patch, origVertType);
+		}
+		delete[] patches;
 	}
-	delete[] patches;
 
 	u32 vertTypeWithIndex16 = (vertType & ~GE_VTYPE_IDX_MASK) | GE_VTYPE_IDX_16BIT;
 
 	UVScale prevUVScale;
-	if (g_Config.bPrescaleUV && (origVertType & GE_VTYPE_TC_MASK) != 0) {
+	if (origVertType & GE_VTYPE_TC_MASK) {
 		// We scaled during Normalize already so let's turn it off when drawing.
 		prevUVScale = gstate_c.uv;
 		gstate_c.uv.uScale = 1.0f;
@@ -993,7 +1104,7 @@ void DrawEngineCommon::SubmitBezier(const void *control_points, const void *indi
 
 	DispatchFlush();
 
-	if (g_Config.bPrescaleUV && (origVertType & GE_VTYPE_TC_MASK) != 0) {
+	if (origVertType & GE_VTYPE_TC_MASK) {
 		gstate_c.uv = prevUVScale;
 	}
 }

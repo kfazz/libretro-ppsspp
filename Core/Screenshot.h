@@ -25,13 +25,15 @@ enum ScreenshotFormat {
 };
 
 enum ScreenshotType {
-	// What's begin show on screen (e.g. including FPS, etc.)
+	// What's being show on screen (e.g. including FPS, etc.)
+	SCREENSHOT_OUTPUT,
+	// What the game rendered (e.g. at render resolution) to the display.
 	SCREENSHOT_DISPLAY,
-	// What the game rendered (e.g. at render resolution.)
-	// Can only be used while in game.
+	// What the game is in-progress rendering now.
 	SCREENSHOT_RENDER,
 };
 
 const u8 *ConvertBufferTo888RGB(const GPUDebugBuffer &buf, u8 *&temp, u32 &w, u32 &h);
 
+// Can only be used while in game.
 bool TakeGameScreenshot(const char *filename, ScreenshotFormat fmt, ScreenshotType type, int *width = nullptr, int *height = nullptr, int maxRes = -1);

@@ -21,7 +21,6 @@
 
 #include "Core/Config.h"
 #include "Common/GraphicsContext.h"
-#include "GPU/GLES/FBO.h"
 
 #include <sys/types.h>
 #include <sys/sysctl.h>
@@ -36,10 +35,18 @@
 
 class IOSDummyGraphicsContext : public DummyGraphicsContext {
 public:
-    Thin3DContext *CreateThin3DContext() override {
-        CheckGLExtensions();
-        return T3DCreateGLContext();
-    }
+	IOSDummyGraphicsContext() {
+		CheckGLExtensions();
+		draw_ = Draw::T3DCreateGLContext();
+	}
+	~IOSDummyGraphicsContext() {
+		delete draw_;
+	}
+	Draw::DrawContext *GetDrawContext() override {
+		return draw_;
+	}
+private:
+	Draw::DrawContext *draw_;
 };
 
 float dp_xscale = 1.0f;
@@ -50,9 +57,7 @@ double lastStartPress = 0.0f;
 bool simulateAnalog = false;
 
 extern ScreenManager *screenManager;
-InputState input_state;
 
-extern std::string ram_temp_file;
 extern bool iosCanUseJit;
 extern bool targetIsJailbroken;
 
@@ -93,12 +98,6 @@ static GraphicsContext *graphicsContext;
 		self.documentsPath = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) objectAtIndex:0];
 		self.bundlePath = [[[NSBundle mainBundle] resourcePath] stringByAppendingString:@"/assets/"];
 
-		memset(&input_state, 0, sizeof(input_state));
-
-		net::Init();
-
-		ram_temp_file = [[NSTemporaryDirectory() stringByAppendingPathComponent:@"ram_tmp.file"] fileSystemRepresentation];
-		
 		iosCanUseJit = true;
 		targetIsJailbroken = false;
 		NSArray *jailPath = [NSArray arrayWithObjects:
@@ -148,8 +147,7 @@ static GraphicsContext *graphicsContext;
 	self.view.multipleTouchEnabled = YES;
 	self.context = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES3];
 	
-	if (!self.context)
-	{
+	if (!self.context) {
 		self.context = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES2];
 	}
 
@@ -159,6 +157,9 @@ static GraphicsContext *graphicsContext;
 	[EAGLContext setCurrentContext:self.context];
 	self.preferredFramesPerSecond = 60;
 
+	// Might be useful for a speed boot, sacrificing resolution:
+	// view.contentScaleFactor = 1.0;
+
 	float scale = [UIScreen mainScreen].scale;
 	
 	if ([[UIScreen mainScreen] respondsToSelector:@selector(nativeScale)]) {
@@ -167,8 +168,7 @@ static GraphicsContext *graphicsContext;
 
 	CGSize size = [[UIApplication sharedApplication].delegate window].frame.size;
 
-	if (size.height > size.width)
-		{
+	if (size.height > size.width) {
 		float h = size.height;
 		size.height = size.width;
 		size.width = h;
@@ -176,6 +176,7 @@ static GraphicsContext *graphicsContext;
 
 	g_dpi = (IS_IPAD() ? 200 : 150) * scale;
 	g_dpi_scale = 240.0f / (float)g_dpi;
+	g_dpi_scale_real = g_dpi_scale;
 	pixel_xres = size.width * scale;
 	pixel_yres = size.height * scale;
 
@@ -252,21 +253,13 @@ static GraphicsContext *graphicsContext;
 
 - (void)glkView:(GLKView *)view drawInRect:(CGRect)rect
 {
-	{
-		lock_guard guard(input_state.lock);
-		UpdateInputState(&input_state);
-		NativeUpdate(input_state);
-		EndInputState(&input_state);
-	}
-
+	NativeUpdate();
 	NativeRender(graphicsContext);
 	time_update();
 }
 
 - (void)touchX:(float)x y:(float)y code:(int)code pointerId:(int)pointerId
 {
-	lock_guard guard(input_state.lock);
-
 	float scale = [UIScreen mainScreen].scale;
 	
 	if ([[UIScreen mainScreen] respondsToSelector:@selector(nativeScale)]) {
@@ -277,19 +270,14 @@ static GraphicsContext *graphicsContext;
 	float scaledY = (int)(y * dp_yscale) * scale;
 
 	TouchInput input;
-
-	input_state.pointer_x[pointerId] = scaledX;
-	input_state.pointer_y[pointerId] = scaledY;
 	input.x = scaledX;
 	input.y = scaledY;
 	switch (code) {
 		case 1 :
-			input_state.pointer_down[pointerId] = true;
 			input.flags = TOUCH_DOWN;
 			break;
 
 		case 2 :
-			input_state.pointer_down[pointerId] = false;
 			input.flags = TOUCH_UP;
 			break;
 
@@ -297,7 +285,6 @@ static GraphicsContext *graphicsContext;
 			input.flags = TOUCH_MOVE;
 			break;
 	}
-	input_state.mouse_valid = true;
 	input.id = pointerId;
 	NativeTouch(input);
 }

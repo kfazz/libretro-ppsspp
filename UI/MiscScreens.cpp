@@ -15,9 +15,11 @@
 // Official git repository and contact information can be found at
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
-#include <algorithm>
+#include "ppsspp_config.h"
 
-#include "base/functional.h"
+#include <algorithm>
+#include <functional>
+
 #include "base/colorutil.h"
 #include "base/display.h"
 #include "base/timeutil.h"
@@ -31,10 +33,13 @@
 #include "util/random/rng.h"
 #include "file/vfs.h"
 #include "UI/ui_atlas.h"
-#include "UI/MiscScreens.h"
+#include "UI/ControlMappingScreen.h"
+#include "UI/DisplayLayoutScreen.h"
 #include "UI/EmuScreen.h"
-#include "UI/MainScreen.h"
 #include "UI/GameInfoCache.h"
+#include "UI/GameSettingsScreen.h"
+#include "UI/MainScreen.h"
+#include "UI/MiscScreens.h"
 #include "Core/Config.h"
 #include "Core/Host.h"
 #include "Core/System.h"
@@ -64,7 +69,23 @@ static const uint32_t colors[4] = {
 	0xC0FFFFFF,
 };
 
-void DrawBackground(UIContext &dc, float alpha = 1.0f) {
+static ManagedTexture *bgTexture = nullptr;
+
+void UIBackgroundInit(UIContext &dc) {
+	const std::string bgPng = GetSysDirectory(DIRECTORY_SYSTEM) + "background.png";
+	const std::string bgJpg = GetSysDirectory(DIRECTORY_SYSTEM) + "background.jpg";
+	if (File::Exists(bgPng) || File::Exists(bgJpg)) {
+		const std::string &bgFile = File::Exists(bgPng) ? bgPng : bgJpg;
+		bgTexture = CreateTextureFromFile(dc.GetDrawContext(), bgFile.c_str(), DETECT, true);
+	}
+}
+
+void UIBackgroundShutdown() {
+	delete bgTexture;
+	bgTexture = nullptr;
+}
+
+void DrawBackground(UIContext &dc, float alpha) {
 	static float xbase[100] = {0};
 	static float ybase[100] = {0};
 	float xres = dc.GetBounds().w;
@@ -82,13 +103,20 @@ void DrawBackground(UIContext &dc, float alpha = 1.0f) {
 		last_yres = yres;
 	}
 	
-#ifdef GOLD
-	int img = I_BG_GOLD;
-#else
-	int img = I_BG;
-#endif
+	uint32_t bgColor = whiteAlpha(alpha);
 
-	ui_draw2d.DrawImageStretch(img, dc.GetBounds());
+	if (bgTexture != nullptr) {
+		dc.Flush();
+		dc.GetDrawContext()->BindTexture(0, bgTexture->GetTexture());
+		dc.Draw()->DrawTexRect(dc.GetBounds(), 0, 0, 1, 1, bgColor);
+
+		dc.Flush();
+		dc.RebindTexture();
+	} else {
+		ImageID img = I_BG;
+		ui_draw2d.DrawImageStretch(img, dc.GetBounds(), bgColor);
+	}
+
 	float t = time_now();
 	for (int i = 0; i < 100; i++) {
 		float x = xbase[i] + dc.GetBounds().x;
@@ -100,31 +128,31 @@ void DrawBackground(UIContext &dc, float alpha = 1.0f) {
 }
 
 void DrawGameBackground(UIContext &dc, const std::string &gamePath) {
-	GameInfo *ginfo = g_gameInfoCache->GetInfo(dc.GetThin3DContext(), gamePath, GAMEINFO_WANTBG);
+	GameInfo *ginfo = nullptr;
+	if (gamePath.size())
+		ginfo = g_gameInfoCache->GetInfo(dc.GetDrawContext(), gamePath, GAMEINFO_WANTBG);
 	dc.Flush();
 
-	if (ginfo) {
-		bool hasPic = false;
-		double loadTime;
-		if (ginfo->pic1Texture) {
-			dc.GetThin3DContext()->SetTexture(0, ginfo->pic1Texture);
-			loadTime = ginfo->timePic1WasLoaded;
-			hasPic = true;
-		} else if (ginfo->pic0Texture) {
-			dc.GetThin3DContext()->SetTexture(0, ginfo->pic0Texture);
-			loadTime = ginfo->timePic0WasLoaded;
-			hasPic = true;
-		}
-		if (hasPic) {
-			uint32_t color = whiteAlpha(ease((time_now_d() - loadTime) * 3)) & 0xFFc0c0c0;
-			dc.Draw()->DrawTexRect(dc.GetBounds(), 0,0,1,1, color);
-			dc.Flush();
-			dc.RebindTexture();
-		} else {
-			::DrawBackground(dc, 1.0f);
-			dc.RebindTexture();
-			dc.Flush();
-		}
+	bool hasPic = false;
+	double loadTime;
+	if (ginfo && ginfo->pic1.texture) {
+		dc.GetDrawContext()->BindTexture(0, ginfo->pic1.texture->GetTexture());
+		loadTime = ginfo->pic1.timeLoaded;
+		hasPic = true;
+	} else if (ginfo && ginfo->pic0.texture) {
+		dc.GetDrawContext()->BindTexture(0, ginfo->pic0.texture->GetTexture());
+		loadTime = ginfo->pic0.timeLoaded;
+		hasPic = true;
+	}
+	if (hasPic) {
+		uint32_t color = whiteAlpha(ease((time_now_d() - loadTime) * 3)) & 0xFFc0c0c0;
+		dc.Draw()->DrawTexRect(dc.GetBounds(), 0,0,1,1, color);
+		dc.Flush();
+		dc.RebindTexture();
+	} else {
+		::DrawBackground(dc, 1.0f);
+		dc.RebindTexture();
+		dc.Flush();
 	}
 }
 
@@ -135,6 +163,16 @@ void HandleCommonMessages(const char *message, const char *value, ScreenManager 
 		}
 		if (PSP_IsInited()) {
 			currentMIPS->UpdateCore((CPUCore)g_Config.iCpuCore);
+		}
+	} else if (!strcmp(message, "control mapping")) {
+		manager->push(new ControlMappingScreen());
+	} else if (!strcmp(message, "display layout editor")) {
+		manager->push(new DisplayLayoutScreen());
+	} else if (!strcmp(message, "window minimized")) {
+		if (!strcmp(value, "true")) {
+			gstate_c.skipDrawReason |= SKIPDRAW_WINDOW_MINIMIZED;
+		} else {
+			gstate_c.skipDrawReason &= ~SKIPDRAW_WINDOW_MINIMIZED;
 		}
 	}
 }
@@ -153,8 +191,24 @@ void UIScreenWithGameBackground::DrawBackground(UIContext &dc) {
 	}
 }
 
+void UIScreenWithGameBackground::sendMessage(const char *message, const char *value) {
+	if (!strcmp(message, "settings")) {
+		screenManager()->push(new GameSettingsScreen(gamePath_));
+	} else {
+		UIScreenWithBackground::sendMessage(message, value);
+	}
+}
+
 void UIDialogScreenWithGameBackground::DrawBackground(UIContext &dc) {
 	DrawGameBackground(dc, gamePath_);
+}
+
+void UIDialogScreenWithGameBackground::sendMessage(const char *message, const char *value) {
+	if (!strcmp(message, "settings")) {
+		screenManager()->push(new GameSettingsScreen(gamePath_));
+	} else {
+		UIDialogScreenWithBackground::sendMessage(message, value);
+	}
 }
 
 void UIScreenWithBackground::sendMessage(const char *message, const char *value) {
@@ -164,6 +218,8 @@ void UIScreenWithBackground::sendMessage(const char *message, const char *value)
 		auto langScreen = new NewLanguageScreen(dev->T("Language"));
 		langScreen->OnChoice.Handle(this, &UIScreenWithBackground::OnLanguageChange);
 		screenManager()->push(langScreen);
+	} else if (!strcmp(message, "settings")) {
+		screenManager()->push(new GameSettingsScreen("", ""));
 	}
 }
 
@@ -186,7 +242,7 @@ UI::EventReturn UIDialogScreenWithBackground::OnLanguageChange(UI::EventParams &
 }
 
 void UIDialogScreenWithBackground::DrawBackground(UIContext &dc) {
-	::DrawBackground(dc);
+	::DrawBackground(dc, 1.0f);
 	dc.Flush();
 }
 
@@ -203,12 +259,8 @@ void UIDialogScreenWithBackground::sendMessage(const char *message, const char *
 		auto langScreen = new NewLanguageScreen(dev->T("Language"));
 		langScreen->OnChoice.Handle(this, &UIDialogScreenWithBackground::OnLanguageChange);
 		screenManager()->push(langScreen);
-	} else if (!strcmp(message, "window minimized")) {
-		if (!strcmp(value, "true")) {
-			gstate_c.skipDrawReason |= SKIPDRAW_WINDOW_MINIMIZED;
-		} else {
-			gstate_c.skipDrawReason &= ~SKIPDRAW_WINDOW_MINIMIZED;
-		}
+	} else if (!strcmp(message, "settings")) {
+		screenManager()->push(new GameSettingsScreen("", ""));
 	}
 }
 
@@ -246,18 +298,19 @@ void PromptScreen::CreateViews() {
 
 UI::EventReturn PromptScreen::OnYes(UI::EventParams &e) {
 	callback_(true);
-	screenManager()->finishDialog(this, DR_OK);
+	TriggerFinish(DR_OK);
 	return UI::EVENT_DONE;
 }
 
 UI::EventReturn PromptScreen::OnNo(UI::EventParams &e) {
 	callback_(false);
-	screenManager()->finishDialog(this, DR_CANCEL);
+	TriggerFinish(DR_CANCEL);
 	return UI::EVENT_DONE;
 }
 
 PostProcScreen::PostProcScreen(const std::string &title) : ListPopupScreen(title) {
 	I18NCategory *ps = GetI18NCategory("PostShaders");
+	ReloadAllPostShaderInfo();
 	shaders_ = GetAllPostShaderInfo();
 	std::vector<std::string> items;
 	int selected = -1;
@@ -382,10 +435,12 @@ void LogoScreen::Next() {
 	}
 }
 
-void LogoScreen::update(InputState &input_state) {
-	UIScreen::update(input_state);
+const float logoScreenSeconds = 2.5f;
+
+void LogoScreen::update() {
+	UIScreen::update();
 	frames_++;
-	if (frames_ > 180 || input_state.pointer_down[0]) {
+	if (frames_ > 60 * logoScreenSeconds) {
 		Next();
 	}
 }
@@ -404,7 +459,17 @@ bool LogoScreen::key(const KeyInput &key) {
 	return false;
 }
 
+bool LogoScreen::touch(const TouchInput &touch) {
+	if (touch.flags & TOUCH_DOWN) {
+		Next();
+		return true;
+	}
+	return false;
+}
+
 void LogoScreen::render() {
+	using namespace Draw;
+
 	UIScreen::render();
 	UIContext &dc = *screenManager()->getUIContext();
 
@@ -414,7 +479,7 @@ void LogoScreen::render() {
 	float yres = dc.GetBounds().h;
 
 	dc.Begin();
-	float t = (float)frames_ / 60.0f;
+	float t = (float)frames_ / (60.0f * logoScreenSeconds / 3.0f);
 
 	float alpha = t;
 	if (t > 1.0f)
@@ -422,6 +487,7 @@ void LogoScreen::render() {
 	float alphaText = alpha;
 	if (t > 2.0f)
 		alphaText = 3.0f - t;
+	uint32_t textColor = colorAlpha(dc.theme->infoStyle.fgColor, alphaText);
 
 	::DrawBackground(dc, alpha);
 
@@ -430,23 +496,24 @@ void LogoScreen::render() {
 	// Manually formatting utf-8 is fun.  \xXX doesn't work everywhere.
 	snprintf(temp, sizeof(temp), "%s Henrik Rydg%c%crd", cr->T("created", "Created by"), 0xC3, 0xA5);
 #ifdef GOLD
-	dc.Draw()->DrawImage(I_ICONGOLD, bounds.centerX() - 120, bounds.centerY() - 30, 1.2f, colorAlpha(0xFFFFFFFF, alphaText), ALIGN_CENTER);
+	dc.Draw()->DrawImage(I_ICONGOLD, bounds.centerX() - 120, bounds.centerY() - 30, 1.2f, textColor, ALIGN_CENTER);
 #else
-	dc.Draw()->DrawImage(I_ICON, bounds.centerX() - 120, bounds.centerY() - 30, 1.2f, colorAlpha(0xFFFFFFFF, alphaText), ALIGN_CENTER);
+	dc.Draw()->DrawImage(I_ICON, bounds.centerX() - 120, bounds.centerY() - 30, 1.2f, textColor, ALIGN_CENTER);
 #endif
-	dc.Draw()->DrawImage(I_LOGO, bounds.centerX() + 40, bounds.centerY() - 30, 1.5f, colorAlpha(0xFFFFFFFF, alphaText), ALIGN_CENTER);
-	//dc.Draw()->DrawTextShadow(UBUNTU48, "PPSSPP", xres / 2, yres / 2 - 30, colorAlpha(0xFFFFFFFF, alphaText), ALIGN_CENTER);
+	dc.Draw()->DrawImage(I_LOGO, bounds.centerX() + 40, bounds.centerY() - 30, 1.5f, textColor, ALIGN_CENTER);
+	//dc.Draw()->DrawTextShadow(UBUNTU48, "PPSSPP", xres / 2, yres / 2 - 30, textColor, ALIGN_CENTER);
 	dc.SetFontScale(1.0f, 1.0f);
 	dc.SetFontStyle(dc.theme->uiFont);
-	dc.DrawText(temp, bounds.centerX(), bounds.centerY() + 40, colorAlpha(0xFFFFFFFF, alphaText), ALIGN_CENTER);
-	dc.DrawText(cr->T("license", "Free Software under GPL 2.0+"), bounds.centerX(), bounds.centerY() + 70, colorAlpha(0xFFFFFFFF, alphaText), ALIGN_CENTER);
-	dc.DrawText("www.ppsspp.org", bounds.centerX(), yres / 2 + 130, colorAlpha(0xFFFFFFFF, alphaText), ALIGN_CENTER);
+	dc.DrawText(temp, bounds.centerX(), bounds.centerY() + 40, textColor, ALIGN_CENTER);
+	dc.DrawText(cr->T("license", "Free Software under GPL 2.0+"), bounds.centerX(), bounds.centerY() + 70, textColor, ALIGN_CENTER);
+	dc.DrawText("www.ppsspp.org", bounds.centerX(), yres / 2 + 130, textColor, ALIGN_CENTER);
 	if (boot_filename.size()) {
-		dc.DrawTextShadow(boot_filename.c_str(), bounds.centerX(), bounds.centerY() + 180, colorAlpha(0xFFFFFFFF, alphaText), ALIGN_CENTER);
+		dc.DrawTextShadow(boot_filename.c_str(), bounds.centerX(), bounds.centerY() + 180, textColor, ALIGN_CENTER);
 	}
 
-#ifdef _WIN32
-	dc.DrawText(screenManager()->getThin3DContext()->GetInfoString(T3DInfo::APINAME).c_str(), bounds.centerX(), bounds.y2() - 100, colorAlpha(0xFFFFFFFF, alphaText), ALIGN_CENTER);
+#if defined(_WIN32) && !PPSSPP_PLATFORM(UWP)
+	// Draw the graphics API, except on UWP where it's always D3D11
+	dc.DrawText(screenManager()->getDrawContext()->GetInfoString(InfoField::APINAME).c_str(), bounds.centerX(), bounds.y2() - 100, textColor, ALIGN_CENTER);
 #endif
 
 	dc.End();
@@ -467,7 +534,7 @@ void CreditsScreen::CreateViews() {
 #endif
 	root_->Add(new Button(cr->T("PPSSPP Forums"), new AnchorLayoutParams(260, 64, 10, NONE, NONE, 84, false)))->OnClick.Handle(this, &CreditsScreen::OnForums);
 	root_->Add(new Button("www.ppsspp.org", new AnchorLayoutParams(260, 64, 10, NONE, NONE, 158, false)))->OnClick.Handle(this, &CreditsScreen::OnPPSSPPOrg);
-#ifdef ANDROID
+#ifdef __ANDROID__
 	root_->Add(new Button(cr->T("Share PPSSPP"), new AnchorLayoutParams(260, 64, NONE, NONE, 10, 84, false)))->OnClick.Handle(this, &CreditsScreen::OnShare);
 	root_->Add(new Button(cr->T("Twitter @PPSSPP_emu"), new AnchorLayoutParams(260, 64, NONE, NONE, 10, 154, false)))->OnClick.Handle(this, &CreditsScreen::OnTwitter);
 #endif
@@ -479,7 +546,7 @@ void CreditsScreen::CreateViews() {
 }
 
 UI::EventReturn CreditsScreen::OnSupport(UI::EventParams &e) {
-#ifdef ANDROID
+#ifdef __ANDROID__
 	LaunchBrowser("market://details?id=org.ppsspp.ppssppgold");
 #else
 	LaunchBrowser("http://central.ppsspp.org/buygold");
@@ -488,7 +555,7 @@ UI::EventReturn CreditsScreen::OnSupport(UI::EventParams &e) {
 }
 
 UI::EventReturn CreditsScreen::OnTwitter(UI::EventParams &e) {
-#ifdef ANDROID
+#ifdef __ANDROID__
 	System_SendMessage("showTwitter", "PPSSPP_emu");
 #else
 	LaunchBrowser("https://twitter.com/#!/PPSSPP_emu");
@@ -513,16 +580,13 @@ UI::EventReturn CreditsScreen::OnShare(UI::EventParams &e) {
 }
 
 UI::EventReturn CreditsScreen::OnOK(UI::EventParams &e) {
-	screenManager()->finishDialog(this, DR_OK);
+	TriggerFinish(DR_OK);
 	return UI::EVENT_DONE;
 }
 
-void CreditsScreen::update(InputState &input_state) {
-	UIScreen::update(input_state);
+void CreditsScreen::update() {
+	UIScreen::update();
 	UpdateUIState(UISTATE_MENU);
-	if (input_state.pad_buttons_down & PAD_BUTTON_BACK) {
-		screenManager()->finishDialog(this, DR_OK);
-	}
 	frames_++;
 }
 
@@ -579,7 +643,7 @@ void CreditsScreen::render() {
 		"Igor Calabria",
 		"Coldbird",
 		"Kyhel",
-		"",
+		"xebra",
 		"",
 		cr->T("specialthanks", "Special thanks to:"),
 		"Maxim for his amazing Atrac3+ decoder work",
@@ -602,10 +666,8 @@ void CreditsScreen::render() {
 		"",
 		"",
 		cr->T("tools", "Free tools used:"),
-#ifdef ANDROID
+#ifdef __ANDROID__
 		"Android SDK + NDK",
-#elif defined(BLACKBERRY)
-		"Blackberry NDK",
 #endif
 #if defined(USING_QT_UI)
 		"Qt",
@@ -639,7 +701,11 @@ void CreditsScreen::render() {
 
 	// TODO: This is kinda ugly, done on every frame...
 	char temp[256];
+#ifdef GOLD
+	snprintf(temp, sizeof(temp), "PPSSPP Gold %s", PPSSPP_GIT_VERSION);
+#else
 	snprintf(temp, sizeof(temp), "PPSSPP %s", PPSSPP_GIT_VERSION);
+#endif
 	credits[0] = (const char *)temp;
 
 	UIContext &dc = *screenManager()->getUIContext();
@@ -652,9 +718,11 @@ void CreditsScreen::render() {
 	int y = bounds.y2() - (frames_ % totalHeight);
 	for (int i = 0; i < numItems; i++) {
 		float alpha = linearInOut(y+32, 64, bounds.y2() - 192, 64);
+		uint32_t textColor = colorAlpha(dc.theme->infoStyle.fgColor, alpha);
+
 		if (alpha > 0.0f) {
 			dc.SetFontScale(ease(alpha), ease(alpha));
-			dc.DrawText(credits[i], dc.GetBounds().centerX(), y, whiteAlpha(alpha), ALIGN_HCENTER);
+			dc.DrawText(credits[i], dc.GetBounds().centerX(), y, textColor, ALIGN_HCENTER);
 			dc.SetFontScale(1.0f, 1.0f);
 		}
 		y += itemHeight;

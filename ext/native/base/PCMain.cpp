@@ -22,7 +22,7 @@
 SDLJoystick *joystick = NULL;
 #endif
 
-#ifdef RPI
+#if PPSSPP_PLATFORM(RPI)
 #include <bcm_host.h>
 #endif
 
@@ -48,10 +48,17 @@ SDLJoystick *joystick = NULL;
 
 class GLDummyGraphicsContext : public DummyGraphicsContext {
 public:
-	Thin3DContext *CreateThin3DContext() override {
+	GLDummyGraphicsContext() {
 		CheckGLExtensions();
-		return T3DCreateGLContext();
+		draw_ = Draw::T3DCreateGLContext();
 	}
+	~GLDummyGraphicsContext() { delete draw_; }
+
+	Draw::DrawContext *GetDrawContext() override {
+		return draw_;
+	}
+private:
+	Draw::DrawContext *draw_;
 };
 
 GlobalUIState lastUIState = UISTATE_MENU;
@@ -150,9 +157,6 @@ int8_t EGL_Init() {
 #endif
 		EGL_SAMPLE_BUFFERS,  0,
 		EGL_SAMPLES,         0,
-#ifdef MAEMO
-		EGL_BUFFER_SIZE, 16,
-#endif
 		EGL_NONE};
 
 	const EGLint attributes[] = { EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE };
@@ -207,20 +211,19 @@ void EGL_Close() {
 }
 #endif
 
-int getDisplayNumber(void)
-{
-    int displayNumber = 0;
-    char * displayNumberStr;
+int getDisplayNumber(void) {
+	int displayNumber = 0;
+	char * displayNumberStr;
 
-    //get environment
-    displayNumberStr=getenv("SDL_VIDEO_FULLSCREEN_HEAD");
+	//get environment
+	displayNumberStr=getenv("SDL_VIDEO_FULLSCREEN_HEAD");
 
-    if (displayNumberStr)
-    {
-      displayNumber = atoi(displayNumberStr);
-    }
+	if (displayNumberStr)
+	{
+		displayNumber = atoi(displayNumberStr);
+	}
 
-    return displayNumber;
+	return displayNumber;
 }
 
 // Simple implementations of System functions
@@ -336,41 +339,11 @@ int System_GetPropertyInt(SystemProperty prop) {
 #else
 		return DEVICE_TYPE_DESKTOP;
 #endif
+	case SYSPROP_HAS_BACK_BUTTON:
+		return 1;
 	default:
 		return -1;
 	}
-}
-
-InputState input_state;
-
-static const int legacyKeyMap[] {
-	NKCODE_X,          //A
-	NKCODE_S,          //B
-	NKCODE_Z,          //X
-	NKCODE_A,          //Y
-	NKCODE_W,          //LBUMPER
-	NKCODE_Q,          //RBUMPER
-	NKCODE_1,        //START
-	NKCODE_2,        //SELECT
-	NKCODE_DPAD_UP,         //UP
-	NKCODE_DPAD_DOWN,       //DOWN
-	NKCODE_DPAD_LEFT,       //LEFT
-	NKCODE_DPAD_RIGHT,      //RIGHT
-	0,                  //MENU (SwipeDown)
-	NKCODE_ESCAPE,  //BACK
-	NKCODE_I,          //JOY UP
-	NKCODE_K,          //JOY DOWN
-	NKCODE_J,          //JOY LEFT
-	NKCODE_L,          //JOY RIGHT
-};
-
-void SimulateGamepad(const uint8_t *keys, InputState *input) {
-	// Legacy key mapping.
-	input->pad_buttons = 0;
-	input->pad_lstick_x = 0;
-	input->pad_lstick_y = 0;
-	input->pad_rstick_x = 0;
-	input->pad_rstick_y = 0;
 }
 
 extern void mixaudio(void *userdata, Uint8 *stream, int len) {
@@ -413,10 +386,11 @@ void ToggleFullScreenIfFlagSet() {
 #undef main
 #endif
 int main(int argc, char *argv[]) {
-#ifdef RPI
+#if PPSSPP_PLATFORM(RPI)
 	bcm_host_init();
 #endif
 	putenv((char*)"SDL_VIDEO_CENTERED=1");
+	SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, "0");
 
 	std::string app_name;
 	std::string app_name_nice;
@@ -424,10 +398,8 @@ int main(int argc, char *argv[]) {
 	bool landscape;
 	NativeGetAppInfo(&app_name, &app_name_nice, &landscape, &version);
 
-	net::Init();
-
 	bool joystick_enabled = true;
-	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK | SDL_INIT_AUDIO) < 0) {
+	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER | SDL_INIT_AUDIO) < 0) {
 		joystick_enabled = false;
 		if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) {
 			fprintf(stderr, "Unable to initialize SDL: %s\n", SDL_GetError());
@@ -482,32 +454,36 @@ int main(int argc, char *argv[]) {
 	float set_dpi = 1.0f;
 	float set_scale = 1.0f;
 
+	// Produce a new set of arguments with the ones we skip.
+	int remain_argc = 1;
+	const char *remain_argv[256] = { argv[0] };
+
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i],"--fullscreen"))
 			mode |= SDL_WINDOW_FULLSCREEN_DESKTOP;
-		if (set_xres == -2) {
+		else if (set_xres == -2)
 			set_xres = parseInt(argv[i]);
-		} else if (set_yres == -2) {
+		else if (set_yres == -2)
 			set_yres = parseInt(argv[i]);
-		}
-		if (set_dpi == -2)
+		else if (set_dpi == -2)
 			set_dpi = parseFloat(argv[i]);
-		if (set_scale == -2)
+		else if (set_scale == -2)
 			set_scale = parseFloat(argv[i]);
-
-		if (!strcmp(argv[i],"--xres"))
+		else if (!strcmp(argv[i],"--xres"))
 			set_xres = -2;
-		if (!strcmp(argv[i],"--yres"))
+		else if (!strcmp(argv[i],"--yres"))
 			set_yres = -2;
-		if (!strcmp(argv[i],"--dpi"))
+		else if (!strcmp(argv[i],"--dpi"))
 			set_dpi = -2;
-		if (!strcmp(argv[i],"--scale"))
+		else if (!strcmp(argv[i],"--scale"))
 			set_scale = -2;
-	
-		if (!strcmp(argv[i],"--ipad"))
+		else if (!strcmp(argv[i],"--ipad"))
 			set_ipad = true;
-		if (!strcmp(argv[i],"--portrait"))
+		else if (!strcmp(argv[i],"--portrait"))
 			portrait = true;
+		else {
+			remain_argv[remain_argc++] = argv[i];
+		}
 	}
 
 	// Is resolution is too low to run windowed
@@ -518,9 +494,7 @@ int main(int argc, char *argv[]) {
 	if (mode & SDL_WINDOW_FULLSCREEN_DESKTOP) {
 		pixel_xres = g_DesktopWidth;
 		pixel_yres = g_DesktopHeight;
-#ifdef PPSSPP
 		g_Config.bFullScreen = true;
-#endif
 	} else {
 		// set a sensible default resolution (2x)
 		pixel_xres = 480 * 2 * set_scale;
@@ -528,9 +502,7 @@ int main(int argc, char *argv[]) {
 		if (portrait) {
 			std::swap(pixel_xres, pixel_yres);
 		}
-#ifdef PPSSPP
 		g_Config.bFullScreen = false;
-#endif
 	}
 
 	set_dpi = 1.0f / set_dpi;
@@ -577,9 +549,7 @@ int main(int argc, char *argv[]) {
 	EGL_Init();
 #endif
 
-#ifdef PPSSPP
 	SDL_SetWindowTitle(g_Screen, (app_name_nice + " " + PPSSPP_GIT_VERSION).c_str());
-#endif
 
 #ifdef MOBILE_DEVICE
 	SDL_ShowCursor(SDL_DISABLE);
@@ -627,13 +597,14 @@ int main(int argc, char *argv[]) {
 #endif
 
 #ifdef _WIN32
-	NativeInit(argc, (const char **)argv, path, "D:\\", nullptr);
+	NativeInit(remain_argc, (const char **)remain_argv, path, "D:\\", nullptr);
 #else
-	NativeInit(argc, (const char **)argv, path, "/tmp", nullptr);
+	NativeInit(remain_argc, (const char **)remain_argv, path, "/tmp", nullptr);
 #endif
 
 	pixel_in_dps = (float)pixel_xres / dp_xres;
 	g_dpi_scale = dp_xres / (float)pixel_xres;
+	g_dpi_scale_real = g_dpi_scale;
 
 	printf("Pixels: %i x %i\n", pixel_xres, pixel_yres);
 	printf("Virtual pixels: %i x %i\n", dp_xres, dp_yres);
@@ -681,11 +652,9 @@ int main(int argc, char *argv[]) {
 	int framecount = 0;
 	float t = 0;
 	float lastT = 0;
-	uint32_t pad_buttons = 0;	 // legacy pad buttons
-	while (true) {
-		input_state.accelerometer_valid = false;
-		input_state.mouse_valid = true;
+	bool mouseDown = false;
 
+	while (true) {
 		SDL_Event event;
 		while (SDL_PollEvent(&event)) {
 			float mx = event.motion.x * g_dpi_scale;
@@ -731,6 +700,7 @@ int main(int argc, char *argv[]) {
 #endif
 			case SDL_KEYDOWN:
 				{
+					if (event.key.repeat > 0) { break;}
 					int k = event.key.keysym.sym;
 					KeyInput key;
 					key.flags = KEY_DOWN;
@@ -741,15 +711,11 @@ int main(int argc, char *argv[]) {
 					key.keyCode = mapped->second;
 					key.deviceId = DEVICE_ID_KEYBOARD;
 					NativeKey(key);
-
-					for (int i = 0; i < ARRAY_SIZE(legacyKeyMap); i++) {
-						if (legacyKeyMap[i] == key.keyCode)
-							pad_buttons |= 1 << i;
-					}
 					break;
 				}
 			case SDL_KEYUP:
 				{
+					if (event.key.repeat > 0) { break;}
 					int k = event.key.keysym.sym;
 					KeyInput key;
 					key.flags = KEY_UP;
@@ -760,10 +726,6 @@ int main(int argc, char *argv[]) {
 					key.keyCode = mapped->second;
 					key.deviceId = DEVICE_ID_KEYBOARD;
 					NativeKey(key);
-					for (int i = 0; i < ARRAY_SIZE(legacyKeyMap); i++) {
-						if (legacyKeyMap[i] == key.keyCode)
-							pad_buttons &= ~(1 << i);
-					}
 					break;
 				}
 			case SDL_TEXTINPUT:
@@ -781,10 +743,7 @@ int main(int argc, char *argv[]) {
 				switch (event.button.button) {
 				case SDL_BUTTON_LEFT:
 					{
-						input_state.pointer_x[0] = mx;
-						input_state.pointer_y[0] = my;
-						input_state.pointer_down[0] = true;
-						input_state.mouse_valid = true;
+						mouseDown = true;
 						TouchInput input;
 						input.x = mx;
 						input.y = my;
@@ -822,10 +781,7 @@ int main(int argc, char *argv[]) {
 					NativeKey(key);
 				}
 			case SDL_MOUSEMOTION:
-				if (input_state.pointer_down[0]) {
-					input_state.pointer_x[0] = mx;
-					input_state.pointer_y[0] = my;
-					input_state.mouse_valid = true;
+				if (mouseDown) {
 					TouchInput input;
 					input.x = mx;
 					input.y = my;
@@ -838,11 +794,7 @@ int main(int argc, char *argv[]) {
 				switch (event.button.button) {
 				case SDL_BUTTON_LEFT:
 					{
-						input_state.pointer_x[0] = mx;
-						input_state.pointer_y[0] = my;
-						input_state.pointer_down[0] = false;
-						input_state.mouse_valid = true;
-						//input_state.mouse_buttons_up = 1;
+						mouseDown = false;
 						TouchInput input;
 						input.x = mx;
 						input.y = my;
@@ -873,10 +825,7 @@ int main(int argc, char *argv[]) {
 		if (g_QuitRequested)
 			break;
 		const uint8_t *keys = SDL_GetKeyboardState(NULL);
-		SimulateGamepad(keys, &input_state);
-		input_state.pad_buttons = pad_buttons;
-		UpdateInputState(&input_state, true);
-		UpdateRunLoop(&input_state);
+		UpdateRunLoop();
 		if (g_QuitRequested)
 			break;
 #if defined(PPSSPP) && !defined(MOBILE_DEVICE)
@@ -912,8 +861,8 @@ int main(int argc, char *argv[]) {
 #endif
 	NativeShutdownGraphics();
 	graphicsContext->Shutdown();
-	delete graphicsContext;
 	NativeShutdown();
+	delete graphicsContext;
 	// Faster exit, thanks to the OS. Remove this if you want to debug shutdown
 	// The speed difference is only really noticable on Linux. On Windows you do notice it though
 #ifndef MOBILE_DEVICE
@@ -926,8 +875,7 @@ int main(int argc, char *argv[]) {
 #endif
 	SDL_GL_DeleteContext(glContext);
 	SDL_Quit();
-	net::Shutdown();
-#ifdef RPI
+#if PPSSPP_PLATFORM(RPI)
 	bcm_host_deinit();
 #endif
 

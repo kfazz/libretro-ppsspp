@@ -15,15 +15,14 @@
 // Official git repository and contact information can be found at
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
+
+// TODO: Implement https://github.com/dolphin-emu/dolphin/pull/1025/commits/b597ec3e081a289d9ac782586617a876535183d6 .
+
 #pragma once
 
 #include "Common/CommonTypes.h"
 #include "Common/Thunk.h"
 #include "Common/x64Emitter.h"
-
-#if defined(ARM)
-#error DO NOT BUILD X86 JIT ON ARM
-#endif
 
 #include "Common/x64Emitter.h"
 #include "Core/MIPS/JitCommon/JitBlockCache.h"
@@ -40,7 +39,6 @@ namespace MIPSComp {
 // This is called when Jit hits a breakpoint.  Returns 1 when hit.
 u32 JitBreakpoint();
 
-// TODO: Hmm, humongous.
 struct RegCacheState {
 	GPRRegCacheState gpr;
 	FPURegCacheState fpr;
@@ -167,7 +165,6 @@ public:
 	void RestoreSavedEmuHackOps(std::vector<u32> saved) override { blocks.RestoreSavedEmuHackOps(saved); }
 
 	void ClearCache() override;
-	void InvalidateCache() override;
 	void InvalidateCacheAt(u32 em_address, int length = 4) override {
 		if (blocks.RangeMayHaveEmuHacks(em_address, em_address + length)) {
 			blocks.InvalidateICache(em_address, length);
@@ -297,6 +294,8 @@ private:
 		}
 		return true;
 	}
+	void SaveFlags();
+	void LoadFlags();
 
 	JitBlockCache blocks;
 	JitOptions jo;

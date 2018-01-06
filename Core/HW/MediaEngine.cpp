@@ -396,8 +396,12 @@ int MediaEngine::addStreamData(const u8 *buffer, int addSize) {
 #ifdef USE_FFMPEG
 		if (!m_pFormatCtx && m_pdata->getQueueSize() >= 2048) {
 			m_mpegheaderSize = m_pdata->get_front(m_mpegheader, sizeof(m_mpegheader));
-			m_pdata->pop_front(0, m_mpegheaderSize);
-			openContext();
+			int streamOffset = (int)(*(s32_be *)(m_mpegheader + 8));
+			if (streamOffset <= m_mpegheaderSize) {
+				m_mpegheaderSize = streamOffset;
+				m_pdata->pop_front(0, m_mpegheaderSize);
+				openContext();
+			}
 		}
 #endif // USE_FFMPEG
 
@@ -454,14 +458,19 @@ bool MediaEngine::setVideoStream(int streamNum, bool force) {
 
 		// Find the decoder for the video stream
 		AVCodec *pCodec = avcodec_find_decoder(m_pCodecCtx->codec_id);
-		if (pCodec == NULL) {
+		if (pCodec == nullptr) {
 			return false;
 		}
 
-		// Open codec
-		if (avcodec_open2(m_pCodecCtx, pCodec, nullptr) < 0) {
-			return false; // Could not open codec
+		AVDictionary *opt = nullptr;
+		// Allow ffmpeg to use any number of threads it wants.  Without this, it doesn't use threads.
+		av_dict_set(&opt, "threads", "0", 0);
+		int openResult = avcodec_open2(m_pCodecCtx, pCodec, &opt);
+		av_dict_free(&opt);
+		if (openResult < 0) {
+			return false;
 		}
+
 		m_pCodecCtxs[streamNum] = m_pCodecCtx;
 	}
 #endif

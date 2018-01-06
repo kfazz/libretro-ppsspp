@@ -15,9 +15,12 @@
 // Official git repository and contact information can be found at
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
+#include "ppsspp_config.h"
+#if PPSSPP_ARCH(X86) || PPSSPP_ARCH(AMD64)
+
 #include <cmath>
 #include <limits>
-#include <xmmintrin.h>
+#include <emmintrin.h>
 
 #include "base/logging.h"
 #include "math/math_util.h"
@@ -311,7 +314,7 @@ void Jit::Comp_SVQ(MIPSOpcode op)
 			GetVectorRegs(vregs, V_Quad, vt);
 			MOV(32, R(EAX), gpr.R(rs));
 			ADD(32, R(EAX), Imm32(imm));
-#ifdef _M_IX86
+#ifdef MASKED_PSP_MEMORY
 			AND(32, R(EAX), Imm32(Memory::MEMVIEW32_MASK));
 #endif
 			MOV(32, R(ECX), R(EAX));
@@ -3543,3 +3546,5 @@ void Jit::Comp_ColorConv(MIPSOpcode op) {
 
 }
 }
+
+#endif // PPSSPP_ARCH(X86) || PPSSPP_ARCH(AMD64)

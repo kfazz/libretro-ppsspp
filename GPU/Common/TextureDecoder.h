@@ -58,7 +58,7 @@ typedef u32 ReliableHashType;
 #endif
 
 // For ARM64, NEON is mandatory, so we also statically link.
-#elif defined(ARM64)
+#elif PPSSPP_ARCH(ARM64)
 #define DoQuickTexHash QuickTexHashNEON
 #define StableQuickTexHash QuickTexHashNEON
 #define DoUnswizzleTex16 DoUnswizzleTex16NEON
@@ -115,9 +115,9 @@ struct DXT5Block {
 	u8 alpha1; u8 alpha2;
 };
 
-void DecodeDXT1Block(u32 *dst, const DXT1Block *src, int pitch, bool ignore1bitAlpha = false);
-void DecodeDXT3Block(u32 *dst, const DXT3Block *src, int pitch);
-void DecodeDXT5Block(u32 *dst, const DXT5Block *src, int pitch);
+void DecodeDXT1Block(u32 *dst, const DXT1Block *src, int pitch, int height, bool ignore1bitAlpha);
+void DecodeDXT3Block(u32 *dst, const DXT3Block *src, int pitch, int height);
+void DecodeDXT5Block(u32 *dst, const DXT5Block *src, int pitch, int height);
 
 static const u8 textureBitsPerPixel[16] = {
 	16,  //GE_TFMT_5650,

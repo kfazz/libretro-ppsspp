@@ -1,7 +1,10 @@
 #include "Common/CommonWindows.h"
+#include <mmreg.h>
 #include <dsound.h>
+#include <process.h>
 
 #include "thread/threadutil.h"
+#include "Common/OSVersion.h"
 #include "Core/Reporting.h"
 #include "Core/Util/AudioFormat.h"
 #include "Windows/W32Util/Misc.h"

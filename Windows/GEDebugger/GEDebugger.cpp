@@ -15,11 +15,11 @@
 // Official git repository and contact information can be found at
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
-#include <vector>
-#include <string>
+#include <functional>
 #include <set>
+#include <string>
+#include <vector>
 
-#include "base/functional.h"
 #include "Common/ColorConv.h"
 #include "Windows/GEDebugger/GEDebugger.h"
 #include "Windows/GEDebugger/SimpleGLWindow.h"
@@ -169,7 +169,7 @@ void CGEDebugger::DescribePrimaryPreview(const GPUgstate &state, wchar_t desc[25
 		return;
 	}
 
-	_assert_msg_(MASTER_LOG, primaryBuffer_ != nullptr, "Must have a valid primaryBuffer_");
+	_assert_msg_(G3D, primaryBuffer_ != nullptr, "Must have a valid primaryBuffer_");
 
 	switch (PrimaryDisplayType(fbTabs->CurrentTabIndex())) {
 	case PRIMARY_FRAMEBUF:
@@ -256,7 +256,7 @@ void CGEDebugger::UpdatePrimaryPreview(const GPUgstate &state) {
 	} else {
 		switch (PrimaryDisplayType(fbTabs->CurrentTabIndex())) {
 		case PRIMARY_FRAMEBUF:
-			bufferResult = GPU_GetCurrentFramebuffer(primaryBuffer_);
+			bufferResult = GPU_GetCurrentFramebuffer(primaryBuffer_, GPU_DBG_FRAMEBUF_RENDER);
 			break;
 
 		case PRIMARY_DEPTHBUF:
@@ -727,14 +727,14 @@ BOOL CGEDebugger::DlgProc(UINT message, WPARAM wParam, LPARAM lParam) {
 			u32 pc = (u32)wParam;
 			ClearTempBreakpoints();
 			auto info = gpuDebug->DissassembleOp(pc);
-			NOTICE_LOG(COMMON, "Waiting at %08x, %s", pc, info.desc.c_str());
+			NOTICE_LOG(G3D, "Waiting at %08x, %s", pc, info.desc.c_str());
 			UpdatePreviews();
 		}
 		break;
 
 	case WM_GEDBG_BREAK_DRAW:
 		{
-			NOTICE_LOG(COMMON, "Waiting at a draw");
+			NOTICE_LOG(G3D, "Waiting at a draw");
 			UpdatePreviews();
 		}
 		break;

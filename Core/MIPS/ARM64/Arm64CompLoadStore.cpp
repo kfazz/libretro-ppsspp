@@ -36,6 +36,8 @@
 // Also, if we kept track of the likely register content of a cached register,
 // (pointer or data), we could avoid many BIC instructions.
 
+#include "ppsspp_config.h"
+#if PPSSPP_ARCH(ARM64)
 
 #include "Core/MemMap.h"
 #include "Core/Config.h"
@@ -85,14 +87,17 @@ namespace MIPSComp {
 		// We can do this a little smarter by shifting out the lower 8 bits, since blocks are 0x100 aligned.
 		// PSP_GetUserMemoryEnd() is dynamic, but the others encode to imms just fine.
 		// So we only need to safety check the one value.
+		// This is because ARM64 immediates for many instructions like CMP can only encode
+		// immediates up to 12 bits, shifted by 12 or not.
 
 		if ((PSP_GetUserMemoryEnd() & 0x000FFFFF) == 0) {
-			// In other words, shift right 8.
-			UBFX(tempReg, SCRATCH1, 8, 24);
+			// In other words, shift right 8, and kill off the top 4 bits as we don't want them involved in the ocmpares.
+			UBFX(tempReg, SCRATCH1, 8, 24 - 4);
 			// Now check if we're higher than that.
 			CMPI2R(tempReg, PSP_GetUserMemoryEnd() >> 8);
 		} else {
-			// Compare first using the tempReg, then shift into it.
+			// Compare first using the tempReg (need it because we have a full 28-bit value), then shift into it.
+			ANDI2R(SCRATCH1, SCRATCH1, 0x0FFFFFFF);
 			CMPI2R(SCRATCH1, PSP_GetUserMemoryEnd(), tempReg);
 			UBFX(tempReg, SCRATCH1, 8, 24);
 		}
@@ -468,3 +473,5 @@ namespace MIPSComp {
 		}
 	}
 }
+
+#endif // PPSSPP_ARCH(ARM64)

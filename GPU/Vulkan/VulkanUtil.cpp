@@ -47,7 +47,41 @@ void VulkanFBO::Create(VulkanContext *vulkan, VkRenderPass rp_compatible, int wi
 	vkCreateFramebuffer(vulkan->GetDevice(), &fb, nullptr, &framebuffer_);
 }
 
-Vulkan2D::Vulkan2D(VulkanContext *vulkan) : vulkan_(vulkan) {
+Vulkan2D::Vulkan2D(VulkanContext *vulkan) : vulkan_(vulkan), curFrame_(0) {
+	InitDeviceObjects();
+}
+
+Vulkan2D::~Vulkan2D() {
+	DestroyDeviceObjects();
+}
+
+void Vulkan2D::Shutdown() {
+	DestroyDeviceObjects();
+}
+
+void Vulkan2D::DestroyDeviceObjects() {
+	for (int i = 0; i < 2; i++) {
+		if (frameData_[i].descPool != VK_NULL_HANDLE) {
+			vulkan_->Delete().QueueDeleteDescriptorPool(frameData_[i].descPool);
+		}
+	}
+	for (auto it : pipelines_) {
+		vulkan_->Delete().QueueDeletePipeline(it.second);
+	}
+	pipelines_.clear();
+
+	VkDevice device = vulkan_->GetDevice();
+	if (descriptorSetLayout_ != VK_NULL_HANDLE) {
+		vkDestroyDescriptorSetLayout(device, descriptorSetLayout_, nullptr);
+		descriptorSetLayout_ = VK_NULL_HANDLE;
+	}
+	if (pipelineLayout_ != VK_NULL_HANDLE) {
+		vkDestroyPipelineLayout(device, pipelineLayout_, nullptr);
+		pipelineLayout_ = VK_NULL_HANDLE;
+	}
+}
+
+void Vulkan2D::InitDeviceObjects() {
 	// All resources we need for PSP drawing. Usually only bindings 0 and 2-4 are populated.
 	VkDescriptorSetLayoutBinding bindings[2] = {};
 	bindings[0].descriptorCount = 1;
@@ -68,15 +102,15 @@ Vulkan2D::Vulkan2D(VulkanContext *vulkan) : vulkan_(vulkan) {
 	assert(VK_SUCCESS == res);
 
 	VkDescriptorPoolSize dpTypes[1];
-	dpTypes[0].descriptorCount = 200;
+	dpTypes[0].descriptorCount = 1500;
 	dpTypes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 
 	VkDescriptorPoolCreateInfo dp = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
 	dp.flags = 0;   // Don't want to mess around with individually freeing these, let's go fixed each frame and zap the whole array. Might try the dynamic approach later.
-	dp.maxSets = 200;
+	dp.maxSets = 1500;
 	dp.pPoolSizes = dpTypes;
 	dp.poolSizeCount = ARRAY_SIZE(dpTypes);
-	for (int i = 0; i < 2; i++) {
+	for (int i = 0; i < ARRAY_SIZE(frameData_); i++) {
 		VkResult res = vkCreateDescriptorPool(vulkan_->GetDevice(), &dp, nullptr, &frameData_[i].descPool);
 		assert(VK_SUCCESS == res);
 	}
@@ -96,13 +130,13 @@ Vulkan2D::Vulkan2D(VulkanContext *vulkan) : vulkan_(vulkan) {
 	assert(VK_SUCCESS == res);
 }
 
-Vulkan2D::~Vulkan2D() {
-	VkDevice device = vulkan_->GetDevice();
-	for (int i = 0; i < 2; i++) {
-		vulkan_->Delete().QueueDeleteDescriptorPool(frameData_[i].descPool);
-	}
-	vkDestroyDescriptorSetLayout(device, descriptorSetLayout_, nullptr);
-	vkDestroyPipelineLayout(device, pipelineLayout_, nullptr);
+void Vulkan2D::DeviceLost() {
+	DestroyDeviceObjects();
+}
+
+void Vulkan2D::DeviceRestore(VulkanContext *vulkan) {
+	vulkan_ = vulkan;
+	InitDeviceObjects();
 }
 
 void Vulkan2D::BeginFrame() {

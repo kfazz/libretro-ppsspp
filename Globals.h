@@ -23,15 +23,16 @@
 #include <string>
 #include <utility>
 
-#include "Log.h"
+#include "ppsspp_config.h"
 
-#include "CommonTypes.h"
+#include "Common/Log.h"
+#include "Common/CommonTypes.h"
 
 #define IS_LITTLE_ENDIAN (*(const u16 *)"\0\xff" >= 0x100)
 #define IS_BIG_ENDIAN (*(const u16 *)"\0\xff" < 0x100)
 
 static inline u8 clamp_u8(int i) {
-#ifdef ARM
+#if PPSSPP_ARCH(ARM) && !defined(_MSC_VER)
 	asm("usat %0, #8, %1" : "=r"(i) : "r"(i));
 #else
 	if (i > 255)
@@ -43,7 +44,7 @@ static inline u8 clamp_u8(int i) {
 }
 
 static inline s16 clamp_s16(int i) {
-#ifdef ARM
+#if PPSSPP_ARCH(ARM) && !defined(_MSC_VER)
 	asm("ssat %0, #16, %1" : "=r"(i) : "r"(i));
 #else
 	if (i > 32767)

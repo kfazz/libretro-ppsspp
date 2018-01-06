@@ -15,8 +15,11 @@
 // Official SVN repository and contact information can be found at
 // http://code.google.com/p/dolphin-emu/
 
+#include "ppsspp_config.h"
+
 #include "Common.h" // Local
 #include "StringUtils.h"
+#include "base/logging.h"
 #include "util/text/utf8.h"
 #include <string>
 
@@ -51,7 +54,7 @@ bool MsgAlert(bool yes_no, int Style, const char* format, ...)
 	CharArrayFromFormatV(buffer, sizeof(buffer)-1, format, args);
 	va_end(args);
 
-	ERROR_LOG(MASTER_LOG, "%s: %s", caption, buffer);
+	ERROR_LOG(SYSTEM, "%s: %s", caption, buffer);
 
 	// Don't ignore questions, especially AskYesNo, PanicYesNo could be ignored
 	if (AlertEnabled || Style == QUESTION || Style == CRITICAL)
@@ -76,6 +79,9 @@ bool MsgHandler(const char* caption, const char* text, bool yes_no, int Style)
 	std::wstring wcaption = ConvertUTF8ToWString(caption);
 
 	return IDYES == MessageBox(0, wtext.c_str(), wcaption.c_str(), STYLE | (yes_no ? MB_YESNO : MB_OK));
+#elif PPSSPP_PLATFORM(UWP)
+	OutputDebugStringUTF8(text);
+	return true;
 #else
 	printf("%s\n", text);
 	return true;

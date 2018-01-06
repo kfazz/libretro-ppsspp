@@ -51,9 +51,10 @@ int metasocket;
 SceNetAdhocctlParameter parameter;
 SceNetAdhocctlAdhocId product_code;
 std::thread friendFinderThread;
-recursive_mutex peerlock;
+std::recursive_mutex peerlock;
 SceNetAdhocPdpStat * pdp[255];
 SceNetAdhocPtpStat * ptp[255];
+uint32_t localip;
 
 int isLocalMAC(const SceNetEtherAddr * addr) {
 	SceNetEtherAddr saddr;
@@ -103,7 +104,7 @@ void addFriend(SceNetAdhocctlConnectPacketS2C * packet) {
 	if (packet == NULL) return;
 
 	// Multithreading Lock
-	peerlock.lock();
+	std::lock_guard<std::recursive_mutex> guard(peerlock);
 
 	SceNetAdhocctlPeerInfo * peer = findFriend(&packet->mac);
 	// Already existed
@@ -142,9 +143,6 @@ void addFriend(SceNetAdhocctlConnectPacketS2C * packet) {
 			friends = peer;
 		}
 	}
-
-	// Multithreading Unlock
-	peerlock.unlock();
 }
 
 SceNetAdhocctlPeerInfo * findFriend(SceNetEtherAddr * MAC) {
@@ -1302,7 +1300,7 @@ int getLocalIp(sockaddr_in * SocketAddress){
 	}
 	return -1;
 #else
-	SocketAddress->sin_addr.s_addr = inet_addr("192.168.12.1");
+	memcpy(&SocketAddress->sin_addr, &localip, sizeof(uint32_t));
 	return 0;
 #endif
 }
@@ -1445,6 +1443,8 @@ int initNetwork(SceNetAdhocctlAdhocId *adhoc_id){
 		host->NotifyUserMessage(buffer, 8.0f);
 		return iResult;
 	}
+	//grab local ip for later use better than constant ip on non windows platform
+	localip = getLocalIp(metasocket);
 
 	// Prepare Login Packet
 	SceNetAdhocctlLoginPacketC2S packet;
@@ -1525,7 +1525,7 @@ bool resolveMAC(SceNetEtherAddr * mac, uint32_t * ip) {
 	}
 
 	// Multithreading Lock
-	peerlock.lock();
+	std::lock_guard<std::recursive_mutex> guard(peerlock);
 
 	// Peer Reference
 	SceNetAdhocctlPeerInfo * peer = friends;
@@ -1537,16 +1537,10 @@ bool resolveMAC(SceNetEtherAddr * mac, uint32_t * ip) {
 			// Copy Data
 			*ip = peer->ip_addr;
 
-			// Multithreading Unlock
-			peerlock.unlock();
-
 			// Return Success
 			return true;
 		}
 	}
-
-	// Multithreading Unlock
-	peerlock.unlock();
 
 	// Peer not found
 	return false;

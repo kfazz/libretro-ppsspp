@@ -4,17 +4,22 @@
 
 #include "base/basictypes.h"
 #include "math/geom2d.h"
+#include "math/lin/vec3.h"
 #include "gfx/texture_atlas.h"
 
 // Everything you need to draw a UI collected into a single unit that can be passed around.
 // Everything forward declared so this header is safe everywhere.
 
-class Thin3DContext;
-class Thin3DShaderSet;
-class Thin3DDepthStencilState;
-class Thin3DTexture;
-class Thin3DBlendState;
-class Thin3DSamplerState;
+namespace Draw {
+	class DrawContext;
+	class Pipeline;
+	class DepthStencilState;
+	class Texture;
+	class BlendState;
+	class SamplerState;
+	class RasterState;
+}
+
 class Texture;
 class DrawBuffer;
 class TextDrawer;
@@ -27,12 +32,21 @@ namespace UI {
 
 class DrawBuffer;
 
+struct UITransform {
+	// TODO: Or just use a matrix?
+	Vec3 translate;
+	Vec3 scale;
+	float alpha;
+};
+
 class UIContext {
 public:
 	UIContext();
 	~UIContext();
 
-	void Init(Thin3DContext *thin3d, Thin3DShaderSet *uiShaderTex, Thin3DShaderSet *uiShaderNoTex, Thin3DTexture *uitexture, DrawBuffer *uidrawbuffer, DrawBuffer *uidrawbufferTop);
+	void Init(Draw::DrawContext *thin3d, Draw::Pipeline *uipipe, Draw::Pipeline *uipipenotex, DrawBuffer *uidrawbuffer, DrawBuffer *uidrawbufferTop);
+
+	void FrameSetup(Draw::Texture *uiTexture);
 
 	void Begin();
 	void BeginNoTex();
@@ -70,10 +84,14 @@ public:
 	// in dps, like dp_xres and dp_yres
 	void SetBounds(const Bounds &b) { bounds_ = b; }
 	const Bounds &GetBounds() const { return bounds_; }
-	Thin3DContext *GetThin3DContext() { return thin3d_; }
+	Draw::DrawContext *GetDrawContext() { return draw_; }
+
+	void PushTransform(const UITransform &transform);
+	void PopTransform();
+	Bounds TransformBounds(const Bounds &bounds);
 
 private:
-	Thin3DContext *thin3d_;
+	Draw::DrawContext *draw_;
 	Bounds bounds_;
 
 	float fontScaleX_;
@@ -81,16 +99,14 @@ private:
 	UI::FontStyle *fontStyle_;
 	TextDrawer *textDrawer_;
 
-	Thin3DContext *thin3D_;
-	Thin3DDepthStencilState *depth_;
-	Thin3DBlendState *blend_;
-	Thin3DSamplerState *sampler_;
-	Thin3DShaderSet *uishader_;
-	Thin3DShaderSet *uishadernotex_;
-	Thin3DTexture *uitexture_;
+	Draw::SamplerState *sampler_;
+	Draw::Pipeline *ui_pipeline_;
+	Draw::Pipeline *ui_pipeline_notex_;
+	Draw::Texture *uitexture_;
 
 	DrawBuffer *uidrawbuffer_;
 	DrawBuffer *uidrawbufferTop_;
 
 	std::vector<Bounds> scissorStack_;
+	std::vector<UITransform> transformStack_;
 };

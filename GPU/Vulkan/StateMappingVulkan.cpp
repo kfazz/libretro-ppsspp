@@ -30,6 +30,7 @@
 #include "GPU/Vulkan/TextureCacheVulkan.h"
 #include "GPU/Vulkan/FramebufferVulkan.h"
 #include "GPU/Vulkan/ShaderManagerVulkan.h"
+#include "GPU/Vulkan/DrawEngineVulkan.h"
 //#include "GPU/Vulkan/PixelShaderGeneratorVulkan.h"
 
 // These tables all fit into u8s.
@@ -48,6 +49,8 @@ static const VkBlendFactor vkBlendFactorLookup[(size_t)BlendFactor::COUNT] = {
 	VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR,
 	VK_BLEND_FACTOR_CONSTANT_ALPHA,
 	VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA,
+	VK_BLEND_FACTOR_SRC1_COLOR,
+	VK_BLEND_FACTOR_ONE_MINUS_SRC1_COLOR,
 	VK_BLEND_FACTOR_SRC1_ALPHA,
 	VK_BLEND_FACTOR_ONE_MINUS_SRC1_ALPHA,
 	VK_BLEND_FACTOR_MAX_ENUM,
@@ -118,10 +121,6 @@ static const VkLogicOp logicOps[] = {
 	VK_LOGIC_OP_SET,
 };
 
-bool ApplyShaderBlending() {
-	return false;
-}
-
 void ResetShaderBlending() {
 	//
 }
@@ -129,7 +128,7 @@ void ResetShaderBlending() {
 // TODO: Do this more progressively. No need to compute the entire state if the entire state hasn't changed.
 // In Vulkan, we simply collect all the state together into a "pipeline key" - we don't actually set any state here
 // (the caller is responsible for setting the little dynamic state that is supported, dynState).
-void ConvertStateToVulkanKey(FramebufferManagerVulkan &fbManager, ShaderManagerVulkan *shaderManager, int prim, VulkanPipelineRasterStateKey &key, VulkanDynamicState &dynState) {
+void DrawEngineVulkan::ConvertStateToVulkanKey(FramebufferManagerVulkan &fbManager, ShaderManagerVulkan *shaderManager, int prim, VulkanPipelineRasterStateKey &key, VulkanDynamicState &dynState) {
 	memset(&key, 0, sizeof(key));
 	memset(&dynState, 0, sizeof(dynState));
 	// Unfortunately, this isn't implemented yet.
@@ -169,7 +168,7 @@ void ConvertStateToVulkanKey(FramebufferManagerVulkan &fbManager, ShaderManagerV
 		key.destColor = vkBlendFactorLookup[(size_t)blendState.dstColor];
 		key.destAlpha = vkBlendFactorLookup[(size_t)blendState.dstAlpha];
 		if (blendState.dirtyShaderBlend) {
-			shaderManager->DirtyUniform(DIRTY_SHADERBLEND);
+			gstate_c.Dirty(DIRTY_SHADERBLEND);
 		}
 		dynState.useBlendColor = blendState.useBlendColor;
 		if (blendState.useBlendColor) {
@@ -308,7 +307,7 @@ void ConvertStateToVulkanKey(FramebufferManagerVulkan &fbManager, ShaderManagerV
 	vp.minDepth = vpAndScissor.depthRangeMin;
 	vp.maxDepth = vpAndScissor.depthRangeMax;
 	if (vpAndScissor.dirtyProj) {
-		shaderManager->DirtyUniform(DIRTY_PROJMATRIX);
+		gstate_c.Dirty(DIRTY_PROJMATRIX);
 	}
 
 	VkRect2D &scissor = dynState.scissor;
@@ -323,6 +322,6 @@ void ConvertStateToVulkanKey(FramebufferManagerVulkan &fbManager, ShaderManagerV
 	if (depthMin < 0.0f) depthMin = 0.0f;
 	if (depthMax > 1.0f) depthMax = 1.0f;
 	if (vpAndScissor.dirtyDepth) {
-		shaderManager->DirtyUniform(DIRTY_DEPTHRANGE);
+		gstate_c.Dirty(DIRTY_DEPTHRANGE);
 	}
 }

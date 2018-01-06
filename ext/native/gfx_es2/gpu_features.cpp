@@ -1,16 +1,23 @@
+#include "ppsspp_config.h"
+
 #include <cstring>
 
 #include "base/logging.h"
 #include "base/stringutil.h"
-#include "gfx/gl_common.h"
-#include "gfx_es2/gpu_features.h"
 
-#ifdef _WIN32
+#if !PPSSPP_PLATFORM(UWP)
+#include "gfx/gl_common.h"
+
+#if defined(_WIN32)
 #include "GL/wglew.h"
 #endif
+#endif
+
+#include "gfx_es2/gpu_features.h"
+
 
 #if defined(USING_GLES2)
-#if defined(ANDROID) || defined(BLACKBERRY)
+#if defined(__ANDROID__)
 PFNEGLGETSYSTEMTIMEFREQUENCYNVPROC eglGetSystemTimeFrequencyNV;
 PFNEGLGETSYSTEMTIMENVPROC eglGetSystemTimeNV;
 PFNGLDRAWTEXTURENVPROC glDrawTextureNV;
@@ -75,6 +82,9 @@ void ProcessGPUFeatures() {
 // http://stackoverflow.com/questions/16147700/opengl-es-using-tegra-specific-extensions-gl-ext-texture-array
 
 void CheckGLExtensions() {
+
+#if !PPSSPP_PLATFORM(UWP)
+
 	// Make sure to only do this once. It's okay to call CheckGLExtensions from wherever.
 	if (extensionsDone)
 		return;
@@ -266,9 +276,13 @@ void CheckGLExtensions() {
 	gl_extensions.EXT_copy_image = strstr(extString, "GL_EXT_copy_image") != 0;
 	gl_extensions.ARB_copy_image = strstr(extString, "GL_ARB_copy_image") != 0;
 	gl_extensions.ARB_vertex_array_object = strstr(extString, "GL_ARB_vertex_array_object") != 0;
+	gl_extensions.ARB_texture_float = strstr(extString, "GL_ARB_texture_float") != 0;
+	gl_extensions.EXT_texture_filter_anisotropic = strstr(extString, "GL_EXT_texture_filter_anisotropic") != 0;
+	gl_extensions.EXT_draw_instanced = strstr(extString, "GL_EXT_draw_instanced") != 0;
+	gl_extensions.ARB_draw_instanced = strstr(extString, "GL_ARB_draw_instanced") != 0;
 
 	if (gl_extensions.IsGLES) {
-		gl_extensions.OES_texture_npot = strstr(extString, "OES_texture_npot") != 0;
+		gl_extensions.OES_texture_npot = strstr(extString, "GL_OES_texture_npot") != 0;
 		gl_extensions.OES_packed_depth_stencil = (strstr(extString, "GL_OES_packed_depth_stencil") != 0) || gl_extensions.GLES3;
 		gl_extensions.OES_depth24 = strstr(extString, "GL_OES_depth24") != 0;
 		gl_extensions.OES_depth_texture = strstr(extString, "GL_OES_depth_texture") != 0;
@@ -278,8 +292,9 @@ void CheckGLExtensions() {
 		gl_extensions.EXT_shader_framebuffer_fetch = strstr(extString, "GL_EXT_shader_framebuffer_fetch") != 0;
 		gl_extensions.NV_shader_framebuffer_fetch = strstr(extString, "GL_NV_shader_framebuffer_fetch") != 0;
 		gl_extensions.ARM_shader_framebuffer_fetch = strstr(extString, "GL_ARM_shader_framebuffer_fetch") != 0;
+		gl_extensions.OES_texture_float = strstr(extString, "GL_OES_texture_float") != 0;
 
-#if defined(ANDROID) || defined(BLACKBERRY)
+#if defined(__ANDROID__)
 		// On Android, incredibly, this is not consistently non-zero! It does seem to have the same value though.
 		// https://twitter.com/ID_AA_Carmack/status/387383037794603008
 #ifdef _DEBUG
@@ -329,7 +344,7 @@ void CheckGLExtensions() {
 		gl_extensions.EXT_unpack_subimage = true;
 	}
 
-#if defined(ANDROID) || defined(BLACKBERRY)
+#if defined(__ANDROID__)
 	if (gl_extensions.OES_mapbuffer) {
 		glMapBuffer = (PFNGLMAPBUFFERPROC)eglGetProcAddress("glMapBufferOES");
 	}
@@ -391,6 +406,9 @@ void CheckGLExtensions() {
 	int error = glGetError();
 	if (error)
 		ELOG("GL error in init: %i", error);
+
+#endif
+
 }
 
 void SetGLCoreContext(bool flag) {

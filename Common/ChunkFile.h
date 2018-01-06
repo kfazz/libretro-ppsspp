@@ -17,6 +17,8 @@
 
 #pragma once
 
+#include "ppsspp_config.h"
+
 // Extremely simple serialization framework.
 // Currently mis-named, a native ChunkFile is something different (a RIFF file)
 
@@ -32,25 +34,10 @@
 #include <deque>
 #include <list>
 #include <set>
-#if defined(MACGNUSTD)
-#include <tr1/type_traits>
-#else
 #include <type_traits>
-#endif
 
 #include "Common.h"
 #include "FileUtil.h"
-#ifdef SHARED_SNAPPY
-#include <snappy-c.h>
-#else
-#include "../ext/snappy/snappy-c.h"
-#endif
-
-#if defined(MACGNUSTD)
-namespace std {
-	using tr1::is_pointer;
-}
-#endif
 
 template <class T>
 struct LinkedListItem : public T
@@ -464,7 +451,7 @@ public:
 			break;
 
 		default:
-			ERROR_LOG(COMMON, "Savestate error: invalid mode %d.", mode);
+			ERROR_LOG(SAVESTATE, "Savestate error: invalid mode %d.", mode);
 		}
 	}
 
@@ -552,7 +539,7 @@ public:
 			{
 				if (shouldExist != 0)
 				{
-					WARN_LOG(COMMON, "Savestate failure: incorrect item marker %d", shouldExist);
+					WARN_LOG(SAVESTATE, "Savestate failure: incorrect item marker %d", shouldExist);
 					SetError(ERROR_FAILURE);
 				}
 				if (mode == MODE_READ)
@@ -591,6 +578,7 @@ public:
 		ERROR_NONE,
 		ERROR_BAD_FILE,
 		ERROR_BROKEN_STATE,
+		ERROR_BAD_ALLOC,
 	};
 
 	// May fail badly if ptr doesn't point to valid data.
@@ -644,7 +632,7 @@ public:
 			delete [] ptr;
 		}
 		
-		INFO_LOG(COMMON, "ChunkReader: Done loading %s", filename.c_str());
+		INFO_LOG(SAVESTATE, "ChunkReader: Done loading %s", filename.c_str());
 		if (error == ERROR_NONE) {
 			failureReason->clear();
 		}
@@ -657,7 +645,17 @@ public:
 	{
 		// Get data
 		size_t const sz = MeasurePtr(_class);
-		u8 *buffer = new u8[sz];
+		u8 *buffer = nullptr;
+#if PPSSPP_PLATFORM(ANDROID)
+		buffer = new u8[sz];
+#else
+		try {
+			buffer = new u8[sz];
+		}
+		catch (std::bad_alloc e) {
+			return ERROR_BAD_ALLOC;
+		}
+#endif
 		Error error = SavePtr(buffer, _class);
 
 		// SaveFile takes ownership of buffer

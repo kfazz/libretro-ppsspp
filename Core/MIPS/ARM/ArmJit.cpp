@@ -15,6 +15,9 @@
 // Official git repository and contact information can be found at
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
+#include "ppsspp_config.h"
+#if PPSSPP_ARCH(ARM)
+
 #include "base/logging.h"
 #include "profiler/profiler.h"
 #include "Common/ChunkFile.h"
@@ -79,6 +82,8 @@ ArmJit::ArmJit(MIPSState *mips) : blocks(mips, this), gpr(mips, &js, &jo), fpr(m
 	fpr.SetEmitter(this);
 	AllocCodeSpace(1024 * 1024 * 16);  // 32MB is the absolute max because that's what an ARM branch instruction can reach, backwards and forwards.
 	GenerateFixedCode();
+
+	INFO_LOG(JIT, "ARM JIT initialized: %d MB of code space", GetSpaceLeft() / (1024 * 1024));
 
 	js.startDefaultPrefix = mips_->HasDefaultPrefix();
 }
@@ -151,11 +156,6 @@ void ArmJit::ClearCache()
 	GenerateFixedCode();
 }
 
-void ArmJit::InvalidateCache()
-{
-	blocks.Clear();
-}
-
 void ArmJit::InvalidateCacheAt(u32 em_address, int length)
 {
 	blocks.InvalidateICache(em_address, length);
@@ -197,6 +197,18 @@ void ArmJit::CompileDelaySlot(int flags)
 
 void ArmJit::Compile(u32 em_address) {
 	PROFILE_THIS_SCOPE("jitc");
+
+#if PPSSPP_PLATFORM(UWP)
+	// INFO_LOG(JIT, "Compiling at %08x", em_address);
+	// Unfortunately Microsoft forgot to expose FlushInstructionCache to UWP applications... even though they expose
+	// the ability to generate code :( This works great on x86 but on ARM we're out of luck.
+	// This seems to be enough to flush the instruction cache:
+	// If this OutputDebugStringUTF8 is not called, we crash.
+	// But it only helps if the debugger is attached :( If not, we still crash.
+	// So really, the JIT is broken on Windows UWP ARM.
+	OutputDebugStringUTF8("JITHACK");
+#endif
+
 	if (GetSpaceLeft() < 0x10000 || blocks.IsFull()) {
 		ClearCache();
 	}
@@ -317,7 +329,7 @@ const u8 *ArmJit::DoJit(u32 em_address, JitBlock *b)
 	
 		js.compilerPC += 4;
 		js.numInstructions++;
-#ifndef HAVE_ARMV7
+#if !PPSSPP_ARCH(ARMV7)
 		if ((GetCodePtr() - b->checkedEntry - partialFlushOffset) > 3200)
 		{
 			// We need to prematurely flush as we are out of range
@@ -705,3 +717,5 @@ MIPSOpcode ArmJit::GetOriginalOp(MIPSOpcode op) {
 }
 
 }  // namespace
+
+#endif // PPSSPP_ARCH(ARM)

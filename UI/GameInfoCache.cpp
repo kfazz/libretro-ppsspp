@@ -37,27 +37,28 @@
 #include "Core/ELF/PBPReader.h"
 #include "Core/SaveState.h"
 #include "Core/System.h"
+#include "Core/Loaders.h"
 #include "Core/Util/GameManager.h"
 #include "Core/Config.h"
 #include "UI/GameInfoCache.h"
-
-#ifdef __SYMBIAN32__
-#define unique_ptr auto_ptr
-#endif
+#include "UI/TextureUtil.h"
 
 GameInfoCache *g_gameInfoCache;
 
+GameInfo::GameInfo() : fileType(IdentifiedFileType::UNKNOWN) {
+}
+
 GameInfo::~GameInfo() {
-	delete iconTexture;
-	delete pic0Texture;
-	delete pic1Texture;
+	delete icon.texture;
+	delete pic0.texture;
+	delete pic1.texture;
 	delete fileLoader;
 }
 
 bool GameInfo::Delete() {
 	switch (fileType) {
-	case FILETYPE_PSP_ISO:
-	case FILETYPE_PSP_ISO_NP:
+	case IdentifiedFileType::PSP_ISO:
+	case IdentifiedFileType::PSP_ISO_NP:
 		{
 			// Just delete the one file (TODO: handle two-disk games as well somehow).
 			const char *fileToRemove = filePath_.c_str();
@@ -68,32 +69,32 @@ bool GameInfo::Delete() {
 			}
 			return true;
 		}
-	case FILETYPE_PSP_PBP_DIRECTORY:
-	case FILETYPE_PSP_SAVEDATA_DIRECTORY:
+	case IdentifiedFileType::PSP_PBP_DIRECTORY:
+	case IdentifiedFileType::PSP_SAVEDATA_DIRECTORY:
 		{
 			// TODO: This could be handled by Core/Util/GameManager too somehow.
 			std::string directoryToRemove = ResolvePBPDirectory(filePath_);
-			INFO_LOG(HLE, "Deleting %s", directoryToRemove.c_str());
+			INFO_LOG(SYSTEM, "Deleting %s", directoryToRemove.c_str());
 			if (!File::DeleteDirRecursively(directoryToRemove)) {
-				ERROR_LOG(HLE, "Failed to delete file");
+				ERROR_LOG(SYSTEM, "Failed to delete file");
 				return false;
 			}
 			g_Config.CleanRecent();
 			return true;
 		}
-	case FILETYPE_PSP_ELF:
-	case FILETYPE_UNKNOWN_BIN:
-	case FILETYPE_UNKNOWN_ELF:
-	case FILETYPE_ARCHIVE_RAR:
-	case FILETYPE_ARCHIVE_ZIP:
-	case FILETYPE_ARCHIVE_7Z:
+	case IdentifiedFileType::PSP_ELF:
+	case IdentifiedFileType::UNKNOWN_BIN:
+	case IdentifiedFileType::UNKNOWN_ELF:
+	case IdentifiedFileType::ARCHIVE_RAR:
+	case IdentifiedFileType::ARCHIVE_ZIP:
+	case IdentifiedFileType::ARCHIVE_7Z:
 		{
 			const std::string &fileToRemove = filePath_;
 			File::Delete(fileToRemove);
 			return true;
 		}
 
-	case FILETYPE_PPSSPP_SAVESTATE:
+	case IdentifiedFileType::PPSSPP_SAVESTATE:
 		{
 			const std::string &ppstPath = filePath_;
 			File::Delete(ppstPath);
@@ -127,8 +128,8 @@ static int64_t GetDirectoryRecursiveSize(const std::string &path) {
 
 u64 GameInfo::GetGameSizeInBytes() {
 	switch (fileType) {
-	case FILETYPE_PSP_PBP_DIRECTORY:
-	case FILETYPE_PSP_SAVEDATA_DIRECTORY:
+	case IdentifiedFileType::PSP_PBP_DIRECTORY:
+	case IdentifiedFileType::PSP_SAVEDATA_DIRECTORY:
 		return GetDirectoryRecursiveSize(ResolvePBPDirectory(filePath_));
 
 	default:
@@ -157,7 +158,7 @@ std::vector<std::string> GameInfo::GetSaveDataDirectories() {
 }
 
 u64 GameInfo::GetSaveDataSizeInBytes() {
-	if (fileType == FILETYPE_PSP_SAVEDATA_DIRECTORY || fileType == FILETYPE_PPSSPP_SAVESTATE) {
+	if (fileType == IdentifiedFileType::PSP_SAVEDATA_DIRECTORY || fileType == IdentifiedFileType::PPSSPP_SAVESTATE) {
 		return 0;
 	}
 	std::vector<std::string> saveDataDir = GetSaveDataDirectories();
@@ -184,7 +185,7 @@ u64 GameInfo::GetSaveDataSizeInBytes() {
 }
 
 u64 GameInfo::GetInstallDataSizeInBytes() {
-	if (fileType == FILETYPE_PSP_SAVEDATA_DIRECTORY || fileType == FILETYPE_PPSSPP_SAVESTATE) {
+	if (fileType == IdentifiedFileType::PSP_SAVEDATA_DIRECTORY || fileType == IdentifiedFileType::PPSSPP_SAVESTATE) {
 		return 0;
 	}
 	std::vector<std::string> saveDataDir = GetSaveDataDirectories();
@@ -212,18 +213,20 @@ u64 GameInfo::GetInstallDataSizeInBytes() {
 }
 
 bool GameInfo::LoadFromPath(const std::string &gamePath) {
-	lock_guard guard(lock);
+	std::lock_guard<std::mutex> guard(lock);
 	// No need to rebuild if we already have it loaded.
 	if (filePath_ != gamePath) {
 		delete fileLoader;
 		fileLoader = ConstructFileLoader(gamePath);
+		if (!fileLoader)
+			return false;
 		filePath_ = gamePath;
 
 		// This is a fallback title, while we're loading / if unable to load.
 		title = File::GetFilename(filePath_);
 	}
 
-	return GetFileLoader()->Exists();
+	return fileLoader ? fileLoader->Exists() : true;
 }
 
 FileLoader *GameInfo::GetFileLoader() {
@@ -293,26 +296,26 @@ void GameInfo::ParseParamSFO() {
 }
 
 std::string GameInfo::GetTitle() {
-	lock_guard guard(lock);
+	std::lock_guard<std::mutex> guard(lock);
 	return title;
 }
 
 bool GameInfo::IsPending() {
-	lock_guard guard(lock);
+	std::lock_guard<std::mutex> guard(lock);
 	return pending;
 }
 
 bool GameInfo::IsWorking() {
-	lock_guard guard(lock);
+	std::lock_guard<std::mutex> guard(lock);
 	return working;
 }
 
 void GameInfo::SetTitle(const std::string &newTitle) {
-	lock_guard guard(lock);
+	std::lock_guard<std::mutex> guard(lock);
 	title = newTitle;
 }
 
-static bool ReadFileToString(IFileSystem *fs, const char *filename, std::string *contents, recursive_mutex *mtx) {
+static bool ReadFileToString(IFileSystem *fs, const char *filename, std::string *contents, std::mutex *mtx) {
 	PSPFileInfo info = fs->GetFileInfo(filename);
 	if (!info.exists) {
 		return false;
@@ -324,7 +327,7 @@ static bool ReadFileToString(IFileSystem *fs, const char *filename, std::string 
 	}
 
 	if (mtx) {
-		lock_guard lock(*mtx);
+		std::lock_guard<std::mutex> lock(*mtx);
 		contents->resize(info.size);
 		fs->ReadFile(handle, (u8 *)contents->data(), info.size);
 	} else {
@@ -335,12 +338,12 @@ static bool ReadFileToString(IFileSystem *fs, const char *filename, std::string 
 	return true;
 }
 
-static bool ReadVFSToString(const char *filename, std::string *contents, recursive_mutex *mtx) {
+static bool ReadVFSToString(const char *filename, std::string *contents, std::mutex *mtx) {
 	size_t sz;
 	uint8_t *data = VFSReadFile(filename, &sz);
 	if (data) {
 		if (mtx) {
-			lock_guard lock(*mtx);
+			std::lock_guard<std::mutex> lock(*mtx);
 			*contents = std::string((const char *)data, sz);
 		} else {
 			*contents = std::string((const char *)data, sz);
@@ -366,18 +369,18 @@ public:
 			return;
 
 		{
-			lock_guard lock(info_->lock);
+			std::lock_guard<std::mutex> lock(info_->lock);
 			info_->working = true;
 			info_->fileType = Identify_File(info_->GetFileLoader());
 		}
 
 		switch (info_->fileType) {
-		case FILETYPE_PSP_PBP:
-		case FILETYPE_PSP_PBP_DIRECTORY:
+		case IdentifiedFileType::PSP_PBP:
+		case IdentifiedFileType::PSP_PBP_DIRECTORY:
 			{
 				FileLoader *pbpLoader = info_->GetFileLoader();
 				std::unique_ptr<FileLoader> altLoader;
-				if (info_->fileType == FILETYPE_PSP_PBP_DIRECTORY) {
+				if (info_->fileType == IdentifiedFileType::PSP_PBP_DIRECTORY) {
 					std::string ebootPath = ResolvePBPFile(gamePath_);
 					if (ebootPath != gamePath_) {
 						pbpLoader = ConstructFileLoader(ebootPath);
@@ -397,37 +400,36 @@ public:
 				// First, PARAM.SFO.
 				std::vector<u8> sfoData;
 				if (pbp.GetSubFile(PBP_PARAM_SFO, &sfoData)) {
-					lock_guard lock(info_->lock);
+					std::lock_guard<std::mutex> lock(info_->lock);
 					info_->paramSFO.ReadSFO(sfoData);
 					info_->ParseParamSFO();
 				}
 
 				// Then, ICON0.PNG.
 				if (pbp.GetSubFileSize(PBP_ICON0_PNG) > 0) {
-					lock_guard lock(info_->lock);
-					pbp.GetSubFileAsString(PBP_ICON0_PNG, &info_->iconTextureData);
+					std::lock_guard<std::mutex> lock(info_->lock);
+					pbp.GetSubFileAsString(PBP_ICON0_PNG, &info_->icon.data);
 				} else {
 					// Read standard icon
-					DEBUG_LOG(LOADER, "Loading unknown.png because a PBP was missing an icon");
-					ReadVFSToString("unknown.png", &info_->iconTextureData, &info_->lock);
+					ReadVFSToString("unknown.png", &info_->icon.data, &info_->lock);
 				}
-				info_->iconDataLoaded = true;
+				info_->icon.dataLoaded = true;
 
 				if (info_->wantFlags & GAMEINFO_WANTBG) {
 					if (pbp.GetSubFileSize(PBP_PIC0_PNG) > 0) {
-						lock_guard lock(info_->lock);
-						pbp.GetSubFileAsString(PBP_PIC0_PNG, &info_->pic0TextureData);
-						info_->pic0DataLoaded = true;
+						std::lock_guard<std::mutex> lock(info_->lock);
+						pbp.GetSubFileAsString(PBP_PIC0_PNG, &info_->pic0.data);
+						info_->pic0.dataLoaded = true;
 					}
 					if (pbp.GetSubFileSize(PBP_PIC1_PNG) > 0) {
-						lock_guard lock(info_->lock);
-						pbp.GetSubFileAsString(PBP_PIC1_PNG, &info_->pic1TextureData);
-						info_->pic1DataLoaded = true;
+						std::lock_guard<std::mutex> lock(info_->lock);
+						pbp.GetSubFileAsString(PBP_PIC1_PNG, &info_->pic1.data);
+						info_->pic1.dataLoaded = true;
 					}
 				}
 				if (info_->wantFlags & GAMEINFO_WANTSND) {
 					if (pbp.GetSubFileSize(PBP_SND0_AT3) > 0) {
-						lock_guard lock(info_->lock);
+						std::lock_guard<std::mutex> lock(info_->lock);
 						pbp.GetSubFileAsString(PBP_SND0_AT3, &info_->sndFileData);
 						info_->sndDataLoaded = true;
 					}
@@ -435,11 +437,11 @@ public:
 			}
 			break;
 
-		case FILETYPE_PSP_ELF:
+		case IdentifiedFileType::PSP_ELF:
 handleELF:
 			// An elf on its own has no usable information, no icons, no nothing.
 			{
-				lock_guard lock(info_->lock);
+				std::lock_guard<std::mutex> lock(info_->lock);
 				info_->id = "ELF000000";
 				info_->id_version = "ELF000000_1.00";
 				info_->paramSFOLoaded = true;
@@ -447,11 +449,11 @@ handleELF:
 
 			// Read standard icon
 			DEBUG_LOG(LOADER, "Loading unknown.png because there was an ELF");
-			ReadVFSToString("unknown.png", &info_->iconTextureData, &info_->lock);
-			info_->iconDataLoaded = true;
+			ReadVFSToString("unknown.png", &info_->icon.data, &info_->lock);
+			info_->icon.dataLoaded = true;
 			break;
 
-		case FILETYPE_PSP_SAVEDATA_DIRECTORY:
+		case IdentifiedFileType::PSP_SAVEDATA_DIRECTORY:
 		{
 			SequentialHandleAllocator handles;
 			VirtualDiscFileSystem umd(&handles, gamePath_.c_str());
@@ -459,73 +461,76 @@ handleELF:
 			// Alright, let's fetch the PARAM.SFO.
 			std::string paramSFOcontents;
 			if (ReadFileToString(&umd, "/PARAM.SFO", &paramSFOcontents, 0)) {
-				lock_guard lock(info_->lock);
+				std::lock_guard<std::mutex> lock(info_->lock);
 				info_->paramSFO.ReadSFO((const u8 *)paramSFOcontents.data(), paramSFOcontents.size());
 				info_->ParseParamSFO();
 			}
 
-			ReadFileToString(&umd, "/ICON0.PNG", &info_->iconTextureData, &info_->lock);
-			info_->iconDataLoaded = true;
+			ReadFileToString(&umd, "/ICON0.PNG", &info_->icon.data, &info_->lock);
+			info_->icon.dataLoaded = true;
 			if (info_->wantFlags & GAMEINFO_WANTBG) {
-				ReadFileToString(&umd, "/PIC1.PNG", &info_->pic1TextureData, &info_->lock);
-				info_->pic1DataLoaded = true;
+				ReadFileToString(&umd, "/PIC1.PNG", &info_->pic1.data, &info_->lock);
+				info_->pic1.dataLoaded = true;
 			}
 			break;
 		}
 
-		case FILETYPE_PPSSPP_SAVESTATE:
+		case IdentifiedFileType::PPSSPP_SAVESTATE:
 		{
 			info_->SetTitle(SaveState::GetTitle(gamePath_));
 
-			lock_guard guard(info_->lock);
+			std::lock_guard<std::mutex> guard(info_->lock);
 
 			// Let's use the screenshot as an icon, too.
 			std::string screenshotPath = ReplaceAll(gamePath_, ".ppst", ".jpg");
 			if (File::Exists(screenshotPath)) {
-				if (readFileToString(false, screenshotPath.c_str(), info_->iconTextureData)) {
-					info_->iconDataLoaded = true;
+				if (readFileToString(false, screenshotPath.c_str(), info_->icon.data)) {
+					info_->icon.dataLoaded = true;
 				}
 			}
 			break;
 		}
 
-		case FILETYPE_PSP_DISC_DIRECTORY:
+		case IdentifiedFileType::PSP_DISC_DIRECTORY:
 			{
-				info_->fileType = FILETYPE_PSP_ISO;
+				info_->fileType = IdentifiedFileType::PSP_ISO;
 				SequentialHandleAllocator handles;
 				VirtualDiscFileSystem umd(&handles, gamePath_.c_str());
 
 				// Alright, let's fetch the PARAM.SFO.
 				std::string paramSFOcontents;
 				if (ReadFileToString(&umd, "/PSP_GAME/PARAM.SFO", &paramSFOcontents, 0)) {
-					lock_guard lock(info_->lock);
+					std::lock_guard<std::mutex> lock(info_->lock);
 					info_->paramSFO.ReadSFO((const u8 *)paramSFOcontents.data(), paramSFOcontents.size());
 					info_->ParseParamSFO();
 				}
 
-				ReadFileToString(&umd, "/PSP_GAME/ICON0.PNG", &info_->iconTextureData, &info_->lock);
-				info_->iconDataLoaded = true;
+				ReadFileToString(&umd, "/PSP_GAME/ICON0.PNG", &info_->icon.data, &info_->lock);
+				info_->icon.dataLoaded = true;
 				if (info_->wantFlags & GAMEINFO_WANTBG) {
-					ReadFileToString(&umd, "/PSP_GAME/PIC0.PNG", &info_->pic0TextureData, &info_->lock);
-					info_->pic0DataLoaded = true;
-					ReadFileToString(&umd, "/PSP_GAME/PIC1.PNG", &info_->pic1TextureData, &info_->lock);
-					info_->pic1DataLoaded = true;
+					ReadFileToString(&umd, "/PSP_GAME/PIC0.PNG", &info_->pic0.data, &info_->lock);
+					info_->pic0.dataLoaded = true;
+					ReadFileToString(&umd, "/PSP_GAME/PIC1.PNG", &info_->pic1.data, &info_->lock);
+					info_->pic1.dataLoaded = true;
 				}
 				if (info_->wantFlags & GAMEINFO_WANTSND) {
 					ReadFileToString(&umd, "/PSP_GAME/SND0.AT3", &info_->sndFileData, &info_->lock);
-					info_->pic1DataLoaded = true;
+					info_->pic1.dataLoaded = true;
 				}
 				break;
 			}
 
-		case FILETYPE_PSP_ISO:
-		case FILETYPE_PSP_ISO_NP:
+		case IdentifiedFileType::PSP_ISO:
+		case IdentifiedFileType::PSP_ISO_NP:
 			{
-				info_->fileType = FILETYPE_PSP_ISO;
+				info_->fileType = IdentifiedFileType::PSP_ISO;
 				SequentialHandleAllocator handles;
 				// Let's assume it's an ISO.
 				// TODO: This will currently read in the whole directory tree. Not really necessary for just a
 				// few files.
+				FileLoader *fl = info_->GetFileLoader();
+				if (!fl)
+					return;  // Happens with UWP currently, TODO...
 				BlockDevice *bd = constructBlockDevice(info_->GetFileLoader());
 				if (!bd)
 					return;  // nothing to do here..
@@ -534,56 +539,56 @@ handleELF:
 				// Alright, let's fetch the PARAM.SFO.
 				std::string paramSFOcontents;
 				if (ReadFileToString(&umd, "/PSP_GAME/PARAM.SFO", &paramSFOcontents, nullptr)) {
-					lock_guard lock(info_->lock);
+					std::lock_guard<std::mutex> lock(info_->lock);
 					info_->paramSFO.ReadSFO((const u8 *)paramSFOcontents.data(), paramSFOcontents.size());
 					info_->ParseParamSFO();
 
 					if (info_->wantFlags & GAMEINFO_WANTBG) {
-						ReadFileToString(&umd, "/PSP_GAME/PIC0.PNG", &info_->pic0TextureData, &info_->lock);
-						info_->pic0DataLoaded = true;
-						ReadFileToString(&umd, "/PSP_GAME/PIC1.PNG", &info_->pic1TextureData, &info_->lock);
-						info_->pic1DataLoaded = true;
+						ReadFileToString(&umd, "/PSP_GAME/PIC0.PNG", &info_->pic0.data, nullptr);
+						info_->pic0.dataLoaded = true;
+						ReadFileToString(&umd, "/PSP_GAME/PIC1.PNG", &info_->pic1.data, nullptr);
+						info_->pic1.dataLoaded = true;
 					}
 					if (info_->wantFlags & GAMEINFO_WANTSND) {
-						ReadFileToString(&umd, "/PSP_GAME/SND0.AT3", &info_->sndFileData, &info_->lock);
-						info_->pic1DataLoaded = true;
+						ReadFileToString(&umd, "/PSP_GAME/SND0.AT3", &info_->sndFileData, nullptr);
+						info_->pic1.dataLoaded = true;
 					}
 				}
 
 				// Fall back to unknown icon if ISO is broken/is a homebrew ISO, override is allowed though
-				if (!ReadFileToString(&umd, "/PSP_GAME/ICON0.PNG", &info_->iconTextureData, &info_->lock)) {
+				if (!ReadFileToString(&umd, "/PSP_GAME/ICON0.PNG", &info_->icon.data, &info_->lock)) {
 					DEBUG_LOG(LOADER, "Loading unknown.png because no icon was found");
-					ReadVFSToString("unknown.png", &info_->iconTextureData, &info_->lock);
+					ReadVFSToString("unknown.png", &info_->icon.data, &info_->lock);
 				}
-				info_->iconDataLoaded = true;
+				info_->icon.dataLoaded = true;
 				break;
 			}
 
-			case FILETYPE_ARCHIVE_ZIP:
+			case IdentifiedFileType::ARCHIVE_ZIP:
 				info_->paramSFOLoaded = true;
 				{
-					ReadVFSToString("zip.png", &info_->iconTextureData, &info_->lock);
-					info_->iconDataLoaded = true;
+					ReadVFSToString("zip.png", &info_->icon.data, &info_->lock);
+					info_->icon.dataLoaded = true;
 				}
 				break;
 
-			case FILETYPE_ARCHIVE_RAR:
+			case IdentifiedFileType::ARCHIVE_RAR:
 				info_->paramSFOLoaded = true;
 				{
-					ReadVFSToString("rargray.png", &info_->iconTextureData, &info_->lock);
-					info_->iconDataLoaded = true;
+					ReadVFSToString("rargray.png", &info_->icon.data, &info_->lock);
+					info_->icon.dataLoaded = true;
 				}
 				break;
 
-			case FILETYPE_ARCHIVE_7Z:
+			case IdentifiedFileType::ARCHIVE_7Z:
 				info_->paramSFOLoaded = true;
 				{
-					ReadVFSToString("7z.png", &info_->iconTextureData, &info_->lock);
-					info_->iconDataLoaded = true;
+					ReadVFSToString("7z.png", &info_->icon.data, &info_->lock);
+					info_->icon.dataLoaded = true;
 				}
 				break;
 
-			case FILETYPE_NORMAL_DIRECTORY:
+			case IdentifiedFileType::NORMAL_DIRECTORY:
 			default:
 				info_->paramSFOLoaded = true;
 				break;
@@ -592,13 +597,13 @@ handleELF:
 		info_->hasConfig = g_Config.hasGameConfig(info_->id);
 
 		if (info_->wantFlags & GAMEINFO_WANTSIZE) {
-			lock_guard lock(info_->lock);
+			std::lock_guard<std::mutex> lock(info_->lock);
 			info_->gameSize = info_->GetGameSizeInBytes();
 			info_->saveDataSize = info_->GetSaveDataSizeInBytes();
 			info_->installDataSize = info_->GetInstallDataSizeInBytes();
 		}
 
-		lock_guard lock(info_->lock);
+		std::lock_guard<std::mutex> lock(info_->lock);
 		info_->pending = false;
 		info_->working = false;
 		// ILOG("Completed writing info for %s", info_->GetTitle().c_str());
@@ -643,31 +648,10 @@ void GameInfoCache::Clear() {
 	}
 	for (auto iter = info_.begin(); iter != info_.end(); iter++) {
 		{
-			lock_guard lock(iter->second->lock);
-			if (!iter->second->pic0TextureData.empty()) {
-				iter->second->pic0TextureData.clear();
-				iter->second->pic0DataLoaded = false;
-			}
-			if (iter->second->pic0Texture) {
-				delete iter->second->pic0Texture;
-				iter->second->pic0Texture = 0;
-			}
-			if (!iter->second->pic1TextureData.empty()) {
-				iter->second->pic1TextureData.clear();
-				iter->second->pic1DataLoaded = false;
-			}
-			if (iter->second->pic1Texture) {
-				delete iter->second->pic1Texture;
-				iter->second->pic1Texture = 0;
-			}
-			if (!iter->second->iconTextureData.empty()) {
-				iter->second->iconTextureData.clear();
-				iter->second->iconDataLoaded = false;
-			}
-			if (iter->second->iconTexture) {
-				delete iter->second->iconTexture;
-				iter->second->iconTexture = 0;
-			}
+			std::lock_guard<std::mutex> lock(iter->second->lock);
+			iter->second->pic0.Clear();
+			iter->second->pic1.Clear();
+			iter->second->icon.Clear();
 
 			if (!iter->second->sndFileData.empty()) {
 				iter->second->sndFileData.clear();
@@ -681,24 +665,9 @@ void GameInfoCache::Clear() {
 
 void GameInfoCache::FlushBGs() {
 	for (auto iter = info_.begin(); iter != info_.end(); iter++) {
-		lock_guard lock(iter->second->lock);
-		if (!iter->second->pic0TextureData.empty()) {
-			iter->second->pic0TextureData.clear();
-			iter->second->pic0DataLoaded = false;
-		}
-		if (iter->second->pic0Texture) {
-			delete iter->second->pic0Texture;
-			iter->second->pic0Texture = 0;
-		}
-
-		if (!iter->second->pic1TextureData.empty()) {
-			iter->second->pic1TextureData.clear();
-			iter->second->pic1DataLoaded = false;
-		}
-		if (iter->second->pic1Texture) {
-			delete iter->second->pic1Texture;
-			iter->second->pic1Texture = 0;
-		}
+		std::lock_guard<std::mutex> lock(iter->second->lock);
+		iter->second->pic0.Clear();
+		iter->second->pic1.Clear();
 
 		if (!iter->second->sndFileData.empty()) {
 			iter->second->sndFileData.clear();
@@ -734,33 +703,28 @@ void GameInfoCache::WaitUntilDone(GameInfo *info) {
 
 
 // Runs on the main thread.
-GameInfo *GameInfoCache::GetInfo(Thin3DContext *thin3d, const std::string &gamePath, int wantFlags) {
-	GameInfo *info = 0;
+GameInfo *GameInfoCache::GetInfo(Draw::DrawContext *draw, const std::string &gamePath, int wantFlags) {
+	GameInfo *info = nullptr;
 
 	auto iter = info_.find(gamePath);
 	if (iter != info_.end()) {
 		info = iter->second;
-		if ((info->wantFlags & wantFlags) != wantFlags) {
-			// Need to start over. We'll just add a new work item.
-			goto again;
-		}
-		if (thin3d && info->iconDataLoaded) {
-			SetupTexture(info, info->iconTextureData, thin3d, info->iconTexture, info->timeIconWasLoaded);
-			info->iconDataLoaded = false;
-		}
-		if (thin3d && info->pic0DataLoaded) {
-			SetupTexture(info, info->pic0TextureData, thin3d, info->pic0Texture, info->timePic0WasLoaded);
-			info->pic0DataLoaded = false;
-		}
-		if (thin3d && info->pic1DataLoaded) {
-			SetupTexture(info, info->pic1TextureData, thin3d, info->pic1Texture, info->timePic1WasLoaded);
-			info->pic1DataLoaded = false;
-		}
-		iter->second->lastAccessedTime = time_now_d();
-		return iter->second;
 	}
 
-again:
+	// If wantFlags don't match, we need to start over.  We'll just queue the work item again.
+	if (info && (info->wantFlags & wantFlags) == wantFlags) {
+		if (draw && info->icon.dataLoaded && !info->icon.texture) {
+			SetupTexture(info, draw, info->icon);
+		}
+		if (draw && info->pic0.dataLoaded && !info->pic0.texture) {
+			SetupTexture(info, draw, info->pic0);
+		}
+		if (draw && info->pic1.dataLoaded && !info->pic1.texture) {
+			SetupTexture(info, draw, info->pic1);
+		}
+		info->lastAccessedTime = time_now_d();
+		return info;
+	}
 
 	if (!info) {
 		info = new GameInfo();
@@ -773,7 +737,7 @@ again:
 	}
 
 	{
-		lock_guard lock(info->lock);
+		std::lock_guard<std::mutex> lock(info->lock);
 		info->wantFlags |= wantFlags;
 		info->pending = true;
 	}
@@ -785,14 +749,16 @@ again:
 	return info;
 }
 
-void GameInfoCache::SetupTexture(GameInfo *info, std::string &textureData, Thin3DContext *thin3d, Thin3DTexture *&tex, double &loadTime) {
-	if (textureData.size()) {
-		if (!tex) {
-			tex = thin3d->CreateTextureFromFileData((const uint8_t *)textureData.data(), (int)textureData.size(), T3DImageType::DETECT);
-			if (tex) {
-				loadTime = time_now_d();
+void GameInfoCache::SetupTexture(GameInfo *info, Draw::DrawContext *thin3d, GameInfoTex &icon) {
+	using namespace Draw;
+	if (icon.data.size()) {
+		if (!icon.texture) {
+			icon.texture = CreateTextureFromFileData(thin3d, (const uint8_t *)icon.data.data(), (int)icon.data.size(), ImageFileType::DETECT);
+			if (icon.texture) {
+				icon.timeLoaded = time_now_d();
 			}
 		}
-		textureData.clear();
+		icon.data.clear();
+		icon.dataLoaded = false;
 	}
 }

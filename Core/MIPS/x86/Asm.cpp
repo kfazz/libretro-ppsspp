@@ -15,6 +15,9 @@
 // Official SVN repository and contact information can be found at
 // http://code.google.com/p/dolphin-emu/
 
+#include "ppsspp_config.h"
+#if PPSSPP_ARCH(X86) || PPSSPP_ARCH(AMD64)
+
 #include "math/math_util.h"
 
 #include "ABI.h"
@@ -141,7 +144,7 @@ void Jit::GenerateFixedCode(JitOptions &jo) {
 		RestoreRoundingMode(true);
 		ABI_CallFunction(reinterpret_cast<void *>(&CoreTiming::Advance));
 		ApplyRoundingMode(true);
-		FixupBranch skipToRealDispatch = J(); //skip the sync and compare first time
+		FixupBranch skipToCoreStateCheck = J();  //skip the downcount check
 
 		dispatcherCheckCoreState = GetCodePtr();
 
@@ -149,6 +152,7 @@ void Jit::GenerateFixedCode(JitOptions &jo) {
 		// IMPORTANT - We jump on negative, not carry!!!
 		FixupBranch bailCoreState = J_CC(CC_S, true);
 
+		SetJumpTarget(skipToCoreStateCheck);
 		CMP(32, M(&coreState), Imm32(0));
 		FixupBranch badCoreState = J_CC(CC_NZ, true);
 		FixupBranch skipToRealDispatch2 = J(); //skip the sync and compare first time
@@ -159,7 +163,6 @@ void Jit::GenerateFixedCode(JitOptions &jo) {
 			// IMPORTANT - We jump on negative, not carry!!!
 			FixupBranch bail = J_CC(CC_S, true);
 
-			SetJumpTarget(skipToRealDispatch);
 			SetJumpTarget(skipToRealDispatch2);
 
 			dispatcherNoCheck = GetCodePtr();
@@ -167,8 +170,11 @@ void Jit::GenerateFixedCode(JitOptions &jo) {
 			MOV(32, R(EAX), M(&mips_->pc));
 			dispatcherInEAXNoCheck = GetCodePtr();
 
-#ifdef _M_IX86
+#ifdef MASKED_PSP_MEMORY
 			AND(32, R(EAX), Imm32(Memory::MEMVIEW32_MASK));
+#endif
+
+#ifdef _M_IX86
 			_assert_msg_(CPU, Memory::base != 0, "Memory base bogus");
 			MOV(32, R(EAX), MDisp(EAX, (u32)Memory::base));
 #elif _M_X64
@@ -224,3 +230,5 @@ void Jit::GenerateFixedCode(JitOptions &jo) {
 }
 
 }  // namespace
+
+#endif // PPSSPP_ARCH(X86) || PPSSPP_ARCH(AMD64)

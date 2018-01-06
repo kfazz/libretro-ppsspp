@@ -17,11 +17,11 @@
 
 #include <time.h>
 
+#include "ppsspp_config.h"
+
 #ifdef _WIN32
 #include "CommonWindows.h"
-#ifndef _XBOX
 #include <mmsystem.h>
-#endif
 #include <sys/timeb.h>
 #else
 #include <sys/time.h>
@@ -35,14 +35,12 @@ namespace Common
 
 u32 Timer::GetTimeMs()
 {
-#ifdef _XBOX
-	return GetTickCount();
-#elif defined(_WIN32)
+#if defined(_WIN32)
+#if PPSSPP_PLATFORM(UWP)
+	return (u32)GetTickCount64();
+#else
 	return timeGetTime();
-#elif defined(BLACKBERRY)
-	struct timespec time;
-	clock_gettime(CLOCK_MONOTONIC, &time);
-	return (u32)(time.tv_sec * 1000 + time.tv_nsec / 1000000);
+#endif
 #else
 	// REALTIME is probably not a good idea for measuring updates.
 	struct timeval t;

@@ -15,7 +15,9 @@
 // Official SVN repository and contact information can be found at
 // http://code.google.com/p/dolphin-emu/
 
-#ifdef ANDROID
+#if defined(_M_IX86) || defined(_M_X64)
+
+#ifdef __ANDROID__
 #include <sys/stat.h>
 #include <fcntl.h>
 #endif
@@ -53,7 +55,7 @@ void do_cpuid(u32 regs[4], u32 cpuid_leaf) {
 #else
 
 #ifdef _M_SSE
-#include <xmmintrin.h>
+#include <emmintrin.h>
 
 #define _XCR_XFEATURE_ENABLED_MASK 0
 static unsigned long long _xgetbv(unsigned int index)
@@ -112,14 +114,13 @@ void CPUInfo::Detect() {
 #endif
 	num_cores = 1;
 
-#ifdef _WIN32
-#ifdef _M_IX86
+#if PPSSPP_PLATFORM(UWP)
+	OS64bit = Mode64bit;  // TODO: Not always accurate!
+#elif defined(_WIN32) && defined(_M_IX86)
 	BOOL f64 = false;
 	IsWow64Process(GetCurrentProcess(), &f64);
 	OS64bit = (f64 == TRUE) ? true : false;
 #endif
-#endif
-
 	// Set obvious defaults, for extra safety
 	if (Mode64bit) {
 		bSSE = true;
@@ -291,3 +292,5 @@ std::string CPUInfo::Summarize()
 	if (bLongMode) sum += ", 64-bit support";
 	return sum;
 }
+
+#endif // defined(_M_IX86) || defined(_M_X64)

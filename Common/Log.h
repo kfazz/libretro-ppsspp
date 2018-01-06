@@ -19,12 +19,6 @@
 
 #include "MsgHandler.h"
 
-#ifdef __arm__
-#if !defined(ARM)
-#define ARM
-#endif
-#endif
-
 #define	NOTICE_LEVEL  1  // VERY important information that is NOT errors. Like startup and debugprintfs from the game itself.
 #define	ERROR_LEVEL   2  // Important errors.
 #define	WARNING_LEVEL 3  // Something is suspicious.
@@ -38,11 +32,23 @@
 
 #include <cstdio>
 
-namespace LogTypes
-{
+namespace LogTypes {
 
 enum LOG_TYPE {
-	MASTER_LOG,
+	SYSTEM = 0,
+	BOOT,
+	COMMON,
+	CPU,
+	FILESYS,
+	G3D,
+	HLE,  // dumping ground that we should get rid of
+	JIT,
+	LOADER,
+	ME,
+	MEMMAP,
+	SASMIX,
+	SAVESTATE,
+	FRAMEBUF,
 
 	SCEAUDIO,
 	SCECTRL,
@@ -57,24 +63,12 @@ enum LOG_TYPE {
 	SCERTC,
 	SCESAS,
 	SCEUTILITY,
-
-	BOOT,
-	COMMON,
-	CPU,
-	FILESYS,
-	G3D,
-	HLE,  // dumping ground that we should get rid off
-	JIT,
-	LOADER,
-	ME,
-	MEMMAP,
-	TIME,
-	SASMIX,
+	SCEMISC,
 
 	NUMBER_OF_LOGS,  // Must be last
 };
 
-enum LOG_LEVELS {
+enum LOG_LEVELS : int {
 	LNOTICE = NOTICE_LEVEL,
 	LERROR = ERROR_LEVEL,
 	LWARNING = WARNING_LEVEL,
@@ -121,16 +115,12 @@ bool GenericLogEnabled(LogTypes::LOG_LEVELS level, LogTypes::LOG_TYPE type);
 					   __LINE__, __FILE__); \
 		if (!PanicYesNo("*** Assertion (see log)***\n")) {Crash();} \
 	}
-#ifdef __SYMBIAN32__
-#define _dbg_assert_msg_(_t_, _a_, ...) if (!(_a_)) ERROR_LOG(_t_, __VA_ARGS__);
-#else
 #define _dbg_assert_msg_(_t_, _a_, ...)\
 	if (!(_a_)) {\
 		printf(__VA_ARGS__); \
 		ERROR_LOG(_t_, __VA_ARGS__); \
 		if (!PanicYesNo(__VA_ARGS__)) {Crash();} \
 	}
-#endif
 #define _dbg_update_() ; //Host_UpdateLogDisplay();
 
 #else // not debug
@@ -142,7 +132,7 @@ bool GenericLogEnabled(LogTypes::LOG_LEVELS level, LogTypes::LOG_TYPE type);
 #endif // dbg_assert
 #endif // MAX_LOGLEVEL DEBUG
 
-#define _assert_(_a_) _dbg_assert_(MASTER_LOG, _a_)
+#define _assert_(_a_) _dbg_assert_(SYSTEM, _a_)
 
 #ifdef _MSC_VER
 #define _assert_msg_(_t_, _a_, _fmt_, ...)		\

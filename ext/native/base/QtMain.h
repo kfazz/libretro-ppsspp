@@ -11,7 +11,7 @@
 #include <QAudioOutput>
 #include <QAudioFormat>
 #endif
-#if defined(MOBILE_DEVICE) && !defined(MAEMO)
+#if defined(MOBILE_DEVICE)
 #include <QAccelerometer>
 #if QT_VERSION < QT_VERSION_CHECK(5, 0, 0)
 QTM_USE_NAMESPACE
@@ -36,13 +36,22 @@ QTM_USE_NAMESPACE
 #include "Core/Config.h"
 
 // Input
-void SimulateGamepad(InputState *input);
+void SimulateGamepad();
 
 class QtDummyGraphicsContext : public DummyGraphicsContext {
 public:
-	Thin3DContext *CreateThin3DContext() override {
-		return T3DCreateGLContext();
+	QtDummyGraphicsContext() {
+		draw_ = Draw::T3DCreateGLContext();
 	}
+	~QtDummyGraphicsContext() {
+		delete draw_;
+	}
+
+	Draw::DrawContext *GetDrawContext() override {
+		return draw_;
+	}
+private:
+	Draw::DrawContext *draw_;
 };
 
 //GUI
@@ -50,33 +59,32 @@ class MainUI : public QGLWidget
 {
 	Q_OBJECT
 public:
-    explicit MainUI(QWidget *parent = 0);
-    ~MainUI();
+	explicit MainUI(QWidget *parent = 0);
+	~MainUI();
 
 public slots:
-    QString InputBoxGetQString(QString title, QString defaultValue);
+	QString InputBoxGetQString(QString title, QString defaultValue);
 
 signals:
 	void doubleClick();
 	void newFrame();
 
 protected:
-    void timerEvent(QTimerEvent *);
-    void changeEvent(QEvent *e);
-    bool event(QEvent *e);
+	void timerEvent(QTimerEvent *);
+	void changeEvent(QEvent *e);
+	bool event(QEvent *e);
 
-    void initializeGL();
-    void resizeGL(int w, int h);
-    void paintGL();
+	void initializeGL();
+	void resizeGL(int w, int h);
+	void paintGL();
 
-    void updateAccelerometer();
+	void updateAccelerometer();
 
 private:
-	InputState input_state;
 	QtDummyGraphicsContext *graphicsContext;
 
-    float xscale, yscale;
-#if defined(MOBILE_DEVICE) && !defined(MAEMO)
+	float xscale, yscale;
+#if defined(MOBILE_DEVICE)
 	QAccelerometer* acc;
 #endif
 };
@@ -91,11 +99,11 @@ class MainAudio: public QObject
 	Q_OBJECT
 public:
 	MainAudio() {}
-    ~MainAudio();
+	~MainAudio();
 public slots:
-    void run();
+	void run();
 protected:
-    void timerEvent(QTimerEvent *);
+	void timerEvent(QTimerEvent *);
 private:
 	QIODevice* feed;
 	QAudioOutput* output;

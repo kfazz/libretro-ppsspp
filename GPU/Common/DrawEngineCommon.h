@@ -22,6 +22,7 @@
 
 #include "Common/CommonTypes.h"
 
+#include "GPU/GPUState.h"
 #include "GPU/Common/GPUDebugInterface.h"
 #include "GPU/Common/VertexDecoderCommon.h"
 
@@ -31,7 +32,7 @@ enum {
 	VERTEX_BUFFER_MAX = 65536,
 	DECODED_VERTEX_BUFFER_SIZE = VERTEX_BUFFER_MAX * 64,
 	DECODED_INDEX_BUFFER_SIZE = VERTEX_BUFFER_MAX * 16,
-	SPLINE_BUFFER_SIZE = VERTEX_BUFFER_MAX * 20,
+	SPLINE_BUFFER_SIZE = VERTEX_BUFFER_MAX * 26, // At least, this buffer needs greater than 1679616 bytes for Mist Dragon morphing in FF4CC.
 };
 
 class DrawEngineCommon {
@@ -56,9 +57,17 @@ public:
 
 	std::vector<std::string> DebugGetVertexLoaderIDs();
 	std::string DebugGetVertexLoaderString(std::string id, DebugShaderStringType stringType);
+
+	virtual void Resized();
+
 protected:
+	virtual void ClearTrackedVertexArrays() {}
+
 	// Preprocessing for spline/bezier
 	u32 NormalizeVertices(u8 *outPtr, u8 *bufPtr, const u8 *inPtr, int lowerBound, int upperBound, u32 vertType);
+
+	void ApplyClearToMemory(int x1, int y1, int x2, int y2, u32 clearColor);
+	bool ApplyShaderBlending();
 
 	VertexDecoder *GetVertexDecoder(u32 vtype);
 
@@ -78,6 +87,7 @@ protected:
 	u8 *splineBuffer;
 
 	// Cached vertex decoders
+	u32 lastVType_ = -1;
 	std::unordered_map<u32, VertexDecoder *> decoderMap_;
 	VertexDecoder *dec_;
 	VertexDecoderJitCache *decJitCache_;
@@ -85,4 +95,23 @@ protected:
 
 	// Fixed index buffer for easy quad generation from spline/bezier
 	u16 *quadIndices_;
+
+	// Shader blending state
+	bool fboTexNeedBind_;
+	bool fboTexBound_;
+
+	// Hardware tessellation
+	int numPatches;
+	class TessellationDataTransfer {
+	protected:
+		int prevSize;
+		int prevSizeTex;
+		int prevSizeCol;
+	public:
+		virtual ~TessellationDataTransfer() {}
+		// Send spline/bezier's control points to vertex shader through floating point texture.
+		virtual void SendDataToShader(const float *pos, const float *tex, const float *col, int size, bool hasColor, bool hasTexCoords) = 0;
+		virtual void PrepareBuffers(float *&pos, float *&tex, float *&col, int size, bool hasColor, bool hasTexCoords) {};
+	};
+	TessellationDataTransfer *tessDataTransfer;
 };

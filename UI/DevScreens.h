@@ -17,11 +17,11 @@
 
 #pragma once
 
-#include <vector>
+#include <functional>
 #include <map>
 #include <string>
+#include <vector>
 
-#include "base/functional.h"
 #include "file/file_util.h"
 #include "ui/ui_screen.h"
 
@@ -53,6 +53,8 @@ public:
 
 private:
 	UI::EventReturn OnToggleAll(UI::EventParams &e);
+	UI::EventReturn OnEnableAll(UI::EventParams &e);
+	UI::EventReturn OnDisableAll(UI::EventParams &e);
 	UI::EventReturn OnLogLevel(UI::EventParams &e);
 	UI::EventReturn OnLogLevelChange(UI::EventParams &e);
 };
@@ -61,7 +63,7 @@ class LogScreen : public UIDialogScreenWithBackground {
 public:
 	LogScreen() : toBottom_(false) {}
 	void CreateViews() override;
-	void update(InputState &input) override;
+	void update() override;
 
 private:
 	void UpdateLog();

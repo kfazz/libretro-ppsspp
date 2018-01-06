@@ -17,8 +17,12 @@
 
 #include <set>
 #include <algorithm>
+#include <vector>
+
 #include "base/NativeApp.h"
+#include "base/display.h"
 #include "input/input_state.h"
+#include "Common/Log.h"
 #include "Windows/RawInput.h"
 #include "Windows/KeyboardDevice.h"
 #include "Windows/MainWindow.h"
@@ -51,8 +55,6 @@
 #define HID_USAGE_GENERIC_MULTIAXIS    ((USHORT) 0x07)
 #endif
 
-extern InputState input_state;
-
 namespace WindowsRawInput {
 	static std::set<int> keyboardKeysDown;
 	static void *rawInputBuffer;
@@ -60,6 +62,8 @@ namespace WindowsRawInput {
 	static bool menuActive;
 	static bool focused = true;
 	static bool mouseRightDown = false;
+	static float mouseX = 0.0f;
+	static float mouseY = 0.0f;
 
 	void Init() {
 		RAWINPUTDEVICE dev[3];
@@ -78,7 +82,7 @@ namespace WindowsRawInput {
 		dev[2].dwFlags = 0;
 
 		if (!RegisterRawInputDevices(dev, 3, sizeof(RAWINPUTDEVICE))) {
-			WARN_LOG(COMMON, "Unable to register raw input devices: %s", GetLastErrorMsg());
+			WARN_LOG(SYSTEM, "Unable to register raw input devices: %s", GetLastErrorMsg());
 		}
 	}
 
@@ -193,14 +197,14 @@ namespace WindowsRawInput {
 		TouchInput touch;
 		touch.id = 0;
 		touch.flags = TOUCH_MOVE;
-		touch.x = input_state.pointer_x[0];
-		touch.y = input_state.pointer_y[0];
+		touch.x = mouseX;
+		touch.y = mouseY;
 
 		KeyInput key;
 		key.deviceId = DEVICE_ID_MOUSE;
 
-		mouseDeltaX += raw->data.mouse.lLastX;
-		mouseDeltaY += raw->data.mouse.lLastY;
+		g_mouseDeltaX += raw->data.mouse.lLastX;
+		g_mouseDeltaY += raw->data.mouse.lLastY;
 
 		if (raw->data.mouse.usButtonFlags & RI_MOUSE_RIGHT_BUTTON_DOWN) {
 			key.flags = KEY_DOWN;
@@ -267,6 +271,11 @@ namespace WindowsRawInput {
 
 		// Docs say to call DefWindowProc to perform necessary cleanup.
 		return DefWindowProc(hWnd, WM_INPUT, wParam, lParam);
+	}
+
+	void SetMousePos(float x, float y) {
+		mouseX = x;
+		mouseY = y;
 	}
 
 	void GainFocus() {

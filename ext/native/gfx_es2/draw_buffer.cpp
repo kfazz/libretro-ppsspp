@@ -9,10 +9,8 @@
 #include "math/math_util.h"
 #include "gfx/texture_atlas.h"
 #include "gfx/gl_debug_log.h"
-#include "gfx/gl_common.h"
 #include "gfx_es2/draw_buffer.h"
 #include "gfx_es2/draw_text.h"
-#include "gfx_es2/glsl_program.h"
 #include "util/text/utf8.h"
 #include "util/text/wrap_text.h"
 
@@ -32,41 +30,48 @@ DrawBuffer::~DrawBuffer() {
 	delete [] verts_;
 }
 
-void DrawBuffer::Init(Thin3DContext *t3d) {
+void DrawBuffer::Init(Draw::DrawContext *t3d, Draw::Pipeline *pipeline) {
+	using namespace Draw;
+
 	if (inited_)
 		return;
 
-	t3d_ = t3d;
+	draw_ = t3d;
 	inited_ = true;
 
-	std::vector<Thin3DVertexComponent> components;
-	components.push_back(Thin3DVertexComponent("Position", SEM_POSITION, FLOATx3, 0));
-	components.push_back(Thin3DVertexComponent("TexCoord0", SEM_TEXCOORD0, FLOATx2, 12));
-	components.push_back(Thin3DVertexComponent("Color0", SEM_COLOR0, UNORM8x4, 20));
-
-	Thin3DShader *vshader = t3d_->GetVshaderPreset(VS_TEXTURE_COLOR_2D);
-
-	vformat_ = t3d_->CreateVertexFormat(components, 24, vshader);
-	if (vformat_->RequiresBuffer()) {
-		vbuf_ = t3d_->CreateBuffer(MAX_VERTS * sizeof(Vertex), T3DBufferUsage::DYNAMIC | T3DBufferUsage::VERTEXDATA);
+	if (pipeline->RequiresBuffer()) {
+		vbuf_ = draw_->CreateBuffer(MAX_VERTS * sizeof(Vertex), BufferUsageFlag::DYNAMIC | BufferUsageFlag::VERTEXDATA);
 	} else {
 		vbuf_ = nullptr;
 	}
+}
+
+Draw::InputLayout *DrawBuffer::CreateInputLayout(Draw::DrawContext *t3d) {
+	using namespace Draw;
+	InputLayoutDesc desc = {
+		{
+			{ sizeof(Vertex), false },
+		},
+		{
+			{ 0, SEM_POSITION, DataFormat::R32G32B32_FLOAT, 0 },
+			{ 0, SEM_TEXCOORD0, DataFormat::R32G32_FLOAT, 12 },
+			{ 0, SEM_COLOR0, DataFormat::R8G8B8A8_UNORM, 20 },
+		},
+	};
+
+	return t3d->CreateInputLayout(desc);
 }
 
 void DrawBuffer::Shutdown() {
 	if (vbuf_) {
 		vbuf_->Release();
 	}
-	vformat_->Release();
-
 	inited_ = false;
 }
 
-void DrawBuffer::Begin(Thin3DShaderSet *program, DrawBufferPrimitiveMode dbmode) {
-	shaderSet_ = program;
+void DrawBuffer::Begin(Draw::Pipeline *program) {
+	pipeline_ = program;
 	count_ = 0;
-	mode_ = dbmode;
 }
 
 void DrawBuffer::End() {
@@ -74,7 +79,8 @@ void DrawBuffer::End() {
 }
 
 void DrawBuffer::Flush(bool set_blend_state) {
-	if (!shaderSet_) {
+	using namespace Draw;
+	if (!pipeline_) {
 		ELOG("No program set!");
 		return;
 	}
@@ -82,14 +88,19 @@ void DrawBuffer::Flush(bool set_blend_state) {
 	if (count_ == 0)
 		return;
 
-	shaderSet_->SetMatrix4x4("WorldViewProj", drawMatrix_.getReadPtr());
+	draw_->BindPipeline(pipeline_);
 
+	VsTexColUB ub{};
+	memcpy(ub.WorldViewProj, drawMatrix_.getReadPtr(), sizeof(Matrix4x4));
+	// pipeline_->SetMatrix4x4("WorldViewProj", drawMatrix_.getReadPtr());
+	draw_->UpdateDynamicUniformBuffer(&ub, sizeof(ub));
 	if (vbuf_) {
-		vbuf_->SubData((const uint8_t *)verts_, 0, sizeof(Vertex) * count_);
+		draw_->UpdateBuffer(vbuf_, (const uint8_t *)verts_, 0, sizeof(Vertex) * count_, Draw::UPDATE_DISCARD);
+		draw_->BindVertexBuffers(0, 1, &vbuf_, nullptr);
 		int offset = 0;
-		t3d_->Draw(mode_ == DBMODE_NORMAL ? PRIM_TRIANGLES : PRIM_LINES, shaderSet_, vformat_, vbuf_, count_, offset);
+		draw_->Draw(count_, offset);
 	} else {
-		t3d_->DrawUP(mode_ == DBMODE_NORMAL ? PRIM_TRIANGLES : PRIM_LINES, shaderSet_, vformat_, (const void *)verts_, count_);
+		draw_->DrawUP((const void *)verts_, count_);
 	}
 	count_ = 0;
 }
@@ -104,7 +115,7 @@ void DrawBuffer::V(float x, float y, float z, uint32_t color, float u, float v) 
 	vert->x = x;
 	vert->y = y;
 	vert->z = z;
-	vert->rgba = color;
+	vert->rgba = alpha_ == 1.0f ? color : alphaMul(color, alpha_);
 	vert->u = u;
 	vert->v = v;
 }
@@ -380,12 +391,13 @@ void DrawBuffer::MeasureTextCount(int font, const char *text, int count, float *
 		// Translate non-breaking space to space.
 		if (cval == 0xA0) {
 			cval = ' ';
-		}
-		if (cval == '\n') {
+		} else if (cval == '\n') {
 			maxX = std::max(maxX, wacc);
 			wacc = 0;
 			lines++;
 			continue;
+		} else if (cval == '\t') {
+			cval = ' ';
 		} else if (cval == '&' && utf.peek() != '&') {
 			// Ignore lone ampersands
 			continue;
@@ -400,12 +412,17 @@ void DrawBuffer::MeasureTextCount(int font, const char *text, int count, float *
 }
 
 void DrawBuffer::MeasureTextRect(int font, const char *text, int count, const Bounds &bounds, float *w, float *h, int align) {
+	if (!text || (uint32_t)font >= (uint32_t)atlas->num_fonts) {
+		*w = 0;
+		*h = 0;
+		return;
+	}
+
 	std::string toMeasure = std::string(text, count);
 	if (align & FLAG_WRAP_TEXT) {
 		AtlasWordWrapper wrapper(*atlas->fonts[font], fontscalex, toMeasure.c_str(), bounds.w);
 		toMeasure = wrapper.Wrapped();
 	}
-
 	MeasureTextCount(font, toMeasure.c_str(), (int)toMeasure.length(), w, h);
 }
 
@@ -505,11 +522,12 @@ void DrawBuffer::DrawText(int font, const char *text, float x, float y, Color co
 		// Translate non-breaking space to space.
 		if (cval == 0xA0) {
 			cval = ' ';
-		}
-		if (cval == '\n') {
+		} else if (cval == '\n') {
 			y += atlasfont.height * fontscaley;
 			x = sx;
 			continue;
+		} else if (cval == '\t') {
+			cval = ' ';
 		} else if (cval == '&' && utf.peek() != '&') {
 			// Ignore lone ampersands
 			continue;
