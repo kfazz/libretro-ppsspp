@@ -6,6 +6,8 @@ GPUCOMMONDIR	= $(CORE_DIR)/GPU/Common
 GPUDIR			= $(CORE_DIR)/GPU
 EXTDIR			= $(CORE_DIR)/ext
 NATIVEDIR		= $(EXTDIR)/native
+GLSLANGDIR		= $(EXTDIR)/glslang
+SPIRVDIR		= $(EXTDIR)/SPIRV-Cross
 
 INCFLAGS += \
 	-I$(CORE_DIR) \
@@ -23,7 +25,9 @@ INCFLAGS += \
 	-I$(NATIVEDIR) \
 	-I$(EXTDIR)/libkirk \
 	-I$(EXTDIR)/xbrz \
-	-I$(EXTDIR)/xxhash
+	-I$(EXTDIR)/xxhash \
+	-I$(GLSLANGDIR)/ \
+	-I$(SPIRVDIR) 
 
 INCFLAGS  += -I$(NATIVEDIR)/ext/rg_etc1
 #INCFLAGS += -I$(NATIVEDIR)/ext/stb_vorbis
@@ -124,7 +128,10 @@ SOURCES_CXX += $(GPUCOMMONDIR)/VertexDecoderCommon.cpp \
 	       $(GPUCOMMONDIR)/FramebufferCommon.cpp \
 	       $(GPUCOMMONDIR)/ShaderId.cpp \
 	       $(GPUCOMMONDIR)/GPUDebugInterface.cpp \
-	       $(GPUCOMMONDIR)/DepalettizeShaderCommon.cpp
+	       $(GPUCOMMONDIR)/DepalettizeShaderCommon.cpp \
+	       $(GPUCOMMONDIR)/ShaderTranslation.cpp \
+	       $(GPUCOMMONDIR)/ShaderCommon.cpp \
+	       $(GPUCOMMONDIR)/StencilCommon.cpp
 SOURCES_C   += $(NATIVEDIR)/ext/libzip/zip_source_function.c \
 				$(NATIVEDIR)/ext/libzip/zip_source_zip.c \
 				$(NATIVEDIR)/ext/libzip/zip_stat.c \
@@ -145,6 +152,7 @@ SOURCES_CXX += $(GPUCOMMONDIR)/TextureDecoder.cpp \
 				$(GPUCOMMONDIR)/PostShader.cpp \
 				$(COMMONDIR)/ColorConv.cpp \
 				$(GPUDIR)/Debugger/Breakpoints.cpp \
+				$(GPUDIR)/Debugger/Record.cpp \
 				$(GPUDIR)/Debugger/Stepping.cpp \
 				$(GPUDIR)/Debugger/Record.cpp \
 				$(GPUDIR)/Common/TextureCacheCommon.cpp \
@@ -207,7 +215,6 @@ SOURCES_CXX += $(EXTDIR)/native/file/chunk_file.cpp \
 	       $(NATIVEDIR)/file/free.cpp \
 	       $(NATIVEDIR)/file/zip_read.cpp \
 	       $(NATIVEDIR)/gfx/gl_debug_log.cpp \
-	       $(NATIVEDIR)/gfx/gl_lost_manager.cpp \
 	       $(NATIVEDIR)/gfx/GLStateCache.cpp \
 	       $(NATIVEDIR)/gfx/texture_atlas.cpp \
 	       $(NATIVEDIR)/gfx_es2/draw_buffer.cpp \
@@ -220,6 +227,7 @@ SOURCES_CXX += $(EXTDIR)/native/file/chunk_file.cpp \
 	       $(NATIVEDIR)/image/png_load.cpp \
 	       $(NATIVEDIR)/input/gesture_detector.cpp \
 	       $(NATIVEDIR)/input/input_state.cpp \
+	       $(NATIVEDIR)/math/dataconv.cpp \
 	       $(NATIVEDIR)/math/curves.cpp \
 	       $(NATIVEDIR)/math/expression_parser.cpp \
 	       $(NATIVEDIR)/math/lin/plane.cpp \
@@ -236,6 +244,7 @@ SOURCES_CXX += $(EXTDIR)/native/file/chunk_file.cpp \
 	       $(NATIVEDIR)/thread/prioritizedworkqueue.cpp \
 	       $(NATIVEDIR)/thread/threadutil.cpp \
 	       $(NATIVEDIR)/ui/screen.cpp \
+	       $(NATIVEDIR)/ui/ui_tween.cpp \
 	       $(NATIVEDIR)/thread/threadpool.cpp \
 	       $(NATIVEDIR)/ui/ui.cpp \
 	       $(NATIVEDIR)/ui/ui_context.cpp \
@@ -505,7 +514,8 @@ endif
 						$(COREDIR)/MIPS/x86/JitSafeMem.cpp \
 						$(COREDIR)/MIPS/x86/RegCache.cpp \
 						$(COREDIR)/MIPS/x86/RegCacheFPU.cpp \
-						$(GPUDIR)/Common/VertexDecoderX86.cpp
+						$(GPUDIR)/Common/VertexDecoderX86.cpp \
+						$(GPUDIR)/Software/SamplerX86.cpp
 		SOURCES_C   += $(NATIVEDIR)/math/fast/fast_matrix_sse.c
    endif
 endif
@@ -539,3 +549,50 @@ SOURCES_C += $(EXTDIR)/zlib/adler32.c \
 				 $(EXTDIR)/zlib/uncompr.c \
 				 $(EXTDIR)/zlib/zutil.c
 endif
+
+SOURCES_CXX += 	$(GLSLANGDIR)/glslang/MachineIndependent/IntermTraverse.cpp \
+		$(GLSLANGDIR)/glslang/MachineIndependent/glslang_tab.cpp \
+		$(GLSLANGDIR)/glslang/MachineIndependent/ParseContextBase.cpp \
+		$(GLSLANGDIR)/glslang/MachineIndependent/preprocessor/PpContext.cpp \
+		$(GLSLANGDIR)/glslang/MachineIndependent/preprocessor/Pp.cpp \
+		$(GLSLANGDIR)/glslang/MachineIndependent/preprocessor/PpScanner.cpp \
+		$(GLSLANGDIR)/glslang/MachineIndependent/preprocessor/PpAtom.cpp \
+		$(GLSLANGDIR)/glslang/MachineIndependent/preprocessor/PpTokens.cpp \
+		$(GLSLANGDIR)/glslang/MachineIndependent/RemoveTree.cpp \
+		$(GLSLANGDIR)/glslang/MachineIndependent/parseConst.cpp \
+		$(GLSLANGDIR)/glslang/MachineIndependent/Constant.cpp \
+		$(GLSLANGDIR)/glslang/MachineIndependent/InfoSink.cpp \
+		$(GLSLANGDIR)/glslang/MachineIndependent/linkValidate.cpp \
+		$(GLSLANGDIR)/glslang/MachineIndependent/iomapper.cpp \
+		$(GLSLANGDIR)/glslang/MachineIndependent/SymbolTable.cpp \
+		$(GLSLANGDIR)/glslang/MachineIndependent/Intermediate.cpp \
+		$(GLSLANGDIR)/glslang/MachineIndependent/propagateNoContraction.cpp \
+		$(GLSLANGDIR)/glslang/MachineIndependent/intermOut.cpp \
+		$(GLSLANGDIR)/glslang/MachineIndependent/Scan.cpp \
+		$(GLSLANGDIR)/glslang/MachineIndependent/ParseHelper.cpp \
+		$(GLSLANGDIR)/glslang/MachineIndependent/reflection.cpp \
+		$(GLSLANGDIR)/glslang/MachineIndependent/limits.cpp \
+		$(GLSLANGDIR)/glslang/MachineIndependent/PoolAlloc.cpp \
+		$(GLSLANGDIR)/glslang/MachineIndependent/ShaderLang.cpp \
+		$(GLSLANGDIR)/glslang/MachineIndependent/Initialize.cpp \
+		$(GLSLANGDIR)/glslang/MachineIndependent/Versions.cpp \
+		$(GLSLANGDIR)/glslang/OSDependent/Unix/ossource.cpp \
+		$(GLSLANGDIR)/glslang/GenericCodeGen/CodeGen.cpp \
+		$(GLSLANGDIR)/glslang/GenericCodeGen/Link.cpp \
+		$(GLSLANGDIR)/OGLCompilersDLL/InitializeDll.cpp \
+		$(GLSLANGDIR)/SPIRV/disassemble.cpp \
+		$(GLSLANGDIR)/SPIRV/SPVRemapper.cpp \
+		$(GLSLANGDIR)/SPIRV/InReadableOrder.cpp \
+		$(GLSLANGDIR)/SPIRV/doc.cpp \
+		$(GLSLANGDIR)/SPIRV/GlslangToSpv.cpp \
+		$(GLSLANGDIR)/SPIRV/SpvBuilder.cpp \
+		$(GLSLANGDIR)/SPIRV/Logger.cpp \
+		$(GLSLANGDIR)/StandAlone/spirv-remap.cpp \
+		$(GLSLANGDIR)/StandAlone/ResourceLimits.cpp \
+		$(GLSLANGDIR)/StandAlone/StandAlone.cpp 
+
+SOURCES_CXX += $(SPIRVDIR)/spirv_cross.cpp \
+		$(SPIRVDIR)/spirv_cfg.cpp \
+		$(SPIRVDIR)/spirv_glsl.cpp
+
+
