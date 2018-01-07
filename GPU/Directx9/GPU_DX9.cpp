@@ -393,8 +393,8 @@ static const CommandTableEntry commandTable[] = {
 
 GPU_DX9::CommandInfo GPU_DX9::cmdInfo_[256];
 
-GPU_DX9::GPU_DX9(GraphicsContext *gfxCtx)
-: gfxCtx_(gfxCtx) {
+GPU_DX9::GPU_DX9(GraphicsContext *gfxCtx, Draw::DrawContext *draw)
+: GPUCommon(gfxCtx, draw) {
 	lastVsync_ = g_Config.bVSync ? 1 : 0;
 	dxstate.SetVSyncInterval(g_Config.bVSync);
 
@@ -412,7 +412,7 @@ GPU_DX9::GPU_DX9(GraphicsContext *gfxCtx)
 	framebufferManagerDX9_->Init();
 	framebufferManagerDX9_->SetTextureCache(textureCacheDX9_);
 	framebufferManagerDX9_->SetShaderManager(shaderManagerDX9_);
-	framebufferManagerDX9_->SetTransformDrawEngine(&drawEngine_);
+	framebufferManagerDX9_->SetDrawEngine(&drawEngine_);
 	textureCacheDX9_->SetFramebufferManager(framebufferManagerDX9_);
 	textureCacheDX9_->SetDepalShaderCache(&depalShaderCache_);
 	textureCacheDX9_->SetShaderManager(shaderManagerDX9_);

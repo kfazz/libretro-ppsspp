@@ -40,8 +40,6 @@ struct FBO {
 	bool native_fbo;
 };
 
-static FBO *g_overriddenBackbuffer;
-
 static GLuint currentDrawHandle_ = 0;
 static GLuint currentReadHandle_ = 0;
 
@@ -323,7 +321,6 @@ static GLenum fbo_get_fb_target(bool read, GLuint **cached) {
 static void fbo_bind_fb_target(bool read, GLuint name) {
 	GLuint *cached;
 	GLenum target = fbo_get_fb_target(read, &cached);
-
 	if (*cached != name) {
 		if (gl_extensions.ARB_framebuffer_object || gl_extensions.IsGLES) {
 			glBindFramebuffer(target, name);
@@ -337,12 +334,6 @@ static void fbo_bind_fb_target(bool read, GLuint name) {
 }
 
 void fbo_unbind() {
-	if (g_overriddenBackbuffer) {
-		fbo_bind_as_render_target(g_overriddenBackbuffer);
-		return;
-	}
-
-	CheckGLExtensions();
 #ifndef USING_GLES2
 	if (gl_extensions.ARB_framebuffer_object || gl_extensions.IsGLES) {
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -359,10 +350,6 @@ void fbo_unbind() {
 
 	currentDrawHandle_ = 0;
 	currentReadHandle_ = 0;
-}
-
-void fbo_override_backbuffer(FBO *fbo) {
-	g_overriddenBackbuffer = fbo;
 }
 
 void fbo_bind_as_render_target(FBO *fbo) {
@@ -384,6 +371,52 @@ void fbo_bind_for_read(FBO *fbo) {
 
 void fbo_unbind_read() {
 	fbo_bind_fb_target(true, 0);
+}
+
+void fbo_copy_image(FBO *src, int srcLevel, int srcX, int srcY, int srcZ, FBO *dst, int dstLevel, int dstX, int dstY, int dstZ, int width, int height, int depth) {
+#if defined(USING_GLES2)
+#ifndef IOS
+	glCopyImageSubDataOES(
+		fbo_get_color_texture(src), GL_TEXTURE_2D, srcLevel, srcX, srcY, srcZ,
+		fbo_get_color_texture(dst), GL_TEXTURE_2D, dstLevel, dstX, dstY, dstZ,
+		width, height, depth);
+	return;
+#endif
+#else
+	if (gl_extensions.ARB_copy_image) {
+		glCopyImageSubData(
+			fbo_get_color_texture(src), GL_TEXTURE_2D, srcLevel, srcX, srcY, srcZ,
+			fbo_get_color_texture(dst), GL_TEXTURE_2D, dstLevel, dstX, dstY, dstZ,
+			width, height, depth);
+		return;
+	} else if (gl_extensions.NV_copy_image) {
+		// Older, pre GL 4.x NVIDIA cards.
+		glCopyImageSubDataNV(
+			fbo_get_color_texture(src), GL_TEXTURE_2D, srcLevel, srcX, srcY, srcZ,
+			fbo_get_color_texture(dst), GL_TEXTURE_2D, dstLevel, dstX, dstY, dstZ,
+			width, height, depth);
+		return;
+	}
+#endif
+}
+
+void fbo_blit(FBO *src, int srcX1, int srcY1, int srcX2, int srcY2, FBO *dst, int dstX1, int dstY1, int dstX2, int dstY2, int channels, FBBlitFilter linearFilter) {
+	GLuint bits = 0;
+	if (channels & FB_COLOR_BIT)
+		bits |= GL_COLOR_BUFFER_BIT;
+	if (channels & FB_DEPTH_BIT)
+		bits |= GL_DEPTH_BUFFER_BIT;
+	if (channels & FB_STENCIL_BIT)
+		bits |= GL_STENCIL_BUFFER_BIT;
+	fbo_bind_as_render_target(dst);
+	fbo_bind_for_read(src);
+	if (gl_extensions.GLES3 || gl_extensions.ARB_framebuffer_object) {
+		glBlitFramebuffer(srcX1, srcY1, srcX2, srcY2, dstX1, dstY1, dstX2, dstY2, bits, linearFilter == FB_BLIT_LINEAR ? GL_LINEAR : GL_NEAREST);
+#if defined(USING_GLES2) && defined(__ANDROID__)  // We only support this extension on Android, it's not even available on PC.
+	} else if (gl_extensions.NV_framebuffer_blit) {
+		glBlitFramebufferNV(srcX1, srcY1, srcX2, srcY2, dstX1, dstY1, dstX2, dstY2, bits, linearFilter == FB_BLIT_LINEAR ? GL_LINEAR : GL_NEAREST);
+#endif // defined(USING_GLES2) && defined(__ANDROID__)
+	}
 }
 
 void fbo_bind_color_as_texture(FBO *fbo, int color) {

@@ -17,6 +17,7 @@
 
 #include "base/logging.h"
 #include "profiler/profiler.h"
+#include "i18n/i18n.h"
 
 #include "Common/ChunkFile.h"
 #include "Common/GraphicsContext.h"
@@ -393,8 +394,8 @@ static const CommandTableEntry commandTable[] = {
 
 GPU_GLES::CommandInfo GPU_GLES::cmdInfo_[256];
 
-GPU_GLES::GPU_GLES(GraphicsContext *ctx)
-: gfxCtx_(ctx) {
+GPU_GLES::GPU_GLES(GraphicsContext *gfxCtx, Draw::DrawContext *draw)
+: GPUCommon(gfxCtx, draw) {
 	UpdateVsyncInterval(true);
 	CheckGPUFeatures();
 
@@ -414,11 +415,11 @@ GPU_GLES::GPU_GLES(GraphicsContext *ctx)
 	framebufferManagerGL_->Init();
 	framebufferManagerGL_->SetTextureCache(textureCacheGL_);
 	framebufferManagerGL_->SetShaderManager(shaderManagerGL_);
-	framebufferManagerGL_->SetTransformDrawEngine(&drawEngine_);
+	framebufferManagerGL_->SetDrawEngine(&drawEngine_);
 	textureCacheGL_->SetFramebufferManager(framebufferManagerGL_);
 	textureCacheGL_->SetDepalShaderCache(&depalShaderCache_);
 	textureCacheGL_->SetShaderManager(shaderManagerGL_);
-	textureCacheGL_->SetTransformDrawEngine(&drawEngine_);
+	textureCacheGL_->SetDrawEngine(&drawEngine_);
 	fragmentTestCache_.SetTextureCache(textureCacheGL_);
 
 	// Sanity check gstate
@@ -470,6 +471,17 @@ GPU_GLES::GPU_GLES(GraphicsContext *ctx)
 		File::CreateFullPath(GetSysDirectory(DIRECTORY_APP_CACHE));
 		shaderCachePath_ = GetSysDirectory(DIRECTORY_APP_CACHE) + "/" + g_paramSFO.GetValueString("DISC_ID") + ".glshadercache";
 		shaderManagerGL_->LoadAndPrecompile(shaderCachePath_);
+	}
+
+	if (g_Config.bHardwareTessellation) {
+		// Disable hardware tessellation if device is unsupported.
+		if (!gstate_c.SupportsAll(GPU_SUPPORTS_INSTANCE_RENDERING | GPU_SUPPORTS_VERTEX_TEXTURE_FETCH | GPU_SUPPORTS_TEXTURE_FLOAT)) {
+			// TODO: Check unsupported device name list.(Above gpu features are supported but it has issues with weak gpu, memory, shader compiler etc...)
+			g_Config.bHardwareTessellation = false;
+			ERROR_LOG(G3D, "Hardware Tessellation is unsupported, falling back to software tessellation");
+			I18NCategory *gr = GetI18NCategory("Graphics");
+			host->NotifyUserMessage(gr->T("Turn off Hardware Tessellation - unsupported"), 2.5f, 0xFF3030FF);
+		}
 	}
 }
 
@@ -579,6 +591,18 @@ void GPU_GLES::CheckGPUFeatures() {
 		features |= GPU_SUPPORTS_TEXTURE_LOD_CONTROL;
 
 	features |= GPU_SUPPORTS_ANISOTROPY;
+
+	if (gl_extensions.GLES3 || gl_extensions.EXT_gpu_shader4
+		|| (!gl_extensions.IsGLES && gl_extensions.VersionGEThan(3, 1)/*GLSL 1.4*/))
+		features |= GPU_SUPPORTS_INSTANCE_RENDERING;
+
+	int maxVertexTextureImageUnits;
+	glGetIntegerv(GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS, &maxVertexTextureImageUnits);
+	if (maxVertexTextureImageUnits >= 3) // At least 3 for hardware tessellation
+		features |= GPU_SUPPORTS_VERTEX_TEXTURE_FETCH;
+
+	if (gl_extensions.ARB_texture_float || gl_extensions.OES_texture_float || gl_extensions.OES_texture_half_float)
+		features |= GPU_SUPPORTS_TEXTURE_FLOAT;
 
 	// If we already have a 16-bit depth buffer, we don't need to round.
 	if (fbo_standard_z_depth() > 16) {

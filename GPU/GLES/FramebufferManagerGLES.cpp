@@ -440,6 +440,7 @@ void FramebufferManagerGLES::DrawFramebufferToOutput(const u8 *srcPixels, GEBuff
 }
 
 // x, y, w, h are relative coordinates against destW/destH, which is not very intuitive.
+// TODO: This could totally use fbo_blit.
 void FramebufferManagerGLES::DrawActiveTexture(GLuint texture, float x, float y, float w, float h, float destW, float destH, float u0, float v0, float u1, float v1, GLSLProgram *program, int uvRotation) {
 	float texCoords[8] = {
 		u0,v0,
@@ -509,8 +510,8 @@ void FramebufferManagerGLES::DrawActiveTexture(GLuint texture, float x, float y,
 	glEnableVertexAttribArray(program->a_position);
 	glEnableVertexAttribArray(program->a_texcoord0);
 	if (gstate_c.Supports(GPU_SUPPORTS_VAO)) {
-		transformDraw_->BindBuffer(pos, sizeof(pos), texCoords, sizeof(texCoords));
-		transformDraw_->BindElementBuffer(indices, sizeof(indices));
+		drawEngine_->BindBuffer(pos, sizeof(pos), texCoords, sizeof(texCoords));
+		drawEngine_->BindElementBuffer(indices, sizeof(indices));
 		glVertexAttribPointer(program->a_position, 3, GL_FLOAT, GL_FALSE, 12, 0);
 		glVertexAttribPointer(program->a_texcoord0, 2, GL_FLOAT, GL_FALSE, 8, (void *)sizeof(pos));
 		glDrawElements(GL_TRIANGLE_STRIP, 4, GL_UNSIGNED_BYTE, 0);
@@ -782,22 +783,10 @@ void FramebufferManagerGLES::BlitFramebufferDepth(VirtualFramebuffer *src, Virtu
 		int h = std::min(src->renderHeight, dst->renderHeight);
 
 		if (gstate_c.Supports(GPU_SUPPORTS_ARB_FRAMEBUFFER_BLIT | GPU_SUPPORTS_NV_FRAMEBUFFER_BLIT)) {
-			// Only use NV if ARB isn't supported.
-			bool useNV = !gstate_c.Supports(GPU_SUPPORTS_ARB_FRAMEBUFFER_BLIT);
-
 			// Let's only do this if not clearing depth.
-			fbo_bind_for_read(src->fbo);
 			glstate.scissorTest.force(false);
-
-			if (useNV) {
-#if defined(USING_GLES2) && defined(__ANDROID__)  // We only support this extension on Android, it's not even available on PC.
-				glBlitFramebufferNV(0, 0, w, h, 0, 0, w, h, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
-#endif // defined(USING_GLES2) && defined(__ANDROID__)
-			} else {
-				glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
-			}
-			// If we set dst->depthUpdated here, our optimization above would be pointless.
-
+			fbo_blit(src->fbo, 0, 0, w, h, dst->fbo, 0, 0, w, h, FB_DEPTH_BIT, FB_BLIT_NEAREST);
+			// WARNING: If we set dst->depthUpdated here, our optimization above would be pointless.
 			glstate.scissorTest.restore();
 		}
 	}
@@ -1296,48 +1285,17 @@ void FramebufferManagerGLES::BlitFramebuffer(VirtualFramebuffer *dst, int dstX, 
 		const bool xOverlap = src == dst && srcX2 > dstX1 && srcX1 < dstX2;
 		const bool yOverlap = src == dst && srcY2 > dstY1 && srcY1 < dstY2;
 		if (sameSize && sameDepth && srcInsideBounds && dstInsideBounds && !(xOverlap && yOverlap)) {
-#if defined(USING_GLES2)
-#ifndef IOS
-			glCopyImageSubDataOES(
-				fbo_get_color_texture(src->fbo), GL_TEXTURE_2D, 0, srcX1, srcY1, 0,
-				fbo_get_color_texture(dst->fbo), GL_TEXTURE_2D, 0, dstX1, dstY1, 0,
-				dstX2 - dstX1, dstY2 - dstY1, 1);
+			fbo_copy_image(src->fbo, 0, srcX1, srcY1, 0, dst->fbo, 0, dstX1, dstY1, 0, dstX2 - dstX1, dstY2 - dstY1, 1);
 			return;
-#endif
-#else
-			if (gl_extensions.ARB_copy_image) {
-				glCopyImageSubData(
-					fbo_get_color_texture(src->fbo), GL_TEXTURE_2D, 0, srcX1, srcY1, 0,
-					fbo_get_color_texture(dst->fbo), GL_TEXTURE_2D, 0, dstX1, dstY1, 0,
-					dstX2 - dstX1, dstY2 - dstY1, 1);
-				return;
-			} else if (gl_extensions.NV_copy_image) {
-				// Older, pre GL 4.x NVIDIA cards.
-				glCopyImageSubDataNV(
-					fbo_get_color_texture(src->fbo), GL_TEXTURE_2D, 0, srcX1, srcY1, 0,
-					fbo_get_color_texture(dst->fbo), GL_TEXTURE_2D, 0, dstX1, dstY1, 0,
-					dstX2 - dstX1, dstY2 - dstY1, 1);
-				return;
-			}
-#endif
 		}
 	}
 
-	fbo_bind_as_render_target(dst->fbo);
 	glstate.scissorTest.force(false);
-
 	if (useBlit) {
-		fbo_bind_for_read(src->fbo);
-		if (!useNV) {
-			glBlitFramebuffer(srcX1, srcY1, srcX2, srcY2, dstX1, dstY1, dstX2, dstY2, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-		} else {
-#if defined(USING_GLES2) && defined(__ANDROID__)  // We only support this extension on Android, it's not even available on PC.
-			glBlitFramebufferNV(srcX1, srcY1, srcX2, srcY2, dstX1, dstY1, dstX2, dstY2, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-#endif // defined(USING_GLES2) && defined(__ANDROID__)
-		}
-
+		fbo_blit(src->fbo, srcX1, srcY1, srcX2, srcY2, dst->fbo, dstX1, dstY1, dstX2, dstY2, FB_COLOR_BIT, FB_BLIT_NEAREST);
 		fbo_unbind_read();
 	} else {
+		fbo_bind_as_render_target(dst->fbo);
 		fbo_bind_color_as_texture(src->fbo, 0);
 
 		// Make sure our 2D drawing program is ready. Compiles only if not already compiled.
@@ -1963,7 +1921,7 @@ void FramebufferManagerGLES::FlushBeforeCopy() {
 	// all the irrelevant state checking it'll use to decide what to do. Should
 	// do something more focused here.
 	SetRenderFrameBuffer(gstate_c.IsDirty(DIRTY_FRAMEBUF), gstate_c.skipDrawReason);
-	transformDraw_->Flush();
+	drawEngine_->Flush();
 }
 
 void FramebufferManagerGLES::Resized() {

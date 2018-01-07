@@ -388,10 +388,10 @@ static const CommandTableEntry commandTable[] = {
 	{ GE_CMD_UNKNOWN_FF, 0 },
 };
 
-GPU_Vulkan::GPU_Vulkan(GraphicsContext *ctx)
-	: vulkan_((VulkanContext *)ctx->GetAPIContext()),
-		drawEngine_(vulkan_),
-		gfxCtx_(ctx) {
+GPU_Vulkan::GPU_Vulkan(GraphicsContext *gfxCtx, Draw::DrawContext *draw)
+	: GPUCommon(gfxCtx, draw),
+		vulkan_((VulkanContext *)gfxCtx->GetAPIContext()),
+		drawEngine_(vulkan_) {
 	UpdateVsyncInterval(true);
 	CheckGPUFeatures();
 
@@ -414,7 +414,7 @@ GPU_Vulkan::GPU_Vulkan(GraphicsContext *ctx)
 	textureCacheVulkan_->SetFramebufferManager(framebufferManagerVulkan_);
 	textureCacheVulkan_->SetDepalShaderCache(&depalShaderCache_);
 	textureCacheVulkan_->SetShaderManager(shaderManagerVulkan_);
-	textureCacheVulkan_->SetTransformDrawEngine(&drawEngine_);
+	textureCacheVulkan_->SetDrawEngine(&drawEngine_);
 
 	// Sanity check gstate
 	if ((int *)&gstate.transferstart - (int *)&gstate != 0xEA) {

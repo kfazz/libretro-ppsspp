@@ -456,6 +456,9 @@ enum {
 	GPU_SUPPORTS_WIDE_LINES = FLAG_BIT(7),
 	GPU_SUPPORTS_ANISOTROPY = FLAG_BIT(8),
 	GPU_USE_CLEAR_RAM_HACK = FLAG_BIT(9),
+	GPU_SUPPORTS_INSTANCE_RENDERING = FLAG_BIT(10),
+	GPU_SUPPORTS_VERTEX_TEXTURE_FETCH = FLAG_BIT(11),
+	GPU_SUPPORTS_TEXTURE_FLOAT = FLAG_BIT(12),
 	GPU_SUPPORTS_LARGE_VIEWPORTS = FLAG_BIT(16),
 	GPU_SUPPORTS_ACCURATE_DEPTH = FLAG_BIT(17),
 	GPU_SUPPORTS_VAO = FLAG_BIT(18),
@@ -482,7 +485,8 @@ struct KnownVertexBounds {
 };
 
 struct GPUStateCache {
-	bool Supports(int flag) { return (featureFlags & flag) != 0; }
+	bool Supports(u32 flags) { return (featureFlags & flags) != 0; } // Return true if ANY of flags are true.
+	bool SupportsAll(u32 flags) { return (featureFlags & flags) == flags; } // Return true if ALL flags are true.
 	uint64_t GetDirtyUniforms() { return dirty & DIRTY_ALL_UNIFORMS; }
 	void Dirty(u64 what) {
 		dirty |= what;
