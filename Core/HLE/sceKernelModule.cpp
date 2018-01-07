@@ -301,8 +301,17 @@ public:
 				}
 			} else {
 				// Older save state.  Let's still reload, but this may not pick up new flags, etc.
+				bool foundBroken = false;
 				for (auto func : importedFuncs) {
-					ImportFunc(func, true);
+					if (func.moduleName[KERNELOBJECT_MAX_NAME_LENGTH] != '\0' || !Memory::IsValidAddress(func.stubAddr)) {
+						foundBroken = true;
+					} else {
+						ImportFunc(func, true);
+					}
+				}
+
+				if (foundBroken) {
+					ERROR_LOG(LOADER, "Broken stub import data while loading state");
 				}
 			}
 
@@ -1668,6 +1677,7 @@ int sceKernelLoadExec(const char *filename, u32 paramPtr)
 	}
 	return 0;
 }
+
 
 static u32 sceKernelLoadModule(const char *name, u32 flags, u32 optionAddr) {
 	if (!name) {
