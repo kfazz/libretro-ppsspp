@@ -147,7 +147,7 @@ void NativeRenderInt() {
 
    bool useBufferedRendering = g_Config.iRenderingMode != 0;
    if (useBufferedRendering)
-      fbo_unbind();
+	fbo_bind_backbuffer_as_render_target();
 }
 
 void NativeResized() { }
