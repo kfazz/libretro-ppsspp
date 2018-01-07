@@ -382,6 +382,10 @@ static void initialize_gl(void)
 #if 0
    glstate.Initialize();
 #endif
+	if (gpu)
+		gpu->InitClear();
+	
+
    CheckGLExtensions();
    gl_initialized = true;
 }
@@ -397,13 +401,16 @@ static void context_reset(void)
          gpu->DeviceLost();
 
       //RecreateViews(); /* TODO ? */
-
-      //gl_lost();
+	if (gpu)
+		gpu->DeviceLost();
 
       initialize_gl();
 #if 0
       glstate.Restore();
 #endif
+	if (gpu)
+		gpu->DeviceRestore();
+
    }
    
    first_ctx_reset = false;
