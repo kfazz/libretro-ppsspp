@@ -265,6 +265,24 @@ FBO *fbo_create(int width, int height, int num_color_textures, bool z_stencil, F
 	return fbo;
 }
 
+FBO *fbo_create_from_native_fbo(GLuint native_fbo, FBO *fbo)
+{
+	if (!fbo)
+		fbo = new FBO();
+
+	fbo->native_fbo = true;
+	fbo->handle = native_fbo;
+	fbo->color_texture = 0;
+	fbo->z_stencil_buffer = 0;
+	fbo->z_buffer = 0;
+	fbo->stencil_buffer = 0;
+	fbo->width = 0;
+	fbo->height = 0;
+	fbo->colorDepth = FBO_8888;
+
+	return fbo;
+}
+
 static GLenum fbo_get_fb_target(bool read, GLuint **cached) {
 	bool supportsBlit = gl_extensions.ARB_framebuffer_object;
 	if (gl_extensions.IsGLES) {
