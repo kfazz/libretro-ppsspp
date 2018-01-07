@@ -55,6 +55,10 @@ FBO *fbo_create(int width, int height, int num_color_textures, bool z_stencil, F
 
 void fbo_copy_image(FBO *src, int level, int x, int y, int z, FBO *dst, int dstLevel, int dstX, int dstY, int dstZ, int width, int height, int depth);
 
+// Create an opaque FBO from a native GL FBO, optionally reusing an existing FBO structure.
+// Useful for overriding the backbuffer FBO that is generated outside of this wrapper.
+FBO *fbo_create_from_native_fbo(GLuint native_fbo, FBO *fbo = NULL);
+
 void fbo_blit(FBO *src, int srcX1, int srcY1, int srcX2, int srcY2, FBO *dst, int dstX1, int dstY1, int dstX2, int dstY2, int channelBits, FBBlitFilter filter);
 
 int fbo_standard_z_depth();
@@ -74,3 +78,5 @@ void fbo_get_dimensions(FBO *fbo, int *w, int *h);
 int fbo_get_color_texture(FBO *fbo);
 int fbo_get_depth_buffer(FBO *fbo);
 int fbo_get_stencil_buffer(FBO *fbo);
+
+void fbo_override_backbuffer(FBO *fbo);  // Makes unbind bind this instead of the real backbuffer.

@@ -40,6 +40,8 @@ struct FBO {
 	bool native_fbo;
 };
 
+static FBO *g_overriddenBackbuffer;
+
 static GLuint currentDrawHandle_ = 0;
 static GLuint currentReadHandle_ = 0;
 
@@ -334,6 +336,12 @@ static void fbo_bind_fb_target(bool read, GLuint name) {
 }
 
 void fbo_unbind() {
+	if (g_overriddenBackbuffer) {
+		fbo_bind_as_render_target(g_overriddenBackbuffer);
+		return;
+	}
+
+	CheckGLExtensions();
 #ifndef USING_GLES2
 	if (gl_extensions.ARB_framebuffer_object || gl_extensions.IsGLES) {
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -350,6 +358,10 @@ void fbo_unbind() {
 
 	currentDrawHandle_ = 0;
 	currentReadHandle_ = 0;
+}
+
+void fbo_override_backbuffer(FBO *fbo) {
+	g_overriddenBackbuffer = fbo;
 }
 
 void fbo_bind_as_render_target(FBO *fbo) {

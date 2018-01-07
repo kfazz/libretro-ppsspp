@@ -121,8 +121,8 @@ void NativeUpdate(InputState &input_state) { }
 void NativeRenderInt(void);
 void NativeRender(GraphicsContext *graphicsContext) { NativeRenderInt(); }
 void NativeRenderInt() {
-  //fbo_override_backbuffer(libretro_framebuffer);
-   fbo_bind_as_render_target(libretro_framebuffer);
+  fbo_override_backbuffer(libretro_framebuffer);
+  //fbo_bind_as_render_target(libretro_framebuffer);
 
 #if 0
    glstate.depthWrite.set(GL_TRUE);
@@ -1189,7 +1189,10 @@ void retro_run(void)
 
       host->BootDone();
       _initialized = true;
-      //libretro_framebuffer = fbo_create_from_native_fbo((GLuint) hw_render.get_current_framebuffer(), libretro_framebuffer);
+
+      libretro_framebuffer = fbo_create_from_native_fbo((GLuint) hw_render.get_current_framebuffer(), libretro_framebuffer);
+#if 0
+//why doesn't this work?
        if (!libretro_framebuffer)
                libretro_framebuffer = new FBO();
 
@@ -1202,8 +1205,10 @@ void retro_run(void)
        libretro_framebuffer->width = 0;
        libretro_framebuffer->height = 0;
        libretro_framebuffer->colorDepth = FBO_8888;
+#endif
 
    }
+
 
 #if 0
    if (log_cb)
