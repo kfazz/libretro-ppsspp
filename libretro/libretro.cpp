@@ -12,6 +12,8 @@
 #include "Core/Host.h"
 #include "Core/SaveState.h"
 #include "Core/System.h"
+#include "Log.h"
+#include "LogManager.h"
 #include "gfx/gl_common.h"
 #include "file/vfs.h"
 #include "file/zip_read.h"
@@ -45,9 +47,44 @@
 const char *PPSSPP_GIT_VERSION = "v1.0.1-git";
 #endif
 
+retro_log_printf_t log_cb;
+
+class PrintfLogger : public LogListener {
+public:
+	void Log(LogTypes::LOG_LEVELS level, const char *msg) {
+		switch (level) {
+		case LogTypes::LVERBOSE:
+			if (log_cb)
+				log_cb(RETRO_LOG_INFO, "V %s.\n", msg);
+			break;
+		case LogTypes::LDEBUG:
+			if (log_cb)
+				log_cb(RETRO_LOG_DEBUG, "D %s.\n", msg);
+			break;
+		case LogTypes::LINFO:
+			if (log_cb)
+				log_cb(RETRO_LOG_INFO, "I %s.\n", msg);
+			break;
+		case LogTypes::LERROR:
+			if (log_cb)
+				log_cb(RETRO_LOG_ERROR, "E %s.\n", msg);
+			break;
+		case LogTypes::LWARNING:
+			if (log_cb)
+				log_cb(RETRO_LOG_WARN, "W %s.\n", msg);
+			break;
+		case LogTypes::LNOTICE:
+		default:
+			if (log_cb)
+				log_cb(RETRO_LOG_INFO, "N %s.\n", msg);
+			break;
+		}
+	}
+};
+
+
 static CoreParameter coreParam;
 static struct retro_hw_render_callback hw_render;
-retro_log_printf_t log_cb;
 static retro_video_refresh_t video_cb;
 static retro_audio_sample_batch_t audio_batch_cb;
 static retro_input_poll_t input_poll_cb;
@@ -801,7 +838,7 @@ static void check_variables(void)
    }
    else
       g_Config.iForceMaxEmulatedFPS = 0;
-
+#if 0
    var.key = "ppsspp_prescale_uv";
    var.value = NULL;
 
@@ -814,6 +851,7 @@ static void check_variables(void)
    }
    else
       g_Config.bPrescaleUV = 0;
+#endif
 
    var.key = "ppsspp_threaded_input";
    var.value = NULL;
@@ -931,7 +969,7 @@ bool retro_load_game(const struct retro_game_info *game)
    coreParam.fileToStart = std::string(game->path);
    coreParam.mountIso = "";
    coreParam.startPaused = false;
-   coreParam.printfEmuLog = false;
+   coreParam.printfEmuLog = true;
    coreParam.headLess = true;
    coreParam.unthrottle = true;
 
