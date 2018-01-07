@@ -93,16 +93,16 @@ static retro_environment_t environ_cb;
 static bool _initialized;
 
 struct FBO {
-	GLuint handle;
-	GLuint color_texture;
-	GLuint z_stencil_buffer;
-	GLuint z_buffer;
-	GLuint stencil_buffer;
+       GLuint handle;
+       GLuint color_texture;
+       GLuint z_stencil_buffer;
+       GLuint z_buffer;
+       GLuint stencil_buffer;
 
-	int width;
-	int height;
-	FBOColorDepth colorDepth;
-	bool native_fbo;
+       int width;
+       int height;
+       FBOColorDepth colorDepth;
+       bool native_fbo;
 };
 
 static FBO *libretro_framebuffer;
@@ -121,11 +121,14 @@ void NativeUpdate(InputState &input_state) { }
 void NativeRenderInt(void);
 void NativeRender(GraphicsContext *graphicsContext) { NativeRenderInt(); }
 void NativeRenderInt() {
-   //fbo_override_backbuffer(libretro_framebuffer);
+  //fbo_override_backbuffer(libretro_framebuffer);
    fbo_bind_as_render_target(libretro_framebuffer);
+
+#if 0
    glstate.depthWrite.set(GL_TRUE);
    glstate.colorMask.set(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
    glstate.Restore();
+#endif
 
    gpu->ReapplyGfxState();
 
@@ -146,6 +149,7 @@ void NativeRenderInt() {
    if (useBufferedRendering)
       fbo_unbind();
 }
+
 void NativeResized() { }
 void NativeMessageReceived(const char *message, const char *value) { }
 InputState input_state;
@@ -1185,19 +1189,19 @@ void retro_run(void)
 
       host->BootDone();
       _initialized = true;
+      //libretro_framebuffer = fbo_create_from_native_fbo((GLuint) hw_render.get_current_framebuffer(), libretro_framebuffer);
+       if (!libretro_framebuffer)
+               libretro_framebuffer = new FBO();
 
-	if (!libretro_framebuffer)
-		libretro_framebuffer = new FBO();
-
-	libretro_framebuffer->native_fbo = true;
-	libretro_framebuffer->handle = hw_render.get_current_framebuffer();
-	libretro_framebuffer->color_texture = 0;
-	libretro_framebuffer->z_stencil_buffer = 0;
-	libretro_framebuffer->z_buffer = 0;
-	libretro_framebuffer->stencil_buffer = 0;
-	libretro_framebuffer->width = 0;
-	libretro_framebuffer->height = 0;
-	libretro_framebuffer->colorDepth = FBO_8888;
+       libretro_framebuffer->native_fbo = true;
+       libretro_framebuffer->handle = hw_render.get_current_framebuffer();
+       libretro_framebuffer->color_texture = 0;
+       libretro_framebuffer->z_stencil_buffer = 0;
+       libretro_framebuffer->z_buffer = 0;
+       libretro_framebuffer->stencil_buffer = 0;
+       libretro_framebuffer->width = 0;
+       libretro_framebuffer->height = 0;
+       libretro_framebuffer->colorDepth = FBO_8888;
 
    }
 
