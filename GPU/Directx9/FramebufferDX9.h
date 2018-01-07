@@ -42,7 +42,7 @@ class ShaderManagerDX9;
 
 class FramebufferManagerDX9 : public FramebufferManagerCommon {
 public:
-	FramebufferManagerDX9();
+	FramebufferManagerDX9(Draw::DrawContext *draw);
 	~FramebufferManagerDX9();
 
 	void SetTextureCache(TextureCacheDX9 *tc) {
@@ -123,6 +123,9 @@ private:
 	LPDIRECT3DTEXTURE9 drawPixelsTex_;
 	int drawPixelsTexW_;
 	int drawPixelsTexH_;
+
+	LPDIRECT3DVERTEXSHADER9 pFramebufferVertexShader;
+	LPDIRECT3DPIXELSHADER9 pFramebufferPixelShader;
 
 	u8 *convBuf;
 
