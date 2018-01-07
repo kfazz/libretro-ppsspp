@@ -1,23 +1,5 @@
 #!/bin/bash
 CMAKE=1
-MAKE_JOBS=4
-# Check Blackberry NDK
-BB_OS=`cat ${QNX_TARGET}/etc/qversion 2>/dev/null`
-if [ ! -z "$BB_OS" ]; then
-	CMAKE_ARGS="-DCMAKE_TOOLCHAIN_FILE=Blackberry/bb.toolchain.cmake -DBLACKBERRY=${BB_OS} ${CMAKE_ARGS}"
-	DEBUG_ARGS="-devMode -debugToken ${QNX_CONFIGURATION}/../debugtoken.bar"
-	PACKAGE=1
-	TARGET_OS=Blackberry
-fi
-
-# Check Symbian NDK
-if [ ! -z "$EPOCROOT" ]; then
-	QMAKE_ARGS="-spec symbian-sbsv2 ${QMAKE_ARGS}"
-	CMAKE=0
-	PACKAGE=1
-	MAKE_OPT="release-gcce ${MAKE_OPT}"
-	TARGET_OS=Symbian
-fi
 
 # Check arguments
 while test $# -gt 0
@@ -58,12 +40,6 @@ do
 		--no-package) echo "Packaging disabled"
 			PACKAGE=0
 			;;
-		--release-package) echo "Blackberry release package enabled"
-			if [ ! -f "Blackberry/build.txt" ]; then
-				echo "1" > "Blackberry/build.txt"
-			fi
-			DEBUG_ARGS="-buildId ../Blackberry/build.txt"
-			;;
 		--*) echo "Bad option: $1"
 			exit 1
 			;;
@@ -76,12 +52,6 @@ done
 if [ ! -z "$TARGET_OS" ]; then
 	echo "Building for $TARGET_OS"
 	BUILD_DIR="$(tr [A-Z] [a-z] <<< build-"$TARGET_OS")"
-	# HACK (doesn't like shadowed dir)
-	if [ "$TARGET_OS" == "Symbian" ]; then
-		BUILD_DIR="Qt"
-		# Temporarily limiting memory usage for automated builds.
-		MAKE_JOBS=2
-	fi
 else
 	echo "Building for native host."
 	if [ "$CMAKE" == "0" ]; then
@@ -103,15 +73,10 @@ else
 	qmake $QMAKE_ARGS ../Qt/PPSSPPQt.pro
 fi
 
-make -j$MAKE_JOBS $MAKE_OPT
+make -j4 $MAKE_OPT
 
 if [ "$PACKAGE" == "1" ]; then
-	if [ "$TARGET_OS" == "Blackberry" ]; then
-		cp ../Blackberry/bar-descriptor.xml .
-		blackberry-nativepackager -package PPSSPP.bar bar-descriptor.xml $DEBUG_ARGS
-	elif [ "$TARGET_OS" == "Symbian" ]; then
-		make sis
-	elif [ "$TARGET_OS" == "iOS" ]; then
+	if [ "$TARGET_OS" == "iOS" ]; then
 		xcodebuild -configuration Release
 	fi
 fi

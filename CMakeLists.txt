@@ -37,8 +37,8 @@ endif()
 # Without this, our CI can't use ccache for clang, for some reason.
 find_program(CCACHE_FOUND ccache)
 if(CCACHE_FOUND)
-	set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ccache)
-	set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ccache)
+	set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ${CCACHE_FOUND})
+	set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ${CCACHE_FOUND})
 
 	# ccache uses -I when compiling without preprocessor, which makes clang complain.
 	if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
@@ -101,7 +101,6 @@ option(MIPS "Set to ON if targeting a MIPS processor" ${MIPS})
 option(X86 "Set to ON if targeting an X86 processor" ${X86})
 # :: Platforms
 option(ANDROID "Set to ON if targeting an Android device" ${ANDROID})
-option(BLACKBERRY "Set to ON if targeting a Blackberry device" ${BLACKBERRY})
 option(IOS "Set to ON if targeting an iOS device" ${IOS})
 option(MAEMO "Set to ON if targeting a Maemo (N900) device" ${MAEMO})
 option(BB "Set to ON if targeting a Beaglebone/Beaglebone Black device" ${BB})
@@ -112,7 +111,7 @@ option(USING_GLES2 "Set to ON if target device uses OpenGL ES 2.0" ${USING_GLES2
 option(RASPBIAN "Set to ON to workaround threading issues when building for ARMV7 on Raspbian" ${RASPBIAN})
 # :: Frontends
 option(USING_QT_UI "Set to ON if you wish to use the Qt frontend wrapper" ${USING_QT_UI})
-option(MOBILE_DEVICE "Set to ON when targetting a mobile device" ${MOBILE_DEVICE})
+option(MOBILE_DEVICE "Set to ON when targeting a mobile device" ${MOBILE_DEVICE})
 option(HEADLESS "Set to OFF to not generate the PPSSPPHeadless target" ${HEADLESS})
 option(UNITTEST "Set to ON to generate the unittest target" ${UNITTEST})
 option(SIMULATOR "Set to ON when targeting an x86 simulator of an ARM platform" ${SIMULATOR})
@@ -120,15 +119,9 @@ option(SIMULATOR "Set to ON when targeting an x86 simulator of an ARM platform" 
 option(USE_FFMPEG "Build with FFMPEG support" ${USE_FFMPEG})
 option(USE_SYSTEM_FFMPEG "Dynamically link against system FFMPEG" ${USE_SYSTEM_FFMPEG})
 
-if(ANDROID OR BLACKBERRY OR IOS)
+if(IOS)
 	if (NOT CMAKE_TOOLCHAIN_FILE)
-		if (ANDROID)
-			set(CMAKE_TOOLCHAIN_FILE ${CMAKE_SOURCE_DIR}/android/android.toolchain.cmake)
-		elseif(BLACKBERRY)
-			set(CMAKE_TOOLCHAIN_FILE ${CMAKE_SOURCE_DIR}/Blackberry/bb.toolchain.cmake)
-		elseif(IOS)
-			set(CMAKE_TOOLCHAIN_FILE ${CMAKE_SOURCE_DIR}/ios/ios.toolchain.cmake)
-		endif()
+		set(CMAKE_TOOLCHAIN_FILE ${CMAKE_SOURCE_DIR}/ios/ios.toolchain.cmake)
 		message(FATAL_ERROR "CMAKE_TOOLCHAIN_FILE was not set!\n"
 			"Delete the CMakeCache.txt file and CMakeFiles directory.\n"
 			"Re-run ${CMAKE_COMMAND} with:\n"
@@ -141,6 +134,8 @@ endif()
 if(ANDROID)
 	set(CoreLibName ppsspp_jni)
 	set(CoreLinkType SHARED)
+	set(MOBILE_DEVICE ON)
+	set(USING_GLES2 ON)
 else()
 	set(CoreLibName Core)
 	set(CoreLinkType STATIC)
@@ -163,7 +158,7 @@ if(MAEMO)
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fpermissive")
 endif()
 
-if (NOT BLACKBERRY AND NOT ANDROID AND NOT IOS)
+if (NOT ANDROID AND NOT IOS)
 	include(FindSDL2)
 endif()
 include(FindThreads)
@@ -182,12 +177,6 @@ if(MIPS)
 	add_definitions(-DMIPS)
 endif()
 
-if(ANDROID)
-	add_definitions(-DANDROID)
-endif()
-if(BLACKBERRY)
-	add_definitions(-DBLACKBERRY=${BLACKBERRY})
-endif()
 if(IOS)
 	add_definitions(-DIOS)
 endif()
@@ -255,11 +244,6 @@ if(NOT MSVC)
 		add_definitions(-msse2)
 	endif()
 
-	if (BLACKBERRY AND ARM)
-		set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -march=armv7-a -mfpu=neon -mcpu=cortex-a9")
-		set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=armv7-a -mfpu=neon -mcpu=cortex-a9")
-	endif()
-
 	if(IOS)
 		add_definitions(-DGL_ETC1_RGB8_OES=0)
 		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++ -U__STRICT_ANSI__")
@@ -276,11 +260,7 @@ if(NOT MSVC)
 		if (NOT CMAKE_C_COMPILER_ID STREQUAL "Intel" AND NOT CMAKE_C_COMPILER_ID STREQUAL "Clang")
 			add_definitions(-Wno-psabi)
 		endif()
-		if (BLACKBERRY)
-			add_definitions(-D_XOPEN_SOURCE=600)
-		else()
-			add_definitions(-D_XOPEN_SOURCE=700)
-		endif()
+		add_definitions(-D_XOPEN_SOURCE=700)
 		add_definitions(-D_XOPEN_SOURCE_EXTENDED -D__BSD_VISIBLE=1)
 		add_definitions(-D_LARGEFILE64_SOURCE=1 -D_FILE_OFFSET_BITS=64)
 	endif()
@@ -317,59 +297,59 @@ endmacro()
 # Commented-out files are files that don't compile
 # and were disabled in the original MSVC project anyway
 
-set(CommonExtra)
-if(ARM)
-	set(CommonExtra ${CommonExtra}
-		Common/ArmCPUDetect.cpp)
-if(ARMV7)
-	set(CommonExtra ${CommonExtra}
-		Common/ColorConvNEON.cpp)
-endif()
-elseif(X86)
-	set(CommonExtra ${CommonExtra}
-		Common/ABI.cpp
-		Common/ABI.h
-		Common/CPUDetect.cpp
-		Common/CPUDetect.h
-		Common/Thunk.cpp
-		Common/Thunk.h
-		Common/x64Analyzer.cpp
-		Common/x64Analyzer.h
-		Common/x64Emitter.cpp
-		Common/x64Emitter.h)
-elseif(MIPS)
-	set(CommonExtra ${CommonExtra}
-		Common/MipsCPUDetect.cpp
-		Common/MipsEmitter.cpp
-		Common/MipsEmitter.h)
-else()
-	set(CommonExtra ${CommonExtra}
+set(CommonX86
+	Common/ABI.cpp
+	Common/ABI.h
+	Common/CPUDetect.cpp
+	Common/CPUDetect.h
+	Common/Thunk.cpp
+	Common/Thunk.h
+	Common/x64Analyzer.cpp
+	Common/x64Analyzer.h
+	Common/x64Emitter.cpp
+	Common/x64Emitter.h)
+source_group(x86 FILES ${CommonX86})
+
+set(CommonARM
+	Common/ArmCPUDetect.cpp
+	Common/ArmEmitter.h
+	Common/ArmEmitter.cpp
+	Common/ColorConvNEON.cpp)
+source_group(ARM FILES ${CommonARM})
+
+set(CommonARM64
+	Common/Arm64Emitter.h
+	Common/Arm64Emitter.cpp
+	Common/ArmEmitter.h
+	Common/ArmEmitter.cpp
+	Core/Util/DisArm64.cpp)
+source_group(ARM64 FILES ${CommonARM64})
+
+set(CommonMIPS
+	Common/MipsCPUDetect.cpp
+	Common/MipsEmitter.cpp
+	Common/MipsEmitter.h)
+source_group(MIPS FILES ${CommonMIPS})
+
+if(NOT (X86 OR ARM OR MIPS))
+	set(CommonFake
 		Common/FakeCPUDetect.cpp
 		Common/FakeEmitter.h)
+    source_group(Fake FILES ${CommonFake})
 endif()
 
-if(UNITTEST)
-set(CommonExtra ${CommonExtra}
-		Common/Arm64Emitter.h
-		Common/Arm64Emitter.cpp
-		Common/ArmEmitter.h
-		Common/ArmEmitter.cpp
-		Core/Util/DisArm64.cpp)
-else()
-#Blackberry appears to depend on this being here, should clean it up.
-set(CommonExtra ${CommonExtra}
-		Common/ArmEmitter.h
-		Common/ArmEmitter.cpp)
-endif()
-
-if(WIN32)
-	set(CommonExtra ${CommonExtra}
-		Common/stdafx.cpp
-		Common/stdafx.h)
-endif()
+set(CommonWindows
+	Common/stdafx.cpp
+	Common/stdafx.h)
+source_group(Windows FILES ${CommonWindows})
 
 add_library(Common STATIC
-	${CommonExtra}
+	${CommonX86}
+	${CommonARM}
+	${CommonARM64}
+	${CommonMIPS}
+	${CommonFake}
+	${CommonWindows}
 	Common/ColorConv.cpp
 	Common/ColorConv.h
 	Common/ChunkFile.cpp
@@ -464,8 +444,6 @@ if(USE_FFMPEG)
 				elseif(X86)
 					set(PLATFORM_ARCH "android/x86")
 				endif()
-			elseif(BLACKBERRY)
-				set(PLATFORM_ARCH "blackberry/armv7")
 			elseif(IOS)
 				set(PLATFORM_ARCH "ios/universal")
 			elseif(MACOSX)
@@ -846,11 +824,6 @@ elseif(USING_QT_UI)
 	if(APPLE)
 		set(nativeExtraLibs ${nativeExtraLibs} "-framework CoreFoundation")
 	endif()
-elseif(BLACKBERRY)
-	unset(CMAKE_DL_LIBS)
-	set(nativeExtra ${nativeExtra} ext/native/base/BlackberryMain.cpp ext/native/base/BlackberryDisplay.cpp)
-	set(nativeExtraLibs ${nativeExtraLibs} OpenAL bps screen socket EGL)
-	set(TargetBin PPSSPPBlackberry)
 elseif(SDL2_FOUND)
 	set(TargetBin PPSSPPSDL)
 	# Require SDL
@@ -1279,6 +1252,8 @@ add_library(${CoreLibName} ${CoreLinkType}
 	Core/HLE/HLETables.cpp
 	Core/HLE/HLETables.h
 	Core/HLE/KernelWaitHelpers.h
+	Core/HLE/KUBridge.h
+	Core/HLE/KUBridge.cpp
 	Core/HLE/ThreadQueueList.h
 	Core/HLE/__sceAudio.cpp
 	Core/HLE/__sceAudio.h
