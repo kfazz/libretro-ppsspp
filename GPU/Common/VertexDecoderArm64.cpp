@@ -15,6 +15,9 @@
 // Official git repository and contact information can be found at
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
+#include "ppsspp_config.h"
+#if PPSSPP_ARCH(ARM64)
+
 // This allows highlighting to work.  Yay.
 #ifdef __INTELLISENSE__
 #define ARM64
@@ -89,8 +92,6 @@ static const JitLookup jitLookup[] = {
 	{&VertexDecoder::Step_WeightsU16Skin, &VertexDecoderJitCache::Jit_WeightsU16Skin},
 	{&VertexDecoder::Step_WeightsFloatSkin, &VertexDecoderJitCache::Jit_WeightsFloatSkin},
 
-	{&VertexDecoder::Step_TcU8, &VertexDecoderJitCache::Jit_TcU8},
-	{&VertexDecoder::Step_TcU16, &VertexDecoderJitCache::Jit_TcU16},
 	{&VertexDecoder::Step_TcFloat, &VertexDecoderJitCache::Jit_TcFloat},
 	{&VertexDecoder::Step_TcU16Double, &VertexDecoderJitCache::Jit_TcU16Double},
 	{&VertexDecoder::Step_TcU8Prescale, &VertexDecoderJitCache::Jit_TcU8Prescale},
@@ -575,16 +576,6 @@ void VertexDecoderJitCache::Jit_Color5551() {
 	CSEL(fullAlphaReg, fullAlphaReg, WZR, CC_EQ);
 }
 
-void VertexDecoderJitCache::Jit_TcU8() {
-	LDURH(tempReg1, srcReg, dec_->tcoff);
-	STR(INDEX_UNSIGNED, tempReg1, dstReg, dec_->decFmt.uvoff);
-}
-
-void VertexDecoderJitCache::Jit_TcU16() {
-	LDUR(tempReg1, srcReg, dec_->tcoff);
-	STR(INDEX_UNSIGNED, tempReg1, dstReg, dec_->decFmt.uvoff);
-}
-
 void VertexDecoderJitCache::Jit_TcU16Through() {
 	LDRH(INDEX_UNSIGNED, tempReg1, srcReg, dec_->tcoff);
 	LDRH(INDEX_UNSIGNED, tempReg2, srcReg, dec_->tcoff + 2);
@@ -783,3 +774,5 @@ void VertexDecoderJitCache::Jit_WriteMatrixMul(int outOff, bool pos) {
 	}
 	fp.STUR(128, accNEON, dstReg, outOff);
 }
+
+#endif // PPSSPP_ARCH(ARM64)

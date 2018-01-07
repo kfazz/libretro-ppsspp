@@ -71,16 +71,12 @@ DrawEngineVulkan::DrawEngineVulkan(VulkanContext *vulkan)
 	framebufferManager_(nullptr),
 	numDrawCalls(0),
 	vertexCountInDrawCalls(0),
-	uvScale(nullptr),
 	fboTexNeedBind_(false),
 	fboTexBound_(false),
 	curFrame_(0),
-	nullTexture_(nullptr) {
+	nullTexture_(nullptr),
+	stats_{}  {
 
-	memset(&stats_, 0, sizeof(stats_));
-
-	memset(&decOptions_, 0, sizeof(decOptions_));
-	decOptions_.expandAllUVtoFloat = false;  // this may be a good idea though.
 	decOptions_.expandAllWeightsToFloat = false;
 	decOptions_.expand8BitNormalsToFloat = false;
 
@@ -95,10 +91,10 @@ DrawEngineVulkan::DrawEngineVulkan(VulkanContext *vulkan)
 
 	indexGen.Setup(decIndex);
 
-	if (g_Config.bPrescaleUV) {
-		uvScale = new UVScale[MAX_DEFERRED_DRAW_CALLS];
-	}
+	InitDeviceObjects();
+}
 
+void DrawEngineVulkan::InitDeviceObjects() {
 	// All resources we need for PSP drawing. Usually only bindings 0 and 2-4 are populated.
 	VkDescriptorSetLayoutBinding bindings[5];
 	bindings[0].descriptorCount = 1;
@@ -197,24 +193,61 @@ DrawEngineVulkan::~DrawEngineVulkan() {
 	FreeMemoryPages(transformed, TRANSFORMED_VERTEX_BUFFER_SIZE);
 	FreeMemoryPages(transformedExpanded, 3 * TRANSFORMED_VERTEX_BUFFER_SIZE);
 
-	for (int i = 0; i < 2; i++) {
-		vulkan_->Delete().QueueDeleteDescriptorPool(frame_[i].descPool);
-		frame_[i].pushUBO->Destroy(vulkan_);
-		frame_[i].pushVertex->Destroy(vulkan_);
-		frame_[i].pushIndex->Destroy(vulkan_);
-		delete frame_[i].pushUBO;
-		delete frame_[i].pushVertex;
-		delete frame_[i].pushIndex;
+	DestroyDeviceObjects();
+}
+
+void DrawEngineVulkan::FrameData::Destroy(VulkanContext *vulkan) {
+	if (descPool != VK_NULL_HANDLE) {
+		vulkan->Delete().QueueDeleteDescriptorPool(descPool);
 	}
-	vulkan_->Delete().QueueDeleteSampler(depalSampler_);
-	vulkan_->Delete().QueueDeleteSampler(nullSampler_);
+
+	if (pushUBO) {
+		pushUBO->Destroy(vulkan);
+		delete pushUBO;
+		pushUBO = nullptr;
+	}
+	if (pushVertex) {
+		pushVertex->Destroy(vulkan);
+		delete pushVertex;
+		pushVertex = nullptr;
+	}
+	if (pushIndex) {
+		pushIndex->Destroy(vulkan);
+		delete pushIndex;
+		pushIndex = nullptr;
+	}
+}
+
+void DrawEngineVulkan::DestroyDeviceObjects() {
+	for (int i = 0; i < 2; i++) {
+		frame_[i].Destroy(vulkan_);
+	}
+	if (depalSampler_ != VK_NULL_HANDLE)
+		vulkan_->Delete().QueueDeleteSampler(depalSampler_);
+	if (nullSampler_ != VK_NULL_HANDLE)
+		vulkan_->Delete().QueueDeleteSampler(nullSampler_);
+	if (pipelineLayout_ != VK_NULL_HANDLE)
+		vkDestroyPipelineLayout(vulkan_->GetDevice(), pipelineLayout_, nullptr);
+	pipelineLayout_ = VK_NULL_HANDLE;
+	if (descriptorSetLayout_ != VK_NULL_HANDLE)
+		vkDestroyDescriptorSetLayout(vulkan_->GetDevice(), descriptorSetLayout_, nullptr);
+	descriptorSetLayout_ = VK_NULL_HANDLE;
 	if (nullTexture_) {
 		nullTexture_->Destroy();
 		delete nullTexture_;
+		nullTexture_ = nullptr;
 	}
-	delete[] uvScale;
-	vkDestroyPipelineLayout(vulkan_->GetDevice(), pipelineLayout_, nullptr);
-	vkDestroyDescriptorSetLayout(vulkan_->GetDevice(), descriptorSetLayout_, nullptr);
+}
+
+void DrawEngineVulkan::DeviceLost() {
+	DestroyDeviceObjects();
+	DirtyAllUBOs();
+}
+
+void DrawEngineVulkan::DeviceRestore(VulkanContext *vulkan) {
+	vulkan_ = vulkan;
+
+	InitDeviceObjects();
 }
 
 void DrawEngineVulkan::BeginFrame() {
@@ -243,7 +276,7 @@ void DrawEngineVulkan::BeginFrame() {
 			VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
 		uint32_t bindOffset;
 		VkBuffer bindBuf;
-		uint32_t *data = (uint32_t *)frame_[0].pushUBO->Push(w * h * 4, &bindOffset, &bindBuf);
+		uint32_t *data = (uint32_t *)frame->pushUBO->Push(w * h * 4, &bindOffset, &bindBuf);
 		for (int y = 0; y < h; y++) {
 			for (int x = 0; x < w; x++) {
 				// data[y*w + x] = ((x ^ y) & 1) ? 0xFF808080 : 0xFF000000;   // gray/black checkerboard
@@ -316,9 +349,7 @@ void DrawEngineVulkan::SubmitPrim(void *verts, void *inds, GEPrimitiveType prim,
 		dc.indexUpperBound = vertexCount - 1;
 	}
 
-	if (uvScale) {
-		uvScale[numDrawCalls] = gstate_c.uv;
-	}
+	uvScale[numDrawCalls] = gstate_c.uv;
 
 	numDrawCalls++;
 	vertexCountInDrawCalls += vertexCount;
@@ -438,18 +469,12 @@ void DrawEngineVulkan::DecodeVerts(VulkanPushBuffer *push, uint32_t *bindOffset,
 		dest = (u8 *)push->Push(vertsToDecode * dec_->GetDecVtxFmt().stride, bindOffset, vkbuf);
 	}
 
-	if (uvScale) {
-		const UVScale origUV = gstate_c.uv;
-		for (int i = 0; i < numDrawCalls; i++) {
-			gstate_c.uv = uvScale[i];
-			DecodeVertsStep(dest, i, decodedVerts);  // Note that this can modify i
-		}
-		gstate_c.uv = origUV;
-	} else {
-		for (int i = 0; i < numDrawCalls; i++) {
-			DecodeVertsStep(dest, i, decodedVerts);  // Note that this can modify i
-		}
+	const UVScale origUV = gstate_c.uv;
+	for (int i = 0; i < numDrawCalls; i++) {
+		gstate_c.uv = uvScale[i];
+		DecodeVertsStep(dest, i, decodedVerts);  // Note that this can modify i
 	}
+	gstate_c.uv = origUV;
 
 	// Sanity check
 	if (indexGen.Prim() < 0) {
@@ -867,7 +892,6 @@ void DrawEngineVulkan::Resized() {
 	decJitCache_->Clear();
 	lastVTypeID_ = -1;
 	dec_ = NULL;
-	// TODO: We must also wipe pipelines.
 	for (auto iter = decoderMap_.begin(); iter != decoderMap_.end(); iter++) {
 		delete iter->second;
 	}

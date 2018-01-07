@@ -15,12 +15,12 @@
 // Official git repository and contact information can be found at
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
+#include <algorithm>
 #include <cstdlib>
 #include <ctime>
-#include <algorithm>
+#include <functional>
 
 #include "base/display.h"
-#include "base/functional.h"
 #include "base/NativeApp.h"
 #include "ext/vjson/json.h"
 #include "file/ini_file.h"
@@ -38,10 +38,6 @@
 #include "Core/Loaders.h"
 #include "GPU/Common/FramebufferCommon.h"
 #include "HLE/sceUtility.h"
-
-#ifndef USING_QT_UI
-extern const char *PPSSPP_GIT_VERSION;
-#endif
 
 // TODO: Find a better place for this.
 http::Downloader g_DownloadManager;
@@ -512,6 +508,7 @@ static ConfigSetting soundSettings[] = {
 	ConfigSetting("Enable", &g_Config.bEnableSound, true, true, true),
 	ConfigSetting("AudioBackend", &g_Config.iAudioBackend, 0, true, true),
 	ConfigSetting("AudioLatency", &g_Config.iAudioLatency, 1, true, true),
+	ConfigSetting("ExtraAudioBuffering", &g_Config.bExtraAudioBuffering, false, true, false),
 	ConfigSetting("SoundSpeedHack", &g_Config.bSoundSpeedHack, false, true, true),
 	ConfigSetting("AudioResampler", &g_Config.bAudioResampler, true, true, true),
 	ConfigSetting("GlobalVolume", &g_Config.iGlobalVolume, VOLUME_MAX, true, true),
@@ -564,7 +561,7 @@ static ConfigSetting controlSettings[] = {
 	ConfigSetting("ComboKey3Mapping", &g_Config.iCombokey3, 0, true, true),
 	ConfigSetting("ComboKey4Mapping", &g_Config.iCombokey4, 0, true, true),
 
-#if !defined(IOS) && !defined(MAEMO)
+#if !defined(IOS)
 #if defined(_WIN32)
 	// A win32 user seeing touch controls is likely using PPSSPP on a tablet. There it makes
 	// sense to default this to on.
@@ -733,7 +730,6 @@ static ConfigSetting debuggerSettings[] = {
 };
 
 static ConfigSetting speedHackSettings[] = {
-	ReportedConfigSetting("PrescaleUVCoords", &g_Config.bPrescaleUV, true, true, true),
 	ReportedConfigSetting("DisableAlphaTest", &g_Config.bDisableAlphaTest, false, true, true),
 
 	ConfigSetting(false),

@@ -15,6 +15,9 @@
 // Official git repository and contact information can be found at
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
+#include "ppsspp_config.h"
+#if PPSSPP_ARCH(ARM)
+
 // This allows highlighting to work.  Yay.
 #ifdef __INTELLISENSE__
 #define ARM
@@ -63,6 +66,13 @@ static const float by32768 = 1.0f / 32768.0f;
 
 using namespace ArmGen;
 
+// NOTE: Avoid R9, it's dangerous on iOS.
+//
+// r0-r3: parameters
+// r4-r11: local vars. save, except R9.
+// r12: interprocedure scratch
+// r13: stack8
+
 static const ARMReg tempReg1 = R3;
 static const ARMReg tempReg2 = R4;
 static const ARMReg tempReg3 = R5;
@@ -109,8 +119,6 @@ static const JitLookup jitLookup[] = {
 	{&VertexDecoder::Step_WeightsU16Skin, &VertexDecoderJitCache::Jit_WeightsU16Skin},
 	{&VertexDecoder::Step_WeightsFloatSkin, &VertexDecoderJitCache::Jit_WeightsFloatSkin},
 
-	{&VertexDecoder::Step_TcU8, &VertexDecoderJitCache::Jit_TcU8},
-	{&VertexDecoder::Step_TcU16, &VertexDecoderJitCache::Jit_TcU16},
 	{&VertexDecoder::Step_TcFloat, &VertexDecoderJitCache::Jit_TcFloat},
 	{&VertexDecoder::Step_TcU16Double, &VertexDecoderJitCache::Jit_TcU16Double},
 
@@ -191,7 +199,7 @@ JittedVertexDecoder VertexDecoderJitCache::Compile(const VertexDecoder &dec, int
 
 	SetCC(CC_AL);
 
-	PUSH(6, R4, R5, R6, R7, R8, R_LR);
+	PUSH(8, R4, R5, R6, R7, R8, R10, R11, R_LR);
 	if (NEONSkinning || NEONMorphing) {
 		VPUSH(D8, 8);
 	}
@@ -301,7 +309,7 @@ JittedVertexDecoder VertexDecoderJitCache::Compile(const VertexDecoder &dec, int
 	if (NEONSkinning || NEONMorphing) {
 		VPOP(D8, 8);
 	}
-	POP(6, R4, R5, R6, R7, R8, R_PC);
+	POP(8, R4, R5, R6, R7, R8, R10, R11, R_PC);
 
 	FlushLitPool();
 	FlushIcache();
@@ -551,21 +559,6 @@ void VertexDecoderJitCache::Jit_WeightsFloatSkin() {
 		VLDMIA(srcReg, false, weightRegs[0], dec_->nweights);
 	}
 	Jit_ApplyWeights();
-}
-
-// Fill last two bytes with zeroes to align to 4 bytes. LDRH does it for us, handy.
-void VertexDecoderJitCache::Jit_TcU8() {
-	LDRB(tempReg1, srcReg, dec_->tcoff);
-	LDRB(tempReg2, srcReg, dec_->tcoff + 1);
-	ORR(tempReg1, tempReg1, Operand2(tempReg2, ST_LSL, 8));
-	STR(tempReg1, dstReg, dec_->decFmt.uvoff);
-}
-
-void VertexDecoderJitCache::Jit_TcU16() {
-	LDRH(tempReg1, srcReg, dec_->tcoff);
-	LDRH(tempReg2, srcReg, dec_->tcoff + 2);
-	ORR(tempReg1, tempReg1, Operand2(tempReg2, ST_LSL, 16));
-	STR(tempReg1, dstReg, dec_->decFmt.uvoff);
 }
 
 void VertexDecoderJitCache::Jit_TcFloat() {
@@ -1608,3 +1601,5 @@ bool VertexDecoderJitCache::CompileStep(const VertexDecoder &dec, int step) {
 	}
 	return false;
 }
+
+#endif // PPSSPP_ARCH(ARM)

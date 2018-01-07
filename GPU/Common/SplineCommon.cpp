@@ -21,6 +21,7 @@
 #include "profiler/profiler.h"
 
 #include "Common/CPUDetect.h"
+#include "Common/MemoryUtil.h"
 #include "Core/Config.h"
 
 #include "GPU/Common/SplineCommon.h"
@@ -117,7 +118,6 @@ inline float bern1(float x) { return 3 * x * (1 - x) * (1 - x); }
 inline float bern2(float x) { return 3 * x * x * (1 - x); }
 inline float bern3(float x) { return x * x * x; }
 
-// Not sure yet if these have any use
 inline float bern0deriv(float x) { return -3 * (x - 1) * (x - 1); }
 inline float bern1deriv(float x) { return 9 * x * x - 12 * x + 3; }
 inline float bern2deriv(float x) { return 3 * (2 - 3 * x) * x; }
@@ -864,13 +864,13 @@ void DrawEngineCommon::SubmitSpline(const void *control_points, const void *indi
 	u32 vertTypeWithIndex16 = (vertType & ~GE_VTYPE_IDX_MASK) | GE_VTYPE_IDX_16BIT;
 
 	UVScale prevUVScale;
-	if (g_Config.bPrescaleUV && (origVertType & GE_VTYPE_TC_MASK) != 0) {
+	if ((origVertType & GE_VTYPE_TC_MASK) != 0) {
 		// We scaled during Normalize already so let's turn it off when drawing.
 		prevUVScale = gstate_c.uv;
 		gstate_c.uv.uScale = 1.0f;
 		gstate_c.uv.vScale = 1.0f;
-		gstate_c.uv.uOff = 0;
-		gstate_c.uv.vOff = 0;
+		gstate_c.uv.uOff = 0.0f;
+		gstate_c.uv.vOff = 0.0f;
 	}
 
 	int generatedBytesRead;
@@ -878,7 +878,7 @@ void DrawEngineCommon::SubmitSpline(const void *control_points, const void *indi
 
 	DispatchFlush();
 
-	if (g_Config.bPrescaleUV && (origVertType & GE_VTYPE_TC_MASK) != 0) {
+	if ((origVertType & GE_VTYPE_TC_MASK) != 0) {
 		gstate_c.uv = prevUVScale;
 	}
 }
@@ -979,7 +979,7 @@ void DrawEngineCommon::SubmitBezier(const void *control_points, const void *indi
 	u32 vertTypeWithIndex16 = (vertType & ~GE_VTYPE_IDX_MASK) | GE_VTYPE_IDX_16BIT;
 
 	UVScale prevUVScale;
-	if (g_Config.bPrescaleUV && (origVertType & GE_VTYPE_TC_MASK) != 0) {
+	if (origVertType & GE_VTYPE_TC_MASK) {
 		// We scaled during Normalize already so let's turn it off when drawing.
 		prevUVScale = gstate_c.uv;
 		gstate_c.uv.uScale = 1.0f;
@@ -993,7 +993,7 @@ void DrawEngineCommon::SubmitBezier(const void *control_points, const void *indi
 
 	DispatchFlush();
 
-	if (g_Config.bPrescaleUV && (origVertType & GE_VTYPE_TC_MASK) != 0) {
+	if (origVertType & GE_VTYPE_TC_MASK) {
 		gstate_c.uv = prevUVScale;
 	}
 }
