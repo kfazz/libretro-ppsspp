@@ -158,7 +158,8 @@ SOURCES_CXX += $(GPUCOMMONDIR)/TextureDecoder.cpp \
 				$(GPUDIR)/GLES/TextureScaler.cpp
 SOURCES_C   += $(NATIVEDIR)/gfx_es2/gl3stub.c \
 				$(NATIVEDIR)/math/fast/fast_math.c \
-				$(NATIVEDIR)/math/fast/fast_matrix.c
+				$(NATIVEDIR)/math/fast/fast_matrix.c \
+				$(NATIVEDIR)/math/fast/fast_matrix_sse.c
 SOURCES_CXX += $(NATIVEDIR)/file/chunk_file.cpp \
 				$(GPUDIR)/Common/SoftwareTransformCommon.cpp \
 				$(NATIVEDIR)/file/fd_util.cpp \

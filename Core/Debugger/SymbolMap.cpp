@@ -100,7 +100,7 @@ bool SymbolMap::LoadSymbolMap(const char *filename) {
 			}
 		}
 
-		if (strlen(line) < 4 || sscanf(line, "%s", temp) != 1)
+		if (strlen(line) < 4 || sscanf(line, "%255s", temp) != 1)
 			continue;
 
 		if (strcmp(temp,"UNUSED")==0) continue;
@@ -128,7 +128,7 @@ bool SymbolMap::LoadSymbolMap(const char *filename) {
 		SymbolType type;
 		char name[128] = {0};
 
-		if (sscanf(line, ".module %x %08x %08x %127c", &moduleIndex, &address, &size, name) >= 3) {
+		if (sscanf(line, ".module %x %08x %08x %127c", (unsigned int *)&moduleIndex, &address, &size, name) >= 3) {
 			// Found a module definition.
 			ModuleEntry mod;
 			mod.index = moduleIndex;
@@ -234,7 +234,7 @@ bool SymbolMap::LoadNocashSym(const char *filename) {
 			break;
 
 		u32 address;
-		if (sscanf(line, "%08X %s", &address, value) != 2)
+		if (sscanf(line, "%08X %255s", &address, value) != 2)
 			continue;
 		if (address == 0 && strcmp(value, "0") == 0)
 			continue;
@@ -260,7 +260,7 @@ bool SymbolMap::LoadNocashSym(const char *filename) {
 				}
 			}
 		} else {				// labels
-			int size = 1;
+			unsigned int size = 1;
 			char* seperator = strchr(value, ',');
 			if (seperator != NULL) {
 				*seperator = 0;

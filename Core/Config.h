@@ -23,9 +23,7 @@
 
 #include "CommonTypes.h"
 
-#if !defined(USING_QT_UI)
 extern const char *PPSSPP_GIT_VERSION;
-#endif
 
 const int PSP_MODEL_FAT = 0;
 const int PSP_MODEL_SLIM = 1;
@@ -222,6 +220,7 @@ public:
 	int iAudioLatency; // 0 = low , 1 = medium(default) , 2 = high
 	int iAudioBackend;
 	int iGlobalVolume;
+	bool bExtraAudioBuffering;  // For bluetooth
 
 	// Audio Hack
 	bool bSoundSpeedHack;
@@ -342,7 +341,7 @@ public:
 	int iCombokey3;
 	int iCombokey4;
 
-#if !defined(IOS) && !defined(MAEMO)
+#if !defined(IOS)
 	bool bShowTouchPause;
 #endif
 
@@ -361,14 +360,7 @@ public:
 	float fAnalogLimiterDeadzone;
 	// GLES backend-specific hacks. Not saved to the ini file, do not add checkboxes. Will be made into
 	// proper options when good enough.
-	// PrescaleUV:
-	//   * Applies UV scale/offset when decoding verts. Get rid of some work in the vertex shader,
-	//     saves a uniform upload and is a prerequisite for future optimized hybrid
-	//     (SW skinning, HW transform) skinning.
-	//   * Still has major problems so off by default - need to store tex scale/offset per DeferredDrawCall,
-	//     which currently isn't done so if texscale/offset isn't static (like in Tekken 6) things go wrong.
-	bool bPrescaleUV;
-	bool bDisableAlphaTest;  // Helps PowerVR immensely, breaks some graphics
+	bool bDisableAlphaTest;  // Helps PowerVR performance immensely, breaks some graphics
 	// End GLES hacks.
 
 	// Use the hardware scaler to scale up the image to save fillrate. Similar to Windows' window size, really.

@@ -41,7 +41,6 @@ matrix:
     - os: linux
       compiler: "gcc linux"
       env: PPSSPP_BUILD_TYPE=Linux
-           CMAKE=TRUE
     - os: linux
       compiler: "gcc android-arm64-v8a"
       env: PPSSPP_BUILD_TYPE=Android
@@ -61,16 +60,20 @@ matrix:
     - os: linux
       compiler: "clang linux"
       env: PPSSPP_BUILD_TYPE=Linux
-           CMAKE=TRUE
     - os: linux
       compiler: "gcc qt"
       env: PPSSPP_BUILD_TYPE=Linux
            QT=TRUE
-# Can't get iOS to work.
-#    - os: osx
-#      compiler: "clang ios"
-#      env: PPSSPP_BUILD_TYPE=iOS
-#           CMAKE=TRUE
+    - os: osx
+      osx_image: xcode8
+      compiler: "clang macos"
+      env: PPSSPP_BUILD_TYPE=macOS
+           CMAKE=TRUE
+    - os: osx
+      osx_image: xcode8
+      compiler: "clang ios"
+      env: PPSSPP_BUILD_TYPE=iOS
+           CMAKE=TRUE
 
 before_install:
   - bash .travis.sh travis_before_install

@@ -6,12 +6,11 @@ while test $# -gt 0
 do
 	case "$1" in
 		--qt) echo "Qt enabled"
-			CMAKE=0
+			QT=1
+			CMAKE_ARGS="-DUSING_QT_UI=ON ${CMAKE_ARGS}"
 			;;
-		--ios) CMAKE_ARGS="-DCMAKE_TOOLCHAIN_FILE=ios/ios.toolchain.cmake -GXcode ${CMAKE_ARGS}"
+		--ios) CMAKE_ARGS="-DCMAKE_TOOLCHAIN_FILE=cmake/Toolchains/ios.cmake ${CMAKE_ARGS}"
 			TARGET_OS=iOS
-			PACKAGE=1
-			echo !!!!!!!!!!!!!!! The error below is expected. Go into build-ios and open the XCodeProj.
 			;;
 		--android) CMAKE_ARGS="-DCMAKE_TOOLCHAIN_FILE=android/android.toolchain.cmake ${CMAKE_ARGS}"
 			TARGET_OS=Android
@@ -54,11 +53,7 @@ if [ ! -z "$TARGET_OS" ]; then
 	BUILD_DIR="$(tr [A-Z] [a-z] <<< build-"$TARGET_OS")"
 else
 	echo "Building for native host."
-	if [ "$CMAKE" == "0" ]; then
-		BUILD_DIR="build-qt"
-	else
-		BUILD_DIR="build"
-	fi
+	BUILD_DIR="build"
 fi
 
 # Strict errors. Any non-zero return exits this script
@@ -67,17 +62,7 @@ set -e
 mkdir -p ${BUILD_DIR}
 pushd ${BUILD_DIR}
 
-if [ "$CMAKE" == "1" ]; then
-	cmake $HEADLESS $CMAKE_ARGS .. | (grep -v "^-- " || true)
-else
-	qmake $QMAKE_ARGS ../Qt/PPSSPPQt.pro
-fi
+cmake $CMAKE_ARGS ..
 
 make -j4 $MAKE_OPT
-
-if [ "$PACKAGE" == "1" ]; then
-	if [ "$TARGET_OS" == "iOS" ]; then
-		xcodebuild -configuration Release
-	fi
-fi
 popd

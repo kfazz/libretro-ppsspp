@@ -320,9 +320,8 @@ void NativeInit(int argc, const char *argv[], const char *savegame_dir, const ch
 	VFSRegister("", new DirectoryAssetReader((File::GetExeDirectory() + "assets/").c_str()));
 	VFSRegister("", new DirectoryAssetReader((File::GetExeDirectory()).c_str()));
 	VFSRegister("", new DirectoryAssetReader("/usr/share/ppsspp/assets/"));
-#else
-	VFSRegister("", new DirectoryAssetReader("assets/"));
 #endif
+	VFSRegister("", new DirectoryAssetReader("assets/"));
 	VFSRegister("", new DirectoryAssetReader(savegame_dir));
 
 #if defined(MOBILE_DEVICE) || !defined(USING_QT_UI)
@@ -336,7 +335,7 @@ void NativeInit(int argc, const char *argv[], const char *savegame_dir, const ch
 	// most sense.
 	g_Config.memStickDirectory = std::string(external_dir) + "/";
 	g_Config.flash0Directory = std::string(external_dir) + "/flash0/";
-#elif defined(MAEMO) || defined(IOS)
+#elif defined(IOS)
 	g_Config.memStickDirectory = user_data_path;
 	g_Config.flash0Directory = std::string(external_dir) + "/flash0/";
 #elif !defined(_WIN32)
@@ -446,7 +445,7 @@ void NativeInit(int argc, const char *argv[], const char *savegame_dir, const ch
 	if (g_Config.currentDirectory == "") {
 #if defined(__ANDROID__)
 		g_Config.currentDirectory = external_dir;
-#elif defined(MAEMO) || defined(IOS) || defined(_WIN32)
+#elif defined(IOS) || defined(_WIN32)
 		g_Config.currentDirectory = savegame_dir;
 #else
 		if (getenv("HOME") != NULL)
@@ -579,13 +578,8 @@ void NativeInitGraphics(GraphicsContext *graphicsContext) {
 	ui_draw2d.Init(thin3d);
 	ui_draw2d_front.Init(thin3d);
 
-#ifdef USING_QT_UI
-	uiTexture = thin3d->CreateTextureFromFile("ui_atlas_lowmem.zim", T3DImageType::ZIM);
-	if (!uiTexture) {
-#else
 	uiTexture = thin3d->CreateTextureFromFile("ui_atlas.zim", T3DImageType::ZIM);
 	if (!uiTexture) {
-#endif
 		PanicAlert("Failed to load ui_atlas.zim.\n\nPlace it in the directory \"assets\" under your PPSSPP directory.");
 		ELOG("Failed to load ui_atlas.zim");
 #ifdef _WIN32
@@ -768,10 +762,11 @@ void HandleGlobalMessage(const std::string &msg, const std::string &value) {
 	}
 	if (msg == "inputbox_completed") {
 		SplitString(value, ':', inputboxValue);
+		std::string setString = inputboxValue.size() > 1 ? inputboxValue[1] : "";
 		if (inputboxValue[0] == "IP")
-			g_Config.proAdhocServer = inputboxValue[1];
+			g_Config.proAdhocServer = setString;
 		if (inputboxValue[0] == "nickname")
-			g_Config.sNickName = inputboxValue[1];
+			g_Config.sNickName = setString;
 		inputboxValue.clear();
 	}
 	if (msg == "savestate_displayslot") {

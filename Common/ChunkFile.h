@@ -32,25 +32,10 @@
 #include <deque>
 #include <list>
 #include <set>
-#if defined(MACGNUSTD)
-#include <tr1/type_traits>
-#else
 #include <type_traits>
-#endif
 
 #include "Common.h"
 #include "FileUtil.h"
-#ifdef SHARED_SNAPPY
-#include <snappy-c.h>
-#else
-#include "../ext/snappy/snappy-c.h"
-#endif
-
-#if defined(MACGNUSTD)
-namespace std {
-	using tr1::is_pointer;
-}
-#endif
 
 template <class T>
 struct LinkedListItem : public T

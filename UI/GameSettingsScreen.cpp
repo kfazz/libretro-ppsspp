@@ -264,14 +264,20 @@ void GameSettingsScreen::CreateViews() {
 	framebufferSlowEffects->SetDisabledPtr(&g_Config.bSoftwareRendering);
 
 	// Seems solid, so we hide the setting.
-	// CheckBox *vtxJit = graphicsSettings->Add(new CheckBox(&g_Config.bVertexDecoderJit, gr->T("Vertex Decoder JIT")));
+	/*CheckBox *vtxJit = graphicsSettings->Add(new CheckBox(&g_Config.bVertexDecoderJit, gr->T("Vertex Decoder JIT")));
 
-	// if (PSP_IsInited()) {
-		// vtxJit->SetEnabled(false);
-	// }
+	if (PSP_IsInited()) {
+		vtxJit->SetEnabled(false);
+	}*/
 
 	static const char *quality[] = { "Low", "Medium", "High"};
 	PopupMultiChoice *beziersChoice = graphicsSettings->Add(new PopupMultiChoice(&g_Config.iSplineBezierQuality, gr->T("LowCurves", "Spline/Bezier curves quality"), quality, 0, ARRAY_SIZE(quality), gr->GetName(), screenManager()));
+	beziersChoice->OnChoice.Add([=](EventParams &e) {
+		if (&g_Config.iSplineBezierQuality != 0) {
+			settingInfo_->Show(gr->T("LowCurves Tip", "This option will significantly improve/reduce the quality of rendered splines and bezier curves"), e.v);
+		}
+		return UI::EVENT_CONTINUE;
+	});
 	beziersChoice->SetDisabledPtr(&g_Config.bSoftwareRendering);
 
 	// In case we're going to add few other antialiasing option like MSAA in the future.
@@ -304,6 +310,10 @@ void GameSettingsScreen::CreateViews() {
 	texScalingType->SetDisabledPtr(&g_Config.bSoftwareRendering);
 
 	CheckBox *deposterize = graphicsSettings->Add(new CheckBox(&g_Config.bTexDeposterize, gr->T("Deposterize")));
+	deposterize->OnClick.Add([=](EventParams &e) {
+		settingInfo_->Show(gr->T("Deposterize Tip", "Fixes small in-texture glitches that may happen when the texture is upscaled"), e.v);
+		return UI::EVENT_CONTINUE;
+	});
 	deposterize->SetDisabledPtr(&g_Config.bSoftwareRendering);
 
 	graphicsSettings->Add(new ItemHeader(gr->T("Texture Filtering")));
@@ -331,7 +341,12 @@ void GameSettingsScreen::CreateViews() {
 #endif
 
 	graphicsSettings->Add(new ItemHeader(gr->T("Hack Settings", "Hack Settings (these WILL cause glitches)")));
-	graphicsSettings->Add(new CheckBox(&g_Config.bTimerHack, gr->T("Timer Hack")));
+	CheckBox *timerHack = graphicsSettings->Add(new CheckBox(&g_Config.bTimerHack, gr->T("Timer Hack")));
+	timerHack->OnClick.Add([=](EventParams &e) {
+		settingInfo_->Show(gr->T("TimerHack Tip", "Faster some games when emulation speed is slower , but may cause glitches/breaking"), e.v);
+		return UI::EVENT_CONTINUE;
+	});
+
 	CheckBox *alphaHack = graphicsSettings->Add(new CheckBox(&g_Config.bDisableAlphaTest, gr->T("Disable Alpha Test (PowerVR speedup)")));
 	alphaHack->OnClick.Add([=](EventParams &e) {
 		settingInfo_->Show(gr->T("DisableAlphaTest Tip", "Faster by sometimes drawing ugly boxes around things"), e.v);
@@ -344,9 +359,6 @@ void GameSettingsScreen::CreateViews() {
 	stencilTest->SetDisabledPtr(&g_Config.bSoftwareRendering);
 
 	CheckBox *depthWrite = graphicsSettings->Add(new CheckBox(&g_Config.bAlwaysDepthWrite, gr->T("Always Depth Write")));
-	depthWrite->SetDisabledPtr(&g_Config.bSoftwareRendering);
-
-	graphicsSettings->Add(new CheckBox(&g_Config.bPrescaleUV, gr->T("Texture Coord Speedhack")));
 	depthWrite->SetDisabledPtr(&g_Config.bSoftwareRendering);
 
 	static const char *bloomHackOptions[] = { "Off", "Safe", "Balanced", "Aggressive" };
@@ -404,8 +416,11 @@ void GameSettingsScreen::CreateViews() {
 
 	static const char *latency[] = { "Low", "Medium", "High" };
 	PopupMultiChoice *lowAudio = audioSettings->Add(new PopupMultiChoice(&g_Config.iAudioLatency, a->T("Audio Latency"), latency, 0, ARRAY_SIZE(latency), gr->GetName(), screenManager()));
-
 	lowAudio->SetEnabledPtr(&g_Config.bEnableSound);
+#if defined(__ANDROID__)
+	CheckBox *extraAudio = audioSettings->Add(new CheckBox(&g_Config.bExtraAudioBuffering, a->T("AudioBufferingForBluetooth", "Bluetooth-friendly buffer (slower)")));
+	extraAudio->SetEnabledPtr(&g_Config.bEnableSound);
+#endif
 	if (System_GetPropertyInt(SYSPROP_AUDIO_SAMPLE_RATE) == 44100) {
 		CheckBox *resampling = audioSettings->Add(new CheckBox(&g_Config.bAudioResampler, a->T("Audio sync", "Audio sync (resampling)")));
 		resampling->SetEnabledPtr(&g_Config.bEnableSound);
@@ -455,9 +470,9 @@ void GameSettingsScreen::CreateViews() {
 		comboKey->OnClick.Handle(this, &GameSettingsScreen::OnCombo_key);
 		comboKey->SetEnabledPtr(&g_Config.bShowTouchControls);
 
-		// On systems that aren't iOS and Maemo, offer to let the user see this button.
+		// On non iOS systems, offer to let the user see this button.
 		// Some Windows touch devices don't have a back button or other button to call up the menu.
-#if !defined(IOS) && !defined(MAEMO)
+#if !defined(IOS)
 		CheckBox *enablePauseBtn = controlsSettings->Add(new CheckBox(&g_Config.bShowTouchPause, co->T("Show Touch Pause Menu Button")));
 
 		// Don't allow the user to disable it once in-game, so they can't lock themselves out of the menu.
@@ -961,7 +976,7 @@ UI::EventReturn GameSettingsScreen::OnRenderingBackend(UI::EventParams &e) {
 	// It only makes sense to show the restart prompt if the backend was actually changed.
 	if (g_Config.iGPUBackend != (int)GetGPUBackend()) {
 		screenManager()->push(new PromptScreen(di->T("ChangingGPUBackends", "Changing GPU backends requires PPSSPP to restart. Restart now?"), di->T("Yes"), di->T("No"),
-			std::bind(&GameSettingsScreen::CallbackRenderingBackend, this, placeholder::_1)));
+			std::bind(&GameSettingsScreen::CallbackRenderingBackend, this, std::placeholders::_1)));
 	}
 #endif
 	return UI::EVENT_DONE;
@@ -1165,13 +1180,13 @@ UI::EventReturn GameSettingsScreen::OnRestoreDefaultSettings(UI::EventParams &e)
 	{
 		screenManager()->push(
 			new PromptScreen(dev->T("RestoreGameDefaultSettings", "Are you sure you want to restore the game-specific settings back to the ppsspp defaults?\n"), di->T("OK"), di->T("Cancel"),
-			std::bind(&GameSettingsScreen::CallbackRestoreDefaults, this, placeholder::_1)));
+			std::bind(&GameSettingsScreen::CallbackRestoreDefaults, this, std::placeholders::_1)));
 	}
 	else
 	{
 		screenManager()->push(
 			new PromptScreen(dev->T("RestoreDefaultSettings", "Are you sure you want to restore all settings(except control mapping)\nback to their defaults?\nYou can't undo this.\nPlease restart PPSSPP after restoring settings."), di->T("OK"), di->T("Cancel"),
-			std::bind(&GameSettingsScreen::CallbackRestoreDefaults, this, placeholder::_1)));
+			std::bind(&GameSettingsScreen::CallbackRestoreDefaults, this, std::placeholders::_1)));
 	}
 
 	return UI::EVENT_DONE;

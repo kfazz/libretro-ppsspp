@@ -18,19 +18,20 @@
 #pragma once
 
 #include <cstring>
+#include "ppsspp_config.h"
 #include "base/basictypes.h"
 #include "Common/Log.h"
 #include "Common/CommonTypes.h"
 #include "Core/Reporting.h"
 #include "GPU/ge_constants.h"
 #include "GPU/Common/ShaderCommon.h"
-#ifdef ARM
+#if PPSSPP_ARCH(ARM)
 #include "Common/ArmEmitter.h"
-#elif defined(ARM64)
+#elif PPSSPP_ARCH(ARM64)
 #include "Common/Arm64Emitter.h"
-#elif defined(_M_IX86) || defined(_M_X64)
+#elif PPSSPP_ARCH(X86) || PPSSPP_ARCH(AMD64)
 #include "Common/x64Emitter.h"
-#elif defined(MIPS)
+#elif PPSSPP_ARCH(MIPS)
 #include "Common/MipsEmitter.h"
 #else
 #include "Common/FakeEmitter.h"
@@ -442,7 +443,6 @@ int TranslateNumBones(int bones);
 typedef void(*JittedVertexDecoder)(const u8 *src, u8 *dst, int count);
 
 struct VertexDecoderOptions {
-	bool expandAllUVtoFloat;
 	bool expandAllWeightsToFloat;
 	bool expand8BitNormalsToFloat;
 };
@@ -476,8 +476,6 @@ public:
 	void Step_WeightsU16Skin() const;
 	void Step_WeightsFloatSkin() const;
 
-	void Step_TcU8() const;
-	void Step_TcU16() const;
 	void Step_TcU8ToFloat() const;
 	void Step_TcU16ToFloat() const;
 	void Step_TcFloat() const;
@@ -587,6 +585,8 @@ public:
 	u8 morphcount;
 	u8 nweights;
 
+	u8 biggest;  // in practice, alignment.
+
 	friend class VertexDecoderJitCache;
 };
 
@@ -602,13 +602,13 @@ public:
 // that's it!
 
 
-#ifdef ARM
+#if PPSSPP_ARCH(ARM)
 class VertexDecoderJitCache : public ArmGen::ARMXCodeBlock {
-#elif defined(ARM64)
+#elif PPSSPP_ARCH(ARM64)
 class VertexDecoderJitCache : public Arm64Gen::ARM64CodeBlock {
-#elif defined(_M_IX86) || defined(_M_X64)
+#elif PPSSPP_ARCH(X86) || PPSSPP_ARCH(AMD64)
 class VertexDecoderJitCache : public Gen::XCodeBlock {
-#elif defined(MIPS)
+#elif PPSSPP_ARCH(MIPS)
 class VertexDecoderJitCache : public MIPSGen::MIPSCodeBlock {
 #else
 class VertexDecoderJitCache : public FakeGen::FakeXCodeBlock {
@@ -630,9 +630,7 @@ public:
 	void Jit_WeightsU16Skin();
 	void Jit_WeightsFloatSkin();
 
-	void Jit_TcU8();
 	void Jit_TcU8ToFloat();
-	void Jit_TcU16();
 	void Jit_TcU16ToFloat();
 	void Jit_TcFloat();
 
@@ -707,7 +705,7 @@ private:
 	void Jit_AnyFloatMorph(int srcoff, int dstoff);
 
 	const VertexDecoder *dec_;
-#ifdef ARM64
+#if PPSSPP_ARCH(ARM64)
 	Arm64Gen::ARM64FloatEmitter fp;
 #endif
 };
