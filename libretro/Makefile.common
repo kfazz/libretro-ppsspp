@@ -109,7 +109,6 @@ SOURCES_C   += $(NATIVEDIR)/ext/libzip/zip_get_archive_comment.c \
 				$(NATIVEDIR)/ext/libzip/zip_new.c \
 				$(NATIVEDIR)/ext/libzip/zip_open.c \
 				$(NATIVEDIR)/ext/libzip/zip_rename.c \
-				$(NATIVEDIR)/ext/libpng17/pngtest.c \
 				$(NATIVEDIR)/ext/libzip/zip_replace.c \
 				$(EXTDIR)/xxhash.c \
 				$(NATIVEDIR)/ext/libzip/zip_set_archive_comment.c \
@@ -154,11 +153,9 @@ SOURCES_CXX += $(GPUCOMMONDIR)/TextureDecoder.cpp \
 				$(GPUDIR)/Debugger/Breakpoints.cpp \
 				$(GPUDIR)/Debugger/Record.cpp \
 				$(GPUDIR)/Debugger/Stepping.cpp \
-				$(GPUDIR)/Debugger/Record.cpp \
 				$(GPUDIR)/Common/TextureCacheCommon.cpp \
 				$(GPUDIR)/Common/TextureScalerCommon.cpp \
 				$(GPUDIR)/Common/SoftwareTransformCommon.cpp \
-				$(GPUDIR)/Common/StencilCommon.cpp \
 				$(GPUDIR)/Software/TransformUnit.cpp \
 				$(GPUDIR)/Software/SoftGpu.cpp \
 				$(GPUDIR)/Software/Sampler.cpp \
@@ -227,7 +224,6 @@ SOURCES_CXX += $(EXTDIR)/native/file/chunk_file.cpp \
 	       $(NATIVEDIR)/image/png_load.cpp \
 	       $(NATIVEDIR)/input/gesture_detector.cpp \
 	       $(NATIVEDIR)/input/input_state.cpp \
-	       $(NATIVEDIR)/math/dataconv.cpp \
 	       $(NATIVEDIR)/math/curves.cpp \
 	       $(NATIVEDIR)/math/expression_parser.cpp \
 	       $(NATIVEDIR)/math/lin/plane.cpp \
@@ -497,7 +493,6 @@ endif
       else
 	   CPUFLAGS += -D_M_IX86 -m32 -D_ARCH_32
       endif
-	   SOURCES_CXX += $(GPUDIR)/Software/SamplerX86.cpp
 	   SOURCES_CXX += $(COMMONDIR)/x64Analyzer.cpp \
 						$(COMMONDIR)/x64Emitter.cpp \
 						$(COMMONDIR)/ABI.cpp \
@@ -588,8 +583,9 @@ SOURCES_CXX += 	$(GLSLANGDIR)/glslang/MachineIndependent/IntermTraverse.cpp \
 		$(GLSLANGDIR)/SPIRV/SpvBuilder.cpp \
 		$(GLSLANGDIR)/SPIRV/Logger.cpp \
 		$(GLSLANGDIR)/StandAlone/spirv-remap.cpp \
-		$(GLSLANGDIR)/StandAlone/ResourceLimits.cpp \
-		$(GLSLANGDIR)/StandAlone/StandAlone.cpp 
+		$(GLSLANGDIR)/StandAlone/ResourceLimits.cpp
+
+#		$(GLSLANGDIR)/StandAlone/StandAlone.cpp 
 
 SOURCES_CXX += $(SPIRVDIR)/spirv_cross.cpp \
 		$(SPIRVDIR)/spirv_cfg.cpp \
