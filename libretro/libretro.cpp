@@ -91,6 +91,20 @@ static retro_input_poll_t input_poll_cb;
 static retro_input_state_t input_state_cb;
 static retro_environment_t environ_cb;
 static bool _initialized;
+
+struct FBO {
+	GLuint handle;
+	GLuint color_texture;
+	GLuint z_stencil_buffer;
+	GLuint z_buffer;
+	GLuint stencil_buffer;
+
+	int width;
+	int height;
+	FBOColorDepth colorDepth;
+	bool native_fbo;
+};
+
 static FBO *libretro_framebuffer;
 static bool gpu_refresh = false;
 static bool threaded_input = false;
@@ -107,8 +121,8 @@ void NativeUpdate(InputState &input_state) { }
 void NativeRenderInt(void);
 void NativeRender(GraphicsContext *graphicsContext) { NativeRenderInt(); }
 void NativeRenderInt() {
-   fbo_override_backbuffer(libretro_framebuffer);
-
+   //fbo_override_backbuffer(libretro_framebuffer);
+   fbo_bind_as_render_target(libretro_framebuffer);
    glstate.depthWrite.set(GL_TRUE);
    glstate.colorMask.set(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
    glstate.Restore();
@@ -1171,7 +1185,20 @@ void retro_run(void)
 
       host->BootDone();
       _initialized = true;
-      libretro_framebuffer = fbo_create_from_native_fbo((GLuint) hw_render.get_current_framebuffer(), libretro_framebuffer);
+
+	if (!libretro_framebuffer)
+		libretro_framebuffer = new FBO();
+
+	libretro_framebuffer->native_fbo = true;
+	libretro_framebuffer->handle = hw_render.get_current_framebuffer();
+	libretro_framebuffer->color_texture = 0;
+	libretro_framebuffer->z_stencil_buffer = 0;
+	libretro_framebuffer->z_buffer = 0;
+	libretro_framebuffer->stencil_buffer = 0;
+	libretro_framebuffer->width = 0;
+	libretro_framebuffer->height = 0;
+	libretro_framebuffer->colorDepth = FBO_8888;
+
    }
 
 #if 0
