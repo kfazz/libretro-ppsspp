@@ -333,7 +333,6 @@ namespace MIPSComp {
 
 		case 53: // lvl/lvr.q - highly unusual
 		case 61: // svl/svr.q - highly unusual
-			logBlocks = 1;
 			DISABLE;
 			break;
 
@@ -1643,7 +1642,7 @@ namespace MIPSComp {
 		GetVectorRegsPrefixS(sregs, sz, _VS);
 		GetVectorRegsPrefixT(tregs, sz, _VT);
 
-		VCondition cond = (VCondition)(op & 0xF);
+		int cond = op & 0xF;
 		int mask = 0;
 		for (int i = 0; i < n; i++) {
 			ir.Write(IROp::FCmpVfpuBit, cond | (i << 4), sregs[i], tregs[i]);
@@ -1929,7 +1928,7 @@ namespace MIPSComp {
 				ir.Write(IROp::FSub, tempregs[3], sregs[2], sregs[3]);
 			}
 		} else {
-			DISABLE;
+			INVALIDOP;
 		}
 
 		for (int i = 0; i < n; ++i) {

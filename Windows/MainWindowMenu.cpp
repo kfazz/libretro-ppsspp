@@ -195,7 +195,7 @@ namespace MainWindow {
 		const char *translatedShaderName = nullptr;
 
 		availableShaders.clear();
-		if (g_Config.iGPUBackend == GPU_BACKEND_DIRECT3D9) {
+		if (GetGPUBackend() == GPUBackend::DIRECT3D9) {
 			translatedShaderName = ps->T("Not available in Direct3D9 backend");
 			AppendMenu(shaderMenu, MF_STRING | MF_BYPOSITION | MF_GRAYED, item++, ConvertUTF8ToWString(translatedShaderName).c_str());
 		} else {
@@ -322,8 +322,6 @@ namespace MainWindow {
 		TranslateSubMenu(menu, "Rendering Mode", MENU_OPTIONS, SUBMENU_RENDERING_MODE);
 		TranslateMenuItem(menu, ID_OPTIONS_NONBUFFEREDRENDERING);
 		TranslateMenuItem(menu, ID_OPTIONS_BUFFEREDRENDERING);
-		TranslateMenuItem(menu, ID_OPTIONS_READFBOTOMEMORYCPU);
-		TranslateMenuItem(menu, ID_OPTIONS_READFBOTOMEMORYGPU);
 		TranslateSubMenu(menu, "Frame Skipping", MENU_OPTIONS, SUBMENU_FRAME_SKIPPING, L"\tF7");
 		TranslateMenuItem(menu, ID_OPTIONS_FRAMESKIP_AUTO);
 		TranslateMenuItem(menu, ID_OPTIONS_FRAMESKIP_0);
@@ -506,15 +504,9 @@ namespace MainWindow {
 	}
 
 	static void setRenderingMode(int mode) {
-		if (mode >= FB_NON_BUFFERED_MODE)
-			g_Config.iRenderingMode = mode;
-		else {
-			if (++g_Config.iRenderingMode > FB_READFBOMEMORY_GPU)
-				g_Config.iRenderingMode = FB_NON_BUFFERED_MODE;
-		}
-
 		I18NCategory *gr = GetI18NCategory("Graphics");
 
+		g_Config.iRenderingMode = mode;
 		switch (g_Config.iRenderingMode) {
 		case FB_NON_BUFFERED_MODE:
 			osm.Show(gr->T("Non-Buffered Rendering"));
@@ -523,14 +515,6 @@ namespace MainWindow {
 
 		case FB_BUFFERED_MODE:
 			osm.Show(gr->T("Buffered Rendering"));
-			break;
-
-		case FB_READFBOMEMORY_CPU:
-			osm.Show(gr->T("Read Framebuffers To Memory (CPU)"));
-			break;
-
-		case FB_READFBOMEMORY_GPU:
-			osm.Show(gr->T("Read Framebuffers To Memory (GPU)"));
 			break;
 		}
 
@@ -783,29 +767,27 @@ namespace MainWindow {
 			break;
 
 		case ID_OPTIONS_DIRECT3D9:
-			g_Config.iGPUBackend = GPU_BACKEND_DIRECT3D9;
+			g_Config.iGPUBackend = (int)GPUBackend::DIRECT3D9;
 			RestartApp();
 			break;
 
 		case ID_OPTIONS_DIRECT3D11:
-			g_Config.iGPUBackend = GPU_BACKEND_DIRECT3D11;
+			g_Config.iGPUBackend = (int)GPUBackend::DIRECT3D11;
 			RestartApp();
 			break;
 
 		case ID_OPTIONS_OPENGL:
-			g_Config.iGPUBackend = GPU_BACKEND_OPENGL;
+			g_Config.iGPUBackend = (int)GPUBackend::OPENGL;
 			RestartApp();
 			break;
 
 		case ID_OPTIONS_VULKAN:
-			g_Config.iGPUBackend = GPU_BACKEND_VULKAN;
+			g_Config.iGPUBackend = (int)GPUBackend::VULKAN;
 			RestartApp();
 			break;
 
 		case ID_OPTIONS_NONBUFFEREDRENDERING:   setRenderingMode(FB_NON_BUFFERED_MODE); break;
 		case ID_OPTIONS_BUFFEREDRENDERING:      setRenderingMode(FB_BUFFERED_MODE); break;
-		case ID_OPTIONS_READFBOTOMEMORYCPU:     setRenderingMode(FB_READFBOMEMORY_CPU); break;
-		case ID_OPTIONS_READFBOTOMEMORYGPU:     setRenderingMode(FB_READFBOMEMORY_GPU); break;
 
 		case ID_DEBUG_SHOWDEBUGSTATISTICS:
 			g_Config.bShowDebugStats = !g_Config.bShowDebugStats;
@@ -1217,14 +1199,7 @@ namespace MainWindow {
 		static const int renderingmode[] = {
 			ID_OPTIONS_NONBUFFEREDRENDERING,
 			ID_OPTIONS_BUFFEREDRENDERING,
-			ID_OPTIONS_READFBOTOMEMORYCPU,
-			ID_OPTIONS_READFBOTOMEMORYGPU,
 		};
-		if (g_Config.iRenderingMode < FB_NON_BUFFERED_MODE)
-			g_Config.iRenderingMode = FB_NON_BUFFERED_MODE;
-
-		else if (g_Config.iRenderingMode > FB_READFBOMEMORY_GPU)
-			g_Config.iRenderingMode = FB_READFBOMEMORY_GPU;
 
 		for (int i = 0; i < ARRAY_SIZE(renderingmode); i++) {
 			CheckMenuItem(menu, renderingmode[i], MF_BYCOMMAND | ((i == g_Config.iRenderingMode) ? MF_CHECKED : MF_UNCHECKED));
@@ -1269,8 +1244,8 @@ namespace MainWindow {
 			CheckMenuItem(menu, savestateSlot[i], MF_BYCOMMAND | ((i == g_Config.iCurrentStateSlot) ? MF_CHECKED : MF_UNCHECKED));
 		}
 
-		switch (g_Config.iGPUBackend) {
-		case GPU_BACKEND_DIRECT3D9:
+		switch (GetGPUBackend()) {
+		case GPUBackend::DIRECT3D9:
 			EnableMenuItem(menu, ID_OPTIONS_DIRECT3D9, MF_GRAYED);
 			EnableMenuItem(menu, ID_OPTIONS_DIRECT3D11, MF_ENABLED);
 			EnableMenuItem(menu, ID_OPTIONS_OPENGL, MF_ENABLED);
@@ -1280,7 +1255,7 @@ namespace MainWindow {
 			CheckMenuItem(menu, ID_OPTIONS_OPENGL, MF_UNCHECKED);
 			CheckMenuItem(menu, ID_OPTIONS_VULKAN, MF_UNCHECKED);
 			break;
-		case GPU_BACKEND_OPENGL:
+		case GPUBackend::OPENGL:
 			EnableMenuItem(menu, ID_OPTIONS_DIRECT3D9, MF_ENABLED);
 			EnableMenuItem(menu, ID_OPTIONS_DIRECT3D11, MF_ENABLED);
 			EnableMenuItem(menu, ID_OPTIONS_OPENGL, MF_GRAYED);
@@ -1290,7 +1265,7 @@ namespace MainWindow {
 			CheckMenuItem(menu, ID_OPTIONS_OPENGL, MF_CHECKED);
 			CheckMenuItem(menu, ID_OPTIONS_VULKAN, MF_UNCHECKED);
 			break;
-		case GPU_BACKEND_VULKAN:
+		case GPUBackend::VULKAN:
 			EnableMenuItem(menu, ID_OPTIONS_DIRECT3D9, MF_ENABLED);
 			EnableMenuItem(menu, ID_OPTIONS_DIRECT3D11, MF_ENABLED);
 			EnableMenuItem(menu, ID_OPTIONS_OPENGL, MF_ENABLED);
@@ -1300,7 +1275,7 @@ namespace MainWindow {
 			CheckMenuItem(menu, ID_OPTIONS_OPENGL, MF_UNCHECKED);
 			CheckMenuItem(menu, ID_OPTIONS_VULKAN, MF_CHECKED);
 			break;
-		case GPU_BACKEND_DIRECT3D11:
+		case GPUBackend::DIRECT3D11:
 			EnableMenuItem(menu, ID_OPTIONS_DIRECT3D9, MF_ENABLED);
 			EnableMenuItem(menu, ID_OPTIONS_DIRECT3D11, MF_GRAYED);
 			EnableMenuItem(menu, ID_OPTIONS_OPENGL, MF_ENABLED);

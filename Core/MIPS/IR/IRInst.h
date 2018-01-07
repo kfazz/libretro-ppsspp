@@ -263,7 +263,7 @@ inline IROp ComparisonToExit(IRComparison comp) {
 
 enum IRFpCompareMode {
 	False = 0,
-	NotEqualUnordered,
+	EitherUnordered,
 	EqualOrdered, // eq,  seq (equal, ordered)
 	EqualUnordered, // ueq, ngl (equal, unordered)
 	LessOrdered, // olt, lt (less than, ordered)
@@ -275,6 +275,8 @@ enum IRFpCompareMode {
 enum {
 	IRTEMP_0 = 192,
 	IRTEMP_1,
+	IRTEMP_2,
+	IRTEMP_3,
 	IRTEMP_LHS,  // Reserved for use in branches
 	IRTEMP_RHS,  // Reserved for use in branches
 
@@ -311,7 +313,7 @@ struct IRMeta {
 	u32 flags;
 };
 
-// 32 bits.
+// 64 bits.
 struct IRInst {
 	IROp op;
 	union {
@@ -320,22 +322,21 @@ struct IRInst {
 	};
 	u8 src1;
 	u8 src2;
+	u32 constant;
 };
 
 // Returns the new PC.
-u32 IRInterpret(MIPSState *mips, const IRInst *inst, const u32 *constPool, int count);
+u32 IRInterpret(MIPSState *mips, const IRInst *inst, int count);
 
 // Each IR block gets a constant pool.
 class IRWriter {
 public:
 	IRWriter &operator =(const IRWriter &w) {
 		insts_ = w.insts_;
-		constPool_ = w.constPool_;
 		return *this;
 	}
 	IRWriter &operator =(IRWriter &&w) {
 		insts_ = std::move(w.insts_);
-		constPool_ = std::move(w.constPool_);
 		return *this;
 	}
 
@@ -350,17 +351,19 @@ public:
 
 	void Clear() {
 		insts_.clear();
-		constPool_.clear();
 	}
 
 	const std::vector<IRInst> &GetInstructions() const { return insts_; }
-	const std::vector<u32> &GetConstants() const { return constPool_; }
 
 private:
 	std::vector<IRInst> insts_;
-	std::vector<u32> constPool_;
+	u32 nextConst_ = 0;
+};
+
+struct IROptions {
+	bool unalignedLoadStore;
 };
 
 const IRMeta *GetIRMeta(IROp op);
-void DisassembleIR(char *buf, size_t bufsize, IRInst inst, const u32 *constPool);
+void DisassembleIR(char *buf, size_t bufsize, IRInst inst);
 void InitIR();
