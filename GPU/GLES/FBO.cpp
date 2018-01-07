@@ -267,7 +267,6 @@ FBO *fbo_create_from_native_fbo(GLuint native_fbo, FBO *fbo)
 	if (!fbo)
 		fbo = new FBO();
 
-	fbo->native_fbo = true;
 	fbo->handle = native_fbo;
 	fbo->color_texture = 0;
 	fbo->z_stencil_buffer = 0;
