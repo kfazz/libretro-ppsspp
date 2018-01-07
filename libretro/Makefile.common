@@ -133,29 +133,31 @@ SOURCES_CXX += $(GPUCOMMONDIR)/TextureDecoder.cpp \
 				$(COMMONDIR)/ColorConv.cpp \
 				$(GPUDIR)/Debugger/Breakpoints.cpp \
 				$(GPUDIR)/Debugger/Stepping.cpp \
-				$(GPUDIR)/GLES/DepalettizeShader.cpp \
+				$(GPUDIR)/GLES/DepalettizeShaderGLES.cpp \
 				$(GPUDIR)/GLES/FBO.cpp \
  				$(GPUDIR)/GLES/GPU_GLES.cpp \
 				$(GPUDIR)/GLES/GLStateCache.cpp \
-				$(GPUDIR)/GLES/FragmentShaderGenerator.cpp \
-				$(GPUDIR)/GLES/FragmentTestCache.cpp \
+				$(GPUDIR)/GLES/FragmentShaderGeneratorGLES.cpp \
+				$(GPUDIR)/GLES/FragmentTestCacheGLES.cpp \
+				$(GPUDIR)/GLES/FramebufferManagerGLES.cpp \
+				$(GPUDIR)/GLES/ShaderManagerGLES.cpp \
+				$(GPUDIR)/GLES/StateMappingGLES.cpp \
+				$(GPUDIR)/GLES/StencilBufferGLES.cpp \
+				$(GPUDIR)/GLES/TextureCacheGLES.cpp \
+				$(GPUDIR)/GLES/TextureScalerGLES.cpp \
 				$(GPUDIR)/GLES/DrawEngineGLES.cpp \
-				$(GPUDIR)/GLES/Framebuffer.cpp \
+				$(GPUDIR)/GLES/VertexShaderGenerator.cpp \
 				$(NATIVEDIR)/base/backtrace.cpp \
-				$(GPUDIR)/GLES/ShaderManager.cpp \
 				$(NATIVEDIR)/base/buffer.cpp \
 				$(NATIVEDIR)/base/colorutil.cpp \
 				$(NATIVEDIR)/base/display.cpp \
 				$(NATIVEDIR)/base/stringutil.cpp \
-				$(GPUDIR)/GLES/StateMapping.cpp \
 				$(NATIVEDIR)/base/timeutil.cpp \
 				$(NATIVEDIR)/data/compression.cpp \
-				$(GPUDIR)/GLES/StencilBuffer.cpp \
 				$(NATIVEDIR)/ext/vjson/block_allocator.cpp \
 				$(GPUDIR)/Common/TextureCacheCommon.cpp \
-				$(GPUDIR)/Common/TextureScalerCommon.cpp \
-				$(GPUDIR)/GLES/TextureCache.cpp \
-				$(GPUDIR)/GLES/TextureScaler.cpp
+				$(GPUDIR)/Common/TextureScalerCommon.cpp 
+
 SOURCES_C   += $(NATIVEDIR)/gfx_es2/gl3stub.c \
 				$(NATIVEDIR)/math/fast/fast_math.c \
 				$(NATIVEDIR)/math/fast/fast_matrix.c
@@ -165,7 +167,6 @@ SOURCES_CXX += $(NATIVEDIR)/file/chunk_file.cpp \
 				$(NATIVEDIR)/file/file_util.cpp \
 				$(NATIVEDIR)/file/free.cpp \
 				$(NATIVEDIR)/file/ini_file.cpp \
-				$(GPUDIR)/GLES/VertexShaderGenerator.cpp \
 				$(GPUDIR)/GeDisasm.cpp \
 				$(NATIVEDIR)/file/path.cpp \
 				$(GPUDIR)/GPUCommon.cpp \
