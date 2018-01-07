@@ -402,6 +402,7 @@ GPU_DX9::GPU_DX9(GraphicsContext *gfxCtx)
 	framebufferManager_ = framebufferManagerDX9_;
 	textureCacheDX9_ = new TextureCacheDX9();
 	textureCache_ = textureCacheDX9_;
+	drawEngineCommon_ = &drawEngine_;
 
 	shaderManager_ = new ShaderManagerDX9();
 	drawEngine_.SetShaderManager(shaderManager_);
@@ -893,34 +894,6 @@ void GPU_DX9::Execute_ViewportType(u32 op, u32 diff) {
 	case GE_CMD_VIEWPORTZCENTER:
 		shaderManager_->DirtyUniform(DIRTY_PROJMATRIX | DIRTY_DEPTHRANGE);
 		break;
-	}
-}
-
-void GPU_DX9::Execute_BoundingBox(u32 op, u32 diff) {
-	// Just resetting, nothing to bound.
-	const u32 data = op & 0x00FFFFFF;
-	if (data == 0) {
-		// TODO: Should this set the bboxResult?  Let's set it true for now.
-		currentList->bboxResult = true;
-		return;
-	}
-	if (((data & 7) == 0) && data <= 64) {  // Sanity check
-		void *control_points = Memory::GetPointer(gstate_c.vertexAddr);
-		if (gstate.vertType & GE_VTYPE_IDX_MASK) {
-			ERROR_LOG_REPORT_ONCE(boundingbox, G3D, "Indexed bounding box data not supported.");
-			// Data seems invalid. Let's assume the box test passed.
-			currentList->bboxResult = true;
-			return;
-		}
-
-		// Test if the bounding box is within the drawing region.
-		if (control_points) {
-			currentList->bboxResult = drawEngine_.TestBoundingBox(control_points, data, gstate.vertType);
-		}
-	} else {
-		ERROR_LOG_REPORT_ONCE(boundingbox, G3D, "Bad bounding box data: %06x", data);
-		// Data seems invalid. Let's assume the box test passed.
-		currentList->bboxResult = true;
 	}
 }
 

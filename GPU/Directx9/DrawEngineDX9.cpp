@@ -107,6 +107,8 @@ DrawEngineDX9::DrawEngineDX9()
 	indexGen.Setup(decIndex);
 
 	InitDeviceObjects();
+
+	tessDataTransfer = new TessellationDataTransferDX9();
 }
 
 DrawEngineDX9::~DrawEngineDX9() {
@@ -121,6 +123,8 @@ DrawEngineDX9::~DrawEngineDX9() {
 			decl->second->Release();
 		}
 	}
+
+	delete tessDataTransfer;
 }
 
 void DrawEngineDX9::InitDeviceObjects() {
@@ -554,6 +558,10 @@ VertexArrayInfoDX9::~VertexArrayInfoDX9() {
 	}
 }
 
+static uint32_t SwapRB(uint32_t c) {
+	return (c & 0xFF00FF00) | ((c >> 16) & 0xFF) | ((c << 16) & 0xFF0000);
+}
+
 // The inline wrapper in the header checks for numDrawCalls == 0
 void DrawEngineDX9::DoFlush() {
 	gpuStats.numFlushes++;
@@ -847,7 +855,8 @@ rotateVBO:
 			}
 
 			dxstate.colorMask.set((mask & D3DCLEAR_TARGET) != 0, (mask & D3DCLEAR_TARGET) != 0, (mask & D3DCLEAR_TARGET) != 0, (mask & D3DCLEAR_STENCIL) != 0);
-			pD3Ddevice->Clear(0, NULL, mask, clearColor, clearDepth, clearColor >> 24);
+
+			pD3Ddevice->Clear(0, NULL, mask, SwapRB(clearColor), clearDepth, clearColor >> 24);
 
 			int scissorX1 = gstate.getScissorX1();
 			int scissorY1 = gstate.getScissorY1();
@@ -895,6 +904,10 @@ void DrawEngineDX9::Resized() {
 
 bool DrawEngineDX9::IsCodePtrVertexDecoder(const u8 *ptr) const {
 	return decJitCache_->IsInSpace(ptr);
+}
+
+void DX9::DrawEngineDX9::TessellationDataTransferDX9::SendDataToShader(const float * pos, const float * tex, const float * col, int size, bool hasColor, bool hasTexCoords)
+{
 }
 
 }  // namespace
