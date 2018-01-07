@@ -150,7 +150,7 @@ SOURCES_CXX += $(GPUCOMMONDIR)/TextureDecoder.cpp \
 				$(GPUDIR)/GLES/TextureCacheGLES.cpp \
 				$(GPUDIR)/GLES/TextureScalerGLES.cpp \
 				$(GPUDIR)/GLES/DrawEngineGLES.cpp \
-				$(GPUDIR)/GLES/VertexShaderGenerator.cpp \
+				$(GPUDIR)/GLES/VertexShaderGeneratorGLES.cpp \
 				$(NATIVEDIR)/base/backtrace.cpp \
 				$(NATIVEDIR)/base/buffer.cpp \
 				$(NATIVEDIR)/base/colorutil.cpp \
