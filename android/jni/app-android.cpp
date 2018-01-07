@@ -55,7 +55,8 @@ enum {
 	ANDROID_VERSION_KITKAT = 19,
 	ANDROID_VERSION_LOLLIPOP = 21,
 	ANDROID_VERSION_MARSHMALLOW = 23,
-	ANDROID_VERSION_N = 24,
+	ANDROID_VERSION_NOUGAT = 24,
+	ANDROID_VERSION_NOUGAT_1 = 25,
 };
 
 struct FrameCommand {
@@ -79,7 +80,7 @@ public:
 	void SwapBuffers() override;
 	void SwapInterval(int interval) override {}
 	void Resize() override {}
-	Draw::DrawContext *CreateThin3DContext() override {
+	Draw::DrawContext *CreateDrawContext() override {
 		CheckGLExtensions();
 		return Draw::T3DCreateGLContext();
 	}
@@ -145,7 +146,7 @@ public:
 	void SwapBuffers() override {}
 	void SwapInterval(int interval) override {}
 	void Resize() override {}
-	Draw::DrawContext *CreateThin3DContext() override {
+	Draw::DrawContext *CreateDrawContext() override {
 		CheckGLExtensions();
 		return Draw::T3DCreateGLContext();
 	}
@@ -166,7 +167,7 @@ public:
 
 	void *GetAPIContext() override { return g_Vulkan; }
 
-	Draw::DrawContext *CreateThin3DContext() override {
+	Draw::DrawContext *CreateDrawContext() override {
 		return Draw::T3DCreateVulkanContext(g_Vulkan);
 	}
 };

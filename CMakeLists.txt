@@ -337,7 +337,10 @@ add_library(Common STATIC
 	Common/KeyMap.h
 	Common/LogManager.cpp
 	Common/LogManager.h
-	Common/MemArena.cpp
+	Common/MemArenaAndroid.cpp
+	Common/MemArenaDarwin.cpp
+	Common/MemArenaPosix.cpp
+	Common/MemArenaWin32.cpp
 	Common/MemArena.h
 	Common/MemoryUtil.cpp
 	Common/MemoryUtil.h
@@ -736,6 +739,7 @@ list(APPEND NativeAppSource
 	UI/InstallZipScreen.cpp
 	UI/ProfilerDraw.cpp
 	UI/ui_atlas.cpp
+	UI/TextureUtil.cpp
 	UI/ComboKeyMappingScreen.cpp)
 
 if(ANDROID)
@@ -1070,8 +1074,8 @@ set(GPU_GLES
 	GPU/GLES/FragmentShaderGeneratorGLES.h
 	GPU/GLES/FragmentTestCacheGLES.cpp
 	GPU/GLES/FragmentTestCacheGLES.h
-	GPU/GLES/FramebufferGLES.cpp
-	GPU/GLES/FramebufferGLES.h
+	GPU/GLES/FramebufferManagerGLES.cpp
+	GPU/GLES/FramebufferManagerGLES.h
 	GPU/GLES/ShaderManagerGLES.cpp
 	GPU/GLES/ShaderManagerGLES.h
 	GPU/GLES/StateMappingGLES.cpp

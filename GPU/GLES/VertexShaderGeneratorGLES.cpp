@@ -105,6 +105,8 @@ void GenerateVertexShader(const ShaderID &id, char *buffer) {
 	const char *varying = "varying";
 	const char *attribute = "attribute";
 	const char * const * boneWeightDecl = boneWeightAttrDecl;
+	const char *texelFetch = NULL;
+	bool isAllowTexture1D = false;
 	bool highpFog = false;
 	bool highpTexcoord = false;
 
@@ -112,8 +114,13 @@ void GenerateVertexShader(const ShaderID &id, char *buffer) {
 		if (gstate_c.featureFlags & GPU_SUPPORTS_GLSL_ES_300) {
 			WRITE(p, "#version 300 es\n");
 			glslES30 = true;
+			texelFetch = "texelFetch";
 		} else {
 			WRITE(p, "#version 100\n");  // GLSL ES 1.0
+			if (gl_extensions.EXT_gpu_shader4) {
+				WRITE(p, "#extension GL_EXT_gpu_shader4 : enable\n");
+				texelFetch = "texelFetch2D";
+			}
 		}
 		WRITE(p, "precision highp float;\n");
 
@@ -126,10 +133,21 @@ void GenerateVertexShader(const ShaderID &id, char *buffer) {
 			if (gl_extensions.VersionGEThan(3, 3, 0)) {
 				glslES30 = true;
 				WRITE(p, "#version 330\n");
+				texelFetch = "texelFetch";
+				isAllowTexture1D = true;
 			} else if (gl_extensions.VersionGEThan(3, 0, 0)) {
 				WRITE(p, "#version 130\n");
+				if (gl_extensions.EXT_gpu_shader4) {
+					WRITE(p, "#extension GL_EXT_gpu_shader4 : enable\n");
+					texelFetch = "texelFetch";
+					isAllowTexture1D = true;
+				}
 			} else {
 				WRITE(p, "#version 110\n");
+				if (gl_extensions.EXT_gpu_shader4) {
+					WRITE(p, "#extension GL_EXT_gpu_shader4 : enable\n");
+					texelFetch = "texelFetch2D";
+				}
 			}
 		}
 
@@ -148,7 +166,7 @@ void GenerateVertexShader(const ShaderID &id, char *buffer) {
 	bool isModeThrough = id.Bit(VS_BIT_IS_THROUGH);
 	bool lmode = id.Bit(VS_BIT_LMODE) && !isModeThrough;  // TODO: Different expression than in shaderIDgen
 	bool doTexture = id.Bit(VS_BIT_DO_TEXTURE);
-	bool doTextureProjection = id.Bit(VS_BIT_DO_TEXTURE_PROJ);
+	bool doTextureProjection = id.Bit(VS_BIT_DO_TEXTURE_TRANSFORM);
 
 	GETexMapMode uvGenMode = static_cast<GETexMapMode>(id.Bits(VS_BIT_UVGEN_MODE, 2));
 
@@ -207,11 +225,14 @@ void GenerateVertexShader(const ShaderID &id, char *buffer) {
 	if (useHWTransform && hasNormal)
 		WRITE(p, "%s mediump vec3 normal;\n", attribute);
 
+	bool texcoordVec3In = false;
 	if (doTexture && hasTexcoord) {
-		if (!useHWTransform && doTextureProjection && !throughmode)
+		if (!useHWTransform && doTextureProjection && !throughmode) {
 			WRITE(p, "%s vec3 texcoord;\n", attribute);
-		else
+			texcoordVec3In = true;
+		} else {
 			WRITE(p, "%s vec2 texcoord;\n", attribute);
+		}
 	}
 	if (hasColor) {
 		WRITE(p, "%s lowp vec4 color0;\n", attribute);
@@ -297,11 +318,7 @@ void GenerateVertexShader(const ShaderID &id, char *buffer) {
 	}
 
 	if (doTexture) {
-		if (doTextureProjection) {
-			WRITE(p, "%s %s vec3 v_texcoord;\n", varying, highpTexcoord ? "highp" : "mediump");
-		} else {
-			WRITE(p, "%s %s vec2 v_texcoord;\n", varying, highpTexcoord ? "highp" : "mediump");
-		}
+		WRITE(p, "%s %s vec3 v_texcoord;\n", varying, highpTexcoord ? "highp" : "mediump");
 	}
 
 	if (enableFog) {
@@ -327,7 +344,7 @@ void GenerateVertexShader(const ShaderID &id, char *buffer) {
 
 	// Hardware tessellation
 	if (doBezier || doSpline) {
-		const char *sampler = gl_extensions.IsGLES ? "sampler2D" : "sampler1D";
+		const char *sampler = !isAllowTexture1D ? "sampler2D" : "sampler1D";
 		WRITE(p, "uniform %s u_tess_pos_tex;\n", sampler);
 		WRITE(p, "uniform %s u_tess_tex_tex;\n", sampler);
 		WRITE(p, "uniform %s u_tess_col_tex;\n", sampler);
@@ -355,31 +372,31 @@ void GenerateVertexShader(const ShaderID &id, char *buffer) {
 
 			WRITE(p, "void spline_knot(ivec2 num_patches, ivec2 type, out vec2 knot[6], ivec2 patch_pos) {\n");
 			WRITE(p, "  for (int i = 0; i < 6; ++i) {\n");
-			WRITE(p, "    knot[i] = vec2(i + patch_pos.x - 2, i + patch_pos.y - 2);\n");
+			WRITE(p, "    knot[i] = vec2(float(i + patch_pos.x - 2), float(i + patch_pos.y - 2));\n");
 			WRITE(p, "  }\n");
 			WRITE(p, "  if ((type.x & 1) != 0) {\n");
 			WRITE(p, "    if (patch_pos.x <= 2)\n");
-			WRITE(p, "      knot[0].x = 0;\n");
+			WRITE(p, "      knot[0].x = 0.0;\n");
 			WRITE(p, "    if (patch_pos.x <= 1)\n");
-			WRITE(p, "      knot[1].x = 0;\n");
+			WRITE(p, "      knot[1].x = 0.0;\n");
 			WRITE(p, "  }\n");
 			WRITE(p, "  if ((type.x & 2) != 0) {\n");
 			WRITE(p, "    if (patch_pos.x >= (num_patches.x - 2))\n");
-			WRITE(p, "      knot[5].x = num_patches.x;\n");
+			WRITE(p, "      knot[5].x = float(num_patches.x);\n");
 			WRITE(p, "    if (patch_pos.x == (num_patches.x - 1))\n");
-			WRITE(p, "      knot[4].x = num_patches.x;\n");
+			WRITE(p, "      knot[4].x = float(num_patches.x);\n");
 			WRITE(p, "  }\n");
 			WRITE(p, "  if ((type.y & 1) != 0) {\n");
 			WRITE(p, "    if (patch_pos.y <= 2)\n");
-			WRITE(p, "      knot[0].y = 0;\n");
+			WRITE(p, "      knot[0].y = 0.0;\n");
 			WRITE(p, "    if (patch_pos.y <= 1)\n");
-			WRITE(p, "      knot[1].y = 0;\n");
+			WRITE(p, "      knot[1].y = 0.0;\n");
 			WRITE(p, "  }\n");
 			WRITE(p, "  if ((type.y & 2) != 0) {\n");
 			WRITE(p, "    if (patch_pos.y >= (num_patches.y - 2))\n");
-			WRITE(p, "      knot[5].y = num_patches.y;\n");
+			WRITE(p, "      knot[5].y = float(num_patches.y);\n");
 			WRITE(p, "    if (patch_pos.y == (num_patches.y - 1))\n");
-			WRITE(p, "      knot[4].y = num_patches.y;\n");
+			WRITE(p, "      knot[4].y = float(num_patches.y);\n");
 			WRITE(p, "  }\n");
 			WRITE(p, "}\n");
 
@@ -412,10 +429,10 @@ void GenerateVertexShader(const ShaderID &id, char *buffer) {
 	if (!useHWTransform) {
 		// Simple pass-through of vertex data to fragment shader
 		if (doTexture) {
-			if (throughmode && doTextureProjection) {
-				WRITE(p, "  v_texcoord = vec3(texcoord, 1.0);\n");
-			} else {
+			if (texcoordVec3In) {
 				WRITE(p, "  v_texcoord = texcoord;\n");
+			} else {
+				WRITE(p, "  v_texcoord = vec3(texcoord, 1.0);\n");
 			}
 		}
 		if (hasColor) {
@@ -449,18 +466,18 @@ void GenerateVertexShader(const ShaderID &id, char *buffer) {
 				WRITE(p, "  vec2 _tex[16];\n");
 				WRITE(p, "  vec4 _col[16];\n");
 				WRITE(p, "  int num_patches_u = %s;\n", doBezier ? "(u_spline_count_u - 1) / 3" : "u_spline_count_u - 3");
-				WRITE(p, "  int u = int(mod(gl_InstanceID, num_patches_u));\n");
-				WRITE(p, "  int v = (gl_InstanceID / num_patches_u);\n");
+				WRITE(p, "  int u = int(mod(float(gl_InstanceID), float(num_patches_u)));\n");
+				WRITE(p, "  int v = gl_InstanceID / num_patches_u;\n");
 				WRITE(p, "  ivec2 patch_pos = ivec2(u, v);\n");
 				WRITE(p, "  for (int i = 0; i < 4; i++) {\n");
 				WRITE(p, "    for (int j = 0; j < 4; j++) {\n");
 				WRITE(p, "      int index = (i + v%s) * u_spline_count_u + (j + u%s);\n", doBezier ? " * 3" : "", doBezier ? " * 3" : "");
-				const char *index = gl_extensions.IsGLES ? "ivec2(index, 0)" : "index";
-				WRITE(p, "      _pos[i * 4 + j] = texelFetch(u_tess_pos_tex, %s, 0).xyz;\n", index);
+				const char *index = !isAllowTexture1D ? "ivec2(index, 0)" : "index";
+				WRITE(p, "      _pos[i * 4 + j] = %s(u_tess_pos_tex, %s, 0).xyz;\n", texelFetch, index);
 				if (doTexture && hasTexcoord && hasTexcoordTess)
-					WRITE(p, "      _tex[i * 4 + j] = texelFetch(u_tess_tex_tex, %s, 0).xy;\n", index);
+					WRITE(p, "      _tex[i * 4 + j] = %s(u_tess_tex_tex, %s, 0).xy;\n", texelFetch, index);
 				if (hasColor && hasColorTess)
-					WRITE(p, "      _col[i * 4 + j] = texelFetch(u_tess_col_tex, %s, 0).rgba;\n", index);
+					WRITE(p, "      _col[i * 4 + j] = %s(u_tess_col_tex, %s, 0).rgba;\n", texelFetch, index);
 				WRITE(p, "    }\n");
 				WRITE(p, "  }\n");
 				WRITE(p, "  vec2 tess_pos = position.xy;\n");
@@ -476,20 +493,20 @@ void GenerateVertexShader(const ShaderID &id, char *buffer) {
 					WRITE(p, "  ivec2 spline_type = ivec2(u_spline_type_u, u_spline_type_v);\n");
 					WRITE(p, "  vec2 knots[6];\n");
 					WRITE(p, "  spline_knot(spline_num_patches, spline_type, knots, patch_pos);\n");
-					WRITE(p, "  spline_weight(tess_pos + patch_pos, knots, weights);\n");
+					WRITE(p, "  spline_weight(tess_pos + vec2(patch_pos), knots, weights);\n");
 				}
 				WRITE(p, "  vec3 pos = tess_sample(_pos, weights);\n");
 				if (doTexture && hasTexcoord) {
 					if (hasTexcoordTess)
 						WRITE(p, "  vec2 tex = tess_sample(_tex, weights);\n");
 					else
-						WRITE(p, "  vec2 tex = tess_pos + patch_pos;\n");
+						WRITE(p, "  vec2 tex = tess_pos + vec2(patch_pos);\n");
 				}
 				if (hasColor) {
 					if (hasColorTess)
 						WRITE(p, "  vec4 col = tess_sample(_col, weights);\n");
 					else
-						WRITE(p, "  vec4 col = texelFetch(u_tess_col_tex, %s, 0).rgba;\n", gl_extensions.IsGLES ? "ivec2(0, 0)" : "0");
+						WRITE(p, "  vec4 col = %s(u_tess_col_tex, %s, 0).rgba;\n", texelFetch, !isAllowTexture1D ? "ivec2(0, 0)" : "0");
 				}
 				if (hasNormal) {
 					// Curved surface is probably always need to compute normal(not sampling from control points)
@@ -515,23 +532,19 @@ void GenerateVertexShader(const ShaderID &id, char *buffer) {
 						WRITE(p, "  vec2 tess_next_v = vec2(0.0, normal.y);\n");
 						// Right
 						WRITE(p, "  vec2 tess_pos_r = tess_pos + tess_next_u;\n");
-						WRITE(p, "  spline_knot(spline_num_patches, spline_type, knots, patch_pos);\n");
-						WRITE(p, "  spline_weight(tess_pos_r + patch_pos, knots, weights);\n");
+						WRITE(p, "  spline_weight(tess_pos_r + vec2(patch_pos), knots, weights);\n");
 						WRITE(p, "  vec3 pos_r = tess_sample(_pos, weights);\n");
 						// Left
 						WRITE(p, "  vec2 tess_pos_l = tess_pos - tess_next_u;\n");
-						WRITE(p, "  spline_knot(spline_num_patches, spline_type, knots, patch_pos);\n");
-						WRITE(p, "  spline_weight(tess_pos_l + patch_pos, knots, weights);\n");
+						WRITE(p, "  spline_weight(tess_pos_l + vec2(patch_pos), knots, weights);\n");
 						WRITE(p, "  vec3 pos_l = tess_sample(_pos, weights);\n");
 						// Down
 						WRITE(p, "  vec2 tess_pos_d = tess_pos + tess_next_v;\n");
-						WRITE(p, "  spline_knot(spline_num_patches, spline_type, knots, patch_pos);\n");
-						WRITE(p, "  spline_weight(tess_pos_d + patch_pos, knots, weights);\n");
+						WRITE(p, "  spline_weight(tess_pos_d + vec2(patch_pos), knots, weights);\n");
 						WRITE(p, "  vec3 pos_d = tess_sample(_pos, weights);\n");
 						// Up
 						WRITE(p, "  vec2 tess_pos_u = tess_pos - tess_next_v;\n");
-						WRITE(p, "  spline_knot(spline_num_patches, spline_type, knots, patch_pos);\n");
-						WRITE(p, "  spline_weight(tess_pos_u + patch_pos, knots, weights);\n");
+						WRITE(p, "  spline_weight(tess_pos_u + vec2(patch_pos), knots, weights);\n");
 						WRITE(p, "  vec3 pos_u = tess_sample(_pos, weights);\n");
 
 						WRITE(p, "  vec3 du = pos_r - pos_l;\n");
@@ -787,20 +800,22 @@ void GenerateVertexShader(const ShaderID &id, char *buffer) {
 				if (scaleUV) {
 					if (hasTexcoord) {
 						if (doBezier || doSpline)
-							WRITE(p, "  v_texcoord = tex * u_uvscaleoffset.xy;\n");
+							// TODO: Need fix?
+							// Fix to avoid temporarily texture animation bug with hardware tessellation.
+							WRITE(p, "  v_texcoord = vec3(tex * u_uvscaleoffset.xy + u_uvscaleoffset.zw, 0.0);\n");
 						else
-							WRITE(p, "  v_texcoord = texcoord * u_uvscaleoffset.xy;\n");
+							WRITE(p, "  v_texcoord = vec3(texcoord.xy * u_uvscaleoffset.xy, 0.0);\n");
 					} else {
-						WRITE(p, "  v_texcoord = vec2(0.0);\n");
+						WRITE(p, "  v_texcoord = vec3(0.0);\n");
 					}
 				} else {
 					if (hasTexcoord) {
 						if (doBezier || doSpline)
-							WRITE(p, "  v_texcoord = tex * u_uvscaleoffset.xy + u_uvscaleoffset.zw;\n");
+							WRITE(p, "  v_texcoord = vec3(tex * u_uvscaleoffset.xy + u_uvscaleoffset.zw, 0.0);\n");
 						else
-							WRITE(p, "  v_texcoord = texcoord * u_uvscaleoffset.xy + u_uvscaleoffset.zw;\n");
+							WRITE(p, "  v_texcoord = vec3(texcoord.xy * u_uvscaleoffset.xy + u_uvscaleoffset.zw, 0.0);\n");
 					} else {
-						WRITE(p, "  v_texcoord = u_uvscaleoffset.zw;\n");
+						WRITE(p, "  v_texcoord = vec3(u_uvscaleoffset.zw, 0.0);\n");
 					}
 				}
 				break;
@@ -841,7 +856,7 @@ void GenerateVertexShader(const ShaderID &id, char *buffer) {
 				break;
 
 			case GE_TEXMAP_ENVIRONMENT_MAP:  // Shade mapping - use dots from light sources.
-				WRITE(p, "  v_texcoord = u_uvscaleoffset.xy * vec2(1.0 + dot(normalize(u_lightpos%i), worldnormal), 1.0 + dot(normalize(u_lightpos%i), worldnormal)) * 0.5;\n", ls0, ls1);
+				WRITE(p, "  v_texcoord = vec3(u_uvscaleoffset.xy * vec2(1.0 + dot(normalize(u_lightpos%i), worldnormal), 1.0 + dot(normalize(u_lightpos%i), worldnormal)) * 0.5, 1.0);\n", ls0, ls1);
 				break;
 
 			default:

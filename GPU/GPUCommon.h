@@ -4,6 +4,7 @@
 #include "Common/MemoryUtil.h"
 #include "Core/ThreadEventQueue.h"
 #include "GPU/GPUInterface.h"
+#include "GPU/GPUState.h"
 #include "GPU/Common/GPUDebugInterface.h"
 
 #if defined(__ANDROID__)
@@ -17,6 +18,13 @@ typedef ThreadEventQueue<GPUInterface, GPUEvent, GPUEventType, GPU_EVENT_INVALID
 class FramebufferManagerCommon;
 class TextureCacheCommon;
 class DrawEngineCommon;
+
+enum DrawType {
+	DRAW_UNKNOWN,
+	DRAW_PRIM,
+	DRAW_SPLINE,
+	DRAW_BEZIER,
+};
 
 class GPUCommon : public GPUThreadEventQueue, public GPUDebugInterface {
 public:
@@ -39,6 +47,7 @@ public:
 
 	void ExecuteOp(u32 op, u32 diff) override;
 	void PreExecuteOp(u32 op, u32 diff) override;
+
 	bool InterpretList(DisplayList &list) override;
 	virtual bool ProcessDLQueue();
 	u32  UpdateStall(int listid, u32 newstall) override;
@@ -73,6 +82,8 @@ public:
 	bool PerformStencilUpload(u32 dest, int size) override;
 
 	void Execute_OffsetAddr(u32 op, u32 diff);
+	void Execute_Vaddr(u32 op, u32 diff);
+	void Execute_Iaddr(u32 op, u32 diff);
 	void Execute_Origin(u32 op, u32 diff);
 	void Execute_Jump(u32 op, u32 diff);
 	void Execute_BJump(u32 op, u32 diff);
@@ -83,6 +94,32 @@ public:
 	void Execute_Bezier(u32 op, u32 diff);
 	void Execute_Spline(u32 op, u32 diff);
 	void Execute_BoundingBox(u32 op, u32 diff);
+	void Execute_BlockTransferStart(u32 op, u32 diff);
+
+	void Execute_TexScaleU(u32 op, u32 diff);
+	void Execute_TexScaleV(u32 op, u32 diff);
+	void Execute_TexOffsetU(u32 op, u32 diff);
+	void Execute_TexOffsetV(u32 op, u32 diff);
+
+	void Execute_WorldMtxNum(u32 op, u32 diff);
+	void Execute_WorldMtxData(u32 op, u32 diff);
+	void Execute_ViewMtxNum(u32 op, u32 diff);
+	void Execute_ViewMtxData(u32 op, u32 diff);
+	void Execute_ProjMtxNum(u32 op, u32 diff);
+	void Execute_ProjMtxData(u32 op, u32 diff);
+	void Execute_TgenMtxNum(u32 op, u32 diff);
+	void Execute_TgenMtxData(u32 op, u32 diff);
+	void Execute_BoneMtxNum(u32 op, u32 diff);
+	void Execute_BoneMtxData(u32 op, u32 diff);
+
+	void Execute_MorphWeight(u32 op, u32 diff);
+
+	void Execute_Unknown(u32 op, u32 diff);
+
+	int EstimatePerVertexCost();
+
+	// Note: Not virtual!
+	inline void Flush();
 
 	u64 GetTickEstimate() override {
 #if defined(_M_X64) || defined(__ANDROID__)
@@ -156,6 +193,13 @@ public:
 	}
 
 protected:
+	void SetDrawType(DrawType type) {
+		if (type != lastDraw_) {
+			gstate_c.Dirty(DIRTY_UVSCALEOFFSET);
+			lastDraw_ = type;
+		}
+	}
+
 	virtual void InitClearInternal() {}
 	virtual void BeginFrameInternal() {}
 	virtual void CopyDisplayToOutputInternal() {}
@@ -194,18 +238,28 @@ protected:
 	// Allows early unlocking with a guard.  Do not double unlock.
 	class easy_guard {
 	public:
-		easy_guard(recursive_mutex &mtx) : mtx_(mtx), locked_(true) { mtx_.lock(); }
-		~easy_guard() { if (locked_) mtx_.unlock(); }
-		void unlock() { if (locked_) mtx_.unlock(); else Crash(); locked_ = false; }
+		easy_guard(optional_recursive_mutex &mtx) : mtx_(mtx), locked_(true) { mtx_.lock(); }
+		~easy_guard() {
+			if (locked_)
+				mtx_.unlock();
+		}
+		void unlock() {
+			if (locked_)
+				mtx_.unlock();
+			else
+				Crash();
+			locked_ = false;
+		}
 
 	private:
-		recursive_mutex &mtx_;
+		optional_recursive_mutex &mtx_;
 		bool locked_;
 	};
 
 	FramebufferManagerCommon *framebufferManager_;
 	TextureCacheCommon *textureCache_;
 	DrawEngineCommon *drawEngineCommon_;
+	ShaderManagerCommon *shaderManager_;
 
 	typedef std::list<int> DisplayListQueue;
 
@@ -213,7 +267,7 @@ protected:
 	DisplayList dls[DisplayListMaxCount];
 	DisplayList *currentList;
 	DisplayListQueue dlQueue;
-	recursive_mutex listLock;
+	optional_recursive_mutex listLock;
 
 	bool interruptRunning;
 	GPURunState gpuState;
@@ -230,6 +284,7 @@ protected:
 	bool dumpThisFrame_;
 	bool interruptsEnabled_;
 	bool resized_;
+	DrawType lastDraw_;
 
 private:
 

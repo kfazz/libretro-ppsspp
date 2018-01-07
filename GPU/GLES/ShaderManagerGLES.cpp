@@ -15,8 +15,6 @@
 // Official git repository and contact information can be found at
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
-// #define SHADERLOG
-
 #if defined(_WIN32) && defined(SHADERLOG)
 #include "Common/CommonWindows.h"
 #endif
@@ -229,17 +227,16 @@ LinkedShader::LinkedShader(ShaderID VSID, Shader *vs, ShaderID FSID, Shader *fs,
 		sprintf(temp, "u_lightspecular%i", i);
 		u_lightspecular[i] = glGetUniformLocation(program, temp);
 	}
-	if (gstate_c.bezier || gstate_c.spline) {
-		u_tess_pos_tex = glGetUniformLocation(program, "u_tess_pos_tex");
-		u_tess_tex_tex = glGetUniformLocation(program, "u_tess_tex_tex");
-		u_tess_col_tex = glGetUniformLocation(program, "u_tess_col_tex");
-		u_spline_count_u = glGetUniformLocation(program, "u_spline_count_u");
-		if (gstate_c.spline) {
-			u_spline_count_v = glGetUniformLocation(program, "u_spline_count_v");
-			u_spline_type_u = glGetUniformLocation(program, "u_spline_type_u");
-			u_spline_type_v = glGetUniformLocation(program, "u_spline_type_v");
-		}
-	}
+
+	// We need to fetch these unconditionally, gstate_c.spline or bezier will not be set if we
+	// create this shader at load time from the shader cache.
+	u_tess_pos_tex = glGetUniformLocation(program, "u_tess_pos_tex");
+	u_tess_tex_tex = glGetUniformLocation(program, "u_tess_tex_tex");
+	u_tess_col_tex = glGetUniformLocation(program, "u_tess_col_tex");
+	u_spline_count_u = glGetUniformLocation(program, "u_spline_count_u");
+	u_spline_count_v = glGetUniformLocation(program, "u_spline_count_v");
+	u_spline_type_u = glGetUniformLocation(program, "u_spline_type_u");
+	u_spline_type_v = glGetUniformLocation(program, "u_spline_type_v");
 
 	attrMask = 0;
 	if (-1 != glGetAttribLocation(program, "position")) attrMask |= 1 << ATTR_POSITION;
@@ -293,14 +290,11 @@ LinkedShader::LinkedShader(ShaderID VSID, Shader *vs, ShaderID FSID, Shader *fs,
 				u_lightpos[i] != -1)
 			availableUniforms |= DIRTY_LIGHT0 << i;
 	}
-	if (gstate_c.bezier) {
-		if (u_spline_count_u != -1) availableUniforms |= DIRTY_BEZIERCOUNTU;
-	} else if (gstate_c.spline) {
-		if (u_spline_count_u != -1) availableUniforms |= DIRTY_SPLINECOUNTU;
-		if (u_spline_count_v != -1) availableUniforms |= DIRTY_SPLINECOUNTV;
-		if (u_spline_type_u != -1) availableUniforms |= DIRTY_SPLINETYPEU;
-		if (u_spline_type_v != -1) availableUniforms |= DIRTY_SPLINETYPEV;
-	}
+	if (u_spline_count_u != -1) availableUniforms |= DIRTY_BEZIERCOUNTU;
+	if (u_spline_count_u != -1) availableUniforms |= DIRTY_SPLINECOUNTU;
+	if (u_spline_count_v != -1) availableUniforms |= DIRTY_SPLINECOUNTV;
+	if (u_spline_type_u != -1) availableUniforms |= DIRTY_SPLINETYPEU;
+	if (u_spline_type_v != -1) availableUniforms |= DIRTY_SPLINETYPEV;
 
 	glUseProgram(program);
 
@@ -308,13 +302,17 @@ LinkedShader::LinkedShader(ShaderID VSID, Shader *vs, ShaderID FSID, Shader *fs,
 	glUniform1i(u_tex, 0);
 	glUniform1i(u_fbotex, 1);
 	glUniform1i(u_testtex, 2);
-	if (gstate_c.bezier || gstate_c.spline) {
+
+	
+	if (u_tess_pos_tex != -1)
 		glUniform1i(u_tess_pos_tex, 3); // Texture unit 3
+	if (u_tess_tex_tex != -1)
 		glUniform1i(u_tess_tex_tex, 4); // Texture unit 4
+	if (u_tess_col_tex != -1)
 		glUniform1i(u_tess_col_tex, 5); // Texture unit 5
-	}
+
 	// The rest, use the "dirty" mechanism.
-	dirtyUniforms = DIRTY_ALL;
+	dirtyUniforms = DIRTY_ALL_UNIFORMS;
 }
 
 LinkedShader::~LinkedShader() {
@@ -547,12 +545,6 @@ void LinkedShader::UpdateUniforms(u32 vertType, const ShaderID &vsid) {
 		glUniform2fv(u_fogcoef, 1, fogcoef);
 	}
 
-	// Texturing
-
-	// If this dirty check is changed to true, Frontier Gate Boost works in texcoord speedhack mode.
-	// This means that it's not a flushing issue.
-	// It uses GE_TEXMAP_TEXTURE_MATRIX with GE_PROJMAP_UV a lot.
-	// Can't figure out why it doesn't dirty at the right points though...
 	if (dirty & DIRTY_UVSCALEOFFSET) {
 		const float invW = 1.0f / (float)gstate_c.curTextureWidth;
 		const float invH = 1.0f / (float)gstate_c.curTextureHeight;
@@ -562,13 +554,10 @@ void LinkedShader::UpdateUniforms(u32 vertType, const ShaderID &vsid) {
 		const float heightFactor = (float)h * invH;
 		float uvscaleoff[4];
 		if (gstate_c.bezier || gstate_c.spline) {
-			// TODO: Move somewhere or fix properly
-			// Fix temporarily avoid texture scaling bug with hardware tessellation.
-			// This issue occurs probably since rev 9d7983e.
-			static const float rescale[4] = {1.0f, 2*127.5f/128.f, 2*32767.5f/32768.f, 1.0f};
-			const float factor = rescale[(vertType & GE_VTYPE_TC_MASK) >> GE_VTYPE_TC_SHIFT];
-			uvscaleoff[0] = gstate_c.uv.uScale * factor * widthFactor;
-			uvscaleoff[1] = gstate_c.uv.vScale * factor * heightFactor;
+			// When we are generating UV coordinates through the bezier/spline, we need to apply the scaling.
+			// However, this is missing a check that we're not getting our UV:s supplied for us in the vertices.
+			uvscaleoff[0] = gstate_c.uv.uScale * widthFactor;
+			uvscaleoff[1] = gstate_c.uv.vScale * heightFactor;
 			uvscaleoff[2] = gstate_c.uv.uOff * widthFactor;
 			uvscaleoff[3] = gstate_c.uv.vOff * heightFactor;
 		} else {
@@ -757,7 +746,7 @@ void LinkedShader::UpdateUniforms(u32 vertType, const ShaderID &vsid) {
 }
 
 ShaderManagerGLES::ShaderManagerGLES()
-		: lastShader_(nullptr), globalDirty_(DIRTY_ALL), shaderSwitchDirty_(0), diskCacheDirty_(false) {
+		: lastShader_(nullptr), shaderSwitchDirty_(0), diskCacheDirty_(false) {
 	codeBuffer_ = new char[16384];
 	lastFSID_.set_invalid();
 	lastVSID_.set_invalid();
@@ -781,7 +770,7 @@ void ShaderManagerGLES::Clear() {
 	linkedShaderCache_.clear();
 	fsCache_.clear();
 	vsCache_.clear();
-	globalDirty_ = DIRTY_ALL;
+	gstate_c.Dirty(DIRTY_ALL_UNIFORMS);
 	lastFSID_.set_invalid();
 	lastVSID_.set_invalid();
 	DirtyShader();
@@ -797,7 +786,7 @@ void ShaderManagerGLES::DirtyShader() {
 	lastFSID_.set_invalid();
 	lastVSID_.set_invalid();
 	DirtyLastShader();
-	globalDirty_ = DIRTY_ALL;
+	gstate_c.Dirty(DIRTY_ALL_UNIFORMS);
 	shaderSwitchDirty_ = 0;
 }
 
@@ -822,11 +811,12 @@ Shader *ShaderManagerGLES::CompileVertexShader(ShaderID VSID) {
 }
 
 Shader *ShaderManagerGLES::ApplyVertexShader(int prim, u32 vertType, ShaderID *VSID) {
-	if (globalDirty_) {
+	uint64_t dirty = gstate_c.GetDirtyUniforms();
+	if (dirty) {
 		if (lastShader_)
-			lastShader_->dirtyUniforms |= globalDirty_;
-		shaderSwitchDirty_ |= globalDirty_;
-		globalDirty_ = 0;
+			lastShader_->dirtyUniforms |= dirty;
+		shaderSwitchDirty_ |= dirty;
+		gstate_c.CleanUniforms();
 	}
 
 	bool useHWTransform = CanUseHardwareTransform(prim);
@@ -999,7 +989,7 @@ std::string ShaderManagerGLES::DebugGetShaderString(std::string id, DebugShaderT
 // as sometimes these features might have an effect on the ID bits.
 
 #define CACHE_HEADER_MAGIC 0x83277592
-#define CACHE_VERSION 1
+#define CACHE_VERSION 3
 struct CacheHeader {
 	uint32_t magic;
 	uint32_t version;

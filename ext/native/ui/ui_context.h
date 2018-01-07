@@ -36,7 +36,9 @@ public:
 	UIContext();
 	~UIContext();
 
-	void Init(Draw::DrawContext *thin3d, Draw::Pipeline *uipipe, Draw::Pipeline *uipipenotex, Draw::Texture *uitexture, DrawBuffer *uidrawbuffer, DrawBuffer *uidrawbufferTop);
+	void Init(Draw::DrawContext *thin3d, Draw::Pipeline *uipipe, Draw::Pipeline *uipipenotex, DrawBuffer *uidrawbuffer, DrawBuffer *uidrawbufferTop);
+
+	void FrameSetup(Draw::Texture *uiTexture);
 
 	void Begin();
 	void BeginNoTex();
@@ -74,10 +76,10 @@ public:
 	// in dps, like dp_xres and dp_yres
 	void SetBounds(const Bounds &b) { bounds_ = b; }
 	const Bounds &GetBounds() const { return bounds_; }
-	Draw::DrawContext *GetThin3DContext() { return thin3d_; }
+	Draw::DrawContext *GetDrawContext() { return draw_; }
 
 private:
-	Draw::DrawContext *thin3d_;
+	Draw::DrawContext *draw_;
 	Bounds bounds_;
 
 	float fontScaleX_;
@@ -85,7 +87,6 @@ private:
 	UI::FontStyle *fontStyle_;
 	TextDrawer *textDrawer_;
 
-	Draw::DrawContext *thin3D_;
 	Draw::SamplerState *sampler_;
 	Draw::Pipeline *ui_pipeline_;
 	Draw::Pipeline *ui_pipeline_notex_;

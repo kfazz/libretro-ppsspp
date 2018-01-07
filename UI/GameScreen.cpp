@@ -65,7 +65,7 @@ void GameScreen::CreateViews() {
 
 	leftColumn->Add(new Choice(di->T("Back"), "", false, new AnchorLayoutParams(150, WRAP_CONTENT, 10, NONE, NONE, 10)))->OnClick.Handle(this, &GameScreen::OnSwitchBack);
 	if (info) {
-		texvGameIcon_ = leftColumn->Add(new Thin3DTextureView(0, IS_DEFAULT, new AnchorLayoutParams(144 * 2, 80 * 2, 10, 10, NONE, NONE)));
+		texvGameIcon_ = leftColumn->Add(new TextureView(0, IS_DEFAULT, new AnchorLayoutParams(144 * 2, 80 * 2, 10, 10, NONE, NONE)));
 
 		LinearLayout *infoLayout = new LinearLayout(ORIENT_VERTICAL, new AnchorLayoutParams(10, 200, NONE, NONE));
 		leftColumn->Add(infoLayout);
@@ -185,14 +185,14 @@ void GameScreen::update(InputState &input) {
 
 	I18NCategory *ga = GetI18NCategory("Game");
 
-	Draw::DrawContext *thin3d = screenManager()->getThin3DContext();
+	Draw::DrawContext *thin3d = screenManager()->getDrawContext();
 
 	GameInfo *info = g_gameInfoCache->GetInfo(thin3d, gamePath_, GAMEINFO_WANTBG | GAMEINFO_WANTSIZE);
 
 	if (tvTitle_)
 		tvTitle_->SetText(info->GetTitle() + " (" + info->id + ")");
 	if (info->iconTexture && texvGameIcon_)	{
-		texvGameIcon_->SetTexture(info->iconTexture);
+		texvGameIcon_->SetTexture(info->iconTexture->GetTexture());
 		// Fade the icon with the background.
 		double loadTime = info->timeIconWasLoaded;
 		if (info->pic1Texture) {

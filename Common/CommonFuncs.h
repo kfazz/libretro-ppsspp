@@ -96,7 +96,6 @@ inline u64 __rotr64(u64 x, unsigned int shift){
 //	#define fstat64 _fstat64
 
 	#define fileno _fileno
-#ifndef _XBOX
 	#if _M_IX86
 		#define Crash() {__asm int 3}
 	#else
@@ -105,9 +104,6 @@ extern "C" {
 }
 		#define Crash() {DebugBreak();}
 	#endif // M_IX86
-#else
-	#define Crash() {DebugBreak();}
-#endif // _XBOX ndef
 #endif // WIN32 ndef
 
 // Generic function to get last error message.

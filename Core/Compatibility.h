@@ -48,6 +48,8 @@ struct CompatFlags {
 	bool VertexDepthRounding;
 	bool PixelDepthRounding;
 	bool DepthRangeHack;
+	bool ClearToRAM;
+	bool Force04154000Download;
 };
 
 class IniFile;
@@ -66,7 +68,7 @@ public:
 private:
 	void Clear();
 	void CheckSettings(IniFile &iniFile, const std::string &gameID);
-	void CheckSetting(IniFile &iniFile, const std::string &gameID, const char *option, bool &flag);
+	void CheckSetting(IniFile &iniFile, const std::string &gameID, const char *option, bool *flag);
 
 	CompatFlags flags_;
 };

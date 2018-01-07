@@ -53,7 +53,11 @@ SOURCES_C   += $(EXTDIR)/libkirk/amctrl.c \
 				$(EXTDIR)/libkirk/SHA1.c \
 				$(NATIVEDIR)/ext/libzip/zip_entry_free.c \
 				$(NATIVEDIR)/ext/libzip/zip_entry_new.c 
-SOURCES_CXX += $(COMMONDIR)/MemArena.cpp
+SOURCES_CXX += $(COMMONDIR)/MemArenaAndroid.cpp \
+		$(COMMONDIR)/MemArenaDarwin.cpp \
+		$(COMMONDIR)/MemArenaPosix.cpp \
+		$(COMMONDIR)/MemArenaWin32.cpp
+
 SOURCES_C   += $(NATIVEDIR)/ext/libzip/zip_err_str.c \
 				$(NATIVEDIR)/ext/libzip/zip_error.c \
 				$(NATIVEDIR)/ext/libzip/zip_error_clear.c \

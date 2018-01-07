@@ -48,41 +48,48 @@ static Draw::Buffer *vdata = nullptr;
 static Draw::Buffer *idata = nullptr;
 
 SoftGPU::SoftGPU(GraphicsContext *gfxCtx, Draw::DrawContext *_thin3D)
-	: gfxCtx_(gfxCtx), thin3d(_thin3D)
+	: gfxCtx_(gfxCtx), draw_(_thin3D)
 {
 	using namespace Draw;
-	fbTex = thin3d->CreateTexture(LINEAR2D, DataFormat::R8G8B8A8_UNORM, 480, 272, 1, 1);
+	TextureDesc desc{};
+	desc.type = TextureType::LINEAR2D;
+	desc.format = DataFormat::R8G8B8A8_UNORM;
+	desc.width = 480;
+	desc.height = 272;
+	desc.depth = 1;
+	desc.mipLevels = 1;
+	fbTex = draw_->CreateTexture(desc);
 
-	InputLayoutDesc desc = {
+	InputLayoutDesc inputDesc = {
 		{
 			{ 24, false },
 		},
 		{
 			{ 0, SEM_POSITION, DataFormat::R32G32B32_FLOAT, 0 },
 			{ 0, SEM_TEXCOORD0, DataFormat::R32G32_FLOAT, 12 },
-			{ 0, SEM_COLOR0, DataFormat::R32G32B32_FLOAT, 20 },
+			{ 0, SEM_COLOR0, DataFormat::R8G8B8A8_UNORM, 20 },
 		},
 	};
 
-	ShaderModule *vshader = thin3d->GetVshaderPreset(VS_TEXTURE_COLOR_2D);
+	ShaderModule *vshader = draw_->GetVshaderPreset(VS_TEXTURE_COLOR_2D);
 
-	vdata = thin3d->CreateBuffer(24 * 4, BufferUsageFlag::DYNAMIC | BufferUsageFlag::VERTEXDATA);
-	idata = thin3d->CreateBuffer(sizeof(int) * 6, BufferUsageFlag::DYNAMIC | BufferUsageFlag::INDEXDATA);
+	vdata = draw_->CreateBuffer(24 * 4, BufferUsageFlag::DYNAMIC | BufferUsageFlag::VERTEXDATA);
+	idata = draw_->CreateBuffer(sizeof(int) * 6, BufferUsageFlag::DYNAMIC | BufferUsageFlag::INDEXDATA);
 
-	InputLayout *inputLayout = thin3d->CreateInputLayout(desc);
-	DepthStencilState *depth = thin3d->CreateDepthStencilState({ false, false, Comparison::LESS });
-	BlendState *blendstateOff = thin3d->CreateBlendState({ false, 0xF });
-	RasterState *rasterNoCull = thin3d->CreateRasterState({});
+	InputLayout *inputLayout = draw_->CreateInputLayout(inputDesc);
+	DepthStencilState *depth = draw_->CreateDepthStencilState({ false, false, Comparison::LESS });
+	BlendState *blendstateOff = draw_->CreateBlendState({ false, 0xF });
+	RasterState *rasterNoCull = draw_->CreateRasterState({});
 
-	samplerNearest = thin3d->CreateSamplerState({ TextureFilter::NEAREST, TextureFilter::NEAREST, TextureFilter::NEAREST });
-	samplerLinear = thin3d->CreateSamplerState({ TextureFilter::LINEAR, TextureFilter::LINEAR, TextureFilter::LINEAR });
+	samplerNearest = draw_->CreateSamplerState({ TextureFilter::NEAREST, TextureFilter::NEAREST, TextureFilter::NEAREST });
+	samplerLinear = draw_->CreateSamplerState({ TextureFilter::LINEAR, TextureFilter::LINEAR, TextureFilter::LINEAR });
 
 	PipelineDesc pipelineDesc{
 		Primitive::TRIANGLE_LIST,
-		{ thin3d->GetVshaderPreset(VS_TEXTURE_COLOR_2D), thin3d->GetFshaderPreset(FS_TEXTURE_COLOR_2D) },
+		{ draw_->GetVshaderPreset(VS_TEXTURE_COLOR_2D), draw_->GetFshaderPreset(FS_TEXTURE_COLOR_2D) },
 		inputLayout, depth, blendstateOff, rasterNoCull
 	};
-	texColor = thin3d->CreateGraphicsPipeline(pipelineDesc);
+	texColor = draw_->CreateGraphicsPipeline(pipelineDesc);
 
 	fb.data = Memory::GetPointer(0x44000000); // TODO: correct default address?
 	depthbuf.data = Memory::GetPointer(0x44000000); // TODO: correct default address?
@@ -131,27 +138,26 @@ void SoftGPU::SetDisplayFramebuffer(u32 framebuf, u32 stride, GEBufferFormat for
 void SoftGPU::CopyToCurrentFboFromDisplayRam(int srcwidth, int srcheight) {
 	using namespace Draw;
 
-	if (!thin3d)
+	if (!draw_)
 		return;
 	float dstwidth = (float)PSP_CoreParameter().pixelWidth;
 	float dstheight = (float)PSP_CoreParameter().pixelHeight;
 
 	Viewport viewport = {0.0f, 0.0f, dstwidth, dstheight, 0.0f, 1.0f};
-	thin3d->SetViewports(1, &viewport);
+	draw_->SetViewports(1, &viewport);
 	SamplerState *sampler;
 	if (g_Config.iBufFilter == SCALE_NEAREST) {
 		sampler = samplerNearest;
 	} else {
 		sampler = samplerLinear;
 	}
-	thin3d->BindSamplerStates(0, 1, &sampler);
-	thin3d->SetScissorRect(0, 0, dstwidth, dstheight);
+	draw_->SetScissorRect(0, 0, dstwidth, dstheight);
 
 	float u0 = 0.0f;
 	float u1;
+	bool hasImage = true;
 	if (!Memory::IsValidAddress(displayFramebuf_)) {
-		u8 data[] = {0, 0, 0, 0};
-		fbTex->SetImageData(0, 0, 0, 1, 1, 1, 0, 4, data);
+		hasImage = false;
 		u1 = 1.0f;
 	} else if (displayFormat_ == GE_FORMAT_8888) {
 		u8 *data = Memory::GetPointer(displayFramebuf_);
@@ -187,7 +193,6 @@ void SoftGPU::CopyToCurrentFboFromDisplayRam(int srcwidth, int srcheight) {
 		fbTex->SetImageData(0, 0, 0, srcwidth, srcheight, 1, 0, srcwidth * 4, (const uint8_t *)&fbTexBuffer[0]);
 		u1 = 1.0f;
 	}
-	fbTex->Finalize(0);
 
 	float x, y, w, h;
 	CenterDisplayOutputRect(&x, &y, &w, &h, 480.0f, 272.0f, dstwidth, dstheight, ROTATION_LOCKED_HORIZONTAL);
@@ -214,36 +219,44 @@ void SoftGPU::CopyToCurrentFboFromDisplayRam(int srcwidth, int srcheight) {
 		uint32_t rgba;
 	};
 
-	float v0 = 1.0f;
-	float v1 = 0.0f;
+	if (hasImage) {
+		float v0 = 1.0f;
+		float v1 = 0.0f;
 
-	if (GetGPUBackend() == GPUBackend::VULKAN) {
-		std::swap(v0, v1);
+		if (GetGPUBackend() == GPUBackend::VULKAN) {
+			std::swap(v0, v1);
+		}
+
+		draw_->BindSamplerStates(0, 1, &sampler);
+
+		const Vertex verts[4] = {
+			{ x, y, 0,    u0, v0,  0xFFFFFFFF }, // TL
+			{ x, y2, 0,   u0, v1,  0xFFFFFFFF }, // BL
+			{ x2, y2, 0,  u1, v1,  0xFFFFFFFF }, // BR
+			{ x2, y, 0,   u1, v0,  0xFFFFFFFF }, // TR
+		};
+		vdata->SetData((const uint8_t *)verts, sizeof(verts));
+
+		int indexes[] = { 0, 1, 2, 0, 2, 3 };
+		idata->SetData((const uint8_t *)indexes, sizeof(indexes));
+
+		draw_->BindTexture(0, fbTex);
+
+		static const float identity4x4[16] = {
+			1.0f, 0.0f, 0.0f, 0.0f,
+			0.0f, 1.0f, 0.0f, 0.0f,
+			0.0f, 0.0f, 1.0f, 0.0f,
+			0.0f, 0.0f, 0.0f, 1.0f,
+		};
+
+		texColor->SetMatrix4x4("WorldViewProj", identity4x4);
+		draw_->BindPipeline(texColor);
+		draw_->BindVertexBuffers(0, 1, &vdata, nullptr);
+		draw_->BindIndexBuffer(idata, 0);
+		draw_->DrawIndexed(6, 0);
+	} else {
+		draw_->Clear(Draw::COLOR, 0, 0, 0);
 	}
-
-	const Vertex verts[4] = {
-		{x, y, 0,    u0, v0,  0xFFFFFFFF}, // TL
-		{x, y2, 0,   u0, v1,  0xFFFFFFFF}, // BL
-		{x2, y2, 0,  u1, v1,  0xFFFFFFFF}, // BR
-		{x2, y, 0,   u1, v0,  0xFFFFFFFF}, // TR
-	};
-	vdata->SetData((const uint8_t *)verts, sizeof(verts));
-
-	int indexes[] = {0, 1, 2, 0, 2, 3};
-	idata->SetData((const uint8_t *)indexes, sizeof(indexes));
-
-	thin3d->BindTexture(0, fbTex);
-
-	static const float identity4x4[16] = {
-		1.0f, 0.0f, 0.0f, 0.0f,
-		0.0f, 1.0f, 0.0f, 0.0f,
-		0.0f, 0.0f, 1.0f, 0.0f,
-		0.0f, 0.0f, 0.0f, 1.0f,
-	};
-
-	texColor->SetMatrix4x4("WorldViewProj", identity4x4);
-	thin3d->BindPipeline(texColor);
-	thin3d->DrawIndexed(vdata, idata, 6, 0);
 }
 
 void SoftGPU::CopyDisplayToOutput()
@@ -283,40 +296,12 @@ void SoftGPU::FastRunLoop(DisplayList &list) {
 	}
 }
 
-int EstimatePerVertexCost() {
-	// TODO: This is transform cost, also account for rasterization cost somehow... although it probably
-	// runs in parallel with transform.
-
-	// Also, this is all pure guesswork. If we can find a way to do measurements, that would be great.
-
-	// GTA wants a low value to run smooth, GoW wants a high value (otherwise it thinks things
-	// went too fast and starts doing all the work over again).
-
-	int cost = 20;
-	if (gstate.isLightingEnabled()) {
-		cost += 10;
-	}
-
-	for (int i = 0; i < 4; i++) {
-		if (gstate.isLightChanEnabled(i))
-			cost += 10;
-	}
-	if (gstate.getUVGenMode() != GE_TEXMAP_TEXTURE_COORDS) {
-		cost += 20;
-	}
-	// TODO: morphcount
-
-	return cost;
-}
-
-void SoftGPU::ExecuteOp(u32 op, u32 diff)
-{
+void SoftGPU::ExecuteOp(u32 op, u32 diff) {
 	u32 cmd = op >> 24;
 	u32 data = op & 0xFFFFFF;
 
 	// Handle control and drawing commands here directly. The others we delegate.
-	switch (cmd)
-	{
+	switch (cmd) {
 	case GE_CMD_BASE:
 		break;
 
@@ -735,14 +720,15 @@ void SoftGPU::ExecuteOp(u32 op, u32 diff)
 		break;
 
 	case GE_CMD_PROJMATRIXNUMBER:
-		gstate.projmtxnum = data & 0xF;
+		gstate.projmtxnum = data & 0x1F;
 		break;
 
 	case GE_CMD_PROJMATRIXDATA:
 		{
-			int num = gstate.projmtxnum & 0xF;
+			int num = gstate.projmtxnum & 0x1F; // NOTE: Changed from 0xF to catch overflows
 			gstate.projMatrix[num] = getFloat24(data);
-			gstate.projmtxnum = (++num) & 0xF;
+			if (num <= 16)
+				gstate.projmtxnum = (++num) & 0x1F;
 		}
 		break;
 

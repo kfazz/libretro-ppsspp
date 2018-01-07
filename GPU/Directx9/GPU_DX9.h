@@ -76,65 +76,21 @@ public:
 
 	typedef void (GPU_DX9::*CmdFunc)(u32 op, u32 diff);
 	struct CommandInfo {
-		u8 flags;
+		uint64_t flags;
 		GPU_DX9::CmdFunc func;
 	};
 
-	void Execute_Generic(u32 op, u32 diff);
-	void Execute_Vaddr(u32 op, u32 diff);
-	void Execute_Iaddr(u32 op, u32 diff);
 	void Execute_Prim(u32 op, u32 diff);
 	void Execute_Bezier(u32 op, u32 diff);
 	void Execute_Spline(u32 op, u32 diff);
 	void Execute_VertexType(u32 op, u32 diff);
 	void Execute_VertexTypeSkinning(u32 op, u32 diff);
-	void Execute_Region(u32 op, u32 diff);
-	void Execute_Scissor(u32 op, u32 diff);
-	void Execute_FramebufType(u32 op, u32 diff);
-	void Execute_ViewportType(u32 op, u32 diff);
 	void Execute_TexScaleU(u32 op, u32 diff);
 	void Execute_TexScaleV(u32 op, u32 diff);
 	void Execute_TexOffsetU(u32 op, u32 diff);
 	void Execute_TexOffsetV(u32 op, u32 diff);
-	void Execute_TexAddr0(u32 op, u32 diff);
-	void Execute_TexAddrN(u32 op, u32 diff);
-	void Execute_TexBufw0(u32 op, u32 diff);
-	void Execute_TexBufwN(u32 op, u32 diff);
 	void Execute_TexSize0(u32 op, u32 diff);
-	void Execute_TexSizeN(u32 op, u32 diff);
-	void Execute_TexFormat(u32 op, u32 diff);
-	void Execute_TexMapMode(u32 op, u32 diff);
-	void Execute_TexParamType(u32 op, u32 diff);
-	void Execute_TexEnvColor(u32 op, u32 diff);
-	void Execute_TexLevel(u32 op, u32 diff);
 	void Execute_LoadClut(u32 op, u32 diff);
-	void Execute_ClutFormat(u32 op, u32 diff);
-	void Execute_Ambient(u32 op, u32 diff);
-	void Execute_MaterialDiffuse(u32 op, u32 diff);
-	void Execute_MaterialEmissive(u32 op, u32 diff);
-	void Execute_MaterialAmbient(u32 op, u32 diff);
-	void Execute_MaterialSpecular(u32 op, u32 diff);
-	void Execute_Light0Param(u32 op, u32 diff);
-	void Execute_Light1Param(u32 op, u32 diff);
-	void Execute_Light2Param(u32 op, u32 diff);
-	void Execute_Light3Param(u32 op, u32 diff);
-	void Execute_FogColor(u32 op, u32 diff);
-	void Execute_FogCoef(u32 op, u32 diff);
-	void Execute_ColorTestMask(u32 op, u32 diff);
-	void Execute_AlphaTest(u32 op, u32 diff);
-	void Execute_StencilTest(u32 op, u32 diff);
-	void Execute_ColorRef(u32 op, u32 diff);
-
-	void Execute_WorldMtxNum(u32 op, u32 diff);
-	void Execute_WorldMtxData(u32 op, u32 diff);
-	void Execute_ViewMtxNum(u32 op, u32 diff);
-	void Execute_ViewMtxData(u32 op, u32 diff);
-	void Execute_ProjMtxNum(u32 op, u32 diff);
-	void Execute_ProjMtxData(u32 op, u32 diff);
-	void Execute_TgenMtxNum(u32 op, u32 diff);
-	void Execute_TgenMtxData(u32 op, u32 diff);
-	void Execute_BoneMtxNum(u32 op, u32 diff);
-	void Execute_BoneMtxData(u32 op, u32 diff);
 
 	// Using string because it's generic - makes no assumptions on the size of the shader IDs of this backend.
 	std::vector<std::string> DebugGetShaderIDs(DebugShaderType shader) override;
@@ -142,7 +98,6 @@ public:
 
 protected:
 	void FastRunLoop(DisplayList &list) override;
-	void FastLoadBoneMatrix(u32 target) override;
 	void FinishDeferred() override;
 
 private:
@@ -163,7 +118,7 @@ private:
 	TextureCacheDX9 *textureCacheDX9_;
 	DepalShaderCacheDX9 depalShaderCache_;
 	DrawEngineDX9 drawEngine_;
-	ShaderManagerDX9 *shaderManager_;
+	ShaderManagerDX9 *shaderManagerDX9_;
 
 	static CommandInfo cmdInfo_[256];
 
