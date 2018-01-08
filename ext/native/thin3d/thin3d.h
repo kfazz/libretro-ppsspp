@@ -14,6 +14,8 @@
 #include "base/logging.h"
 #include "DataFormat.h"
 
+#include "GL/glew.h"
+
 class Matrix4x4;
 
 #ifdef _WIN32
@@ -567,6 +569,11 @@ public:
 	virtual Texture *CreateTexture(const TextureDesc &desc) = 0;
 	// On some hardware, you might get a 24-bit depth buffer even though you only wanted a 16-bit one.
 	virtual Framebuffer *CreateFramebuffer(const FramebufferDesc &desc) = 0;
+	virtual Framebuffer *CreateFramebufferFromNative(GLuint framebuffer_native) {
+	ILOG("Virt CreateFramebufferFromNative:\n");
+	Framebuffer *fbo = new Framebuffer();
+	return fbo;
+	};
 
 	virtual ShaderModule *CreateShaderModule(ShaderStage stage, ShaderLanguage language, const uint8_t *data, size_t dataSize) = 0;
 	virtual Pipeline *CreateGraphicsPipeline(const PipelineDesc &desc) = 0;

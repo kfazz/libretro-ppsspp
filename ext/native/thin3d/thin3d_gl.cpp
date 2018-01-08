@@ -431,6 +431,7 @@ public:
 	Texture *CreateTexture(const TextureDesc &desc) override;
 	Buffer *CreateBuffer(size_t size, uint32_t usageFlags) override;
 	Framebuffer *CreateFramebuffer(const FramebufferDesc &desc) override;
+	Framebuffer *CreateFramebufferFromNative(GLuint) override;
 
 	void UpdateBuffer(Buffer *buffer, const uint8_t *data, size_t offset, size_t size, UpdateBufferFlags flags) override;
 
@@ -1554,7 +1555,7 @@ Framebuffer *OpenGLContext::CreateFramebuffer(const FramebufferDesc &desc) {
 	GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
 	switch (status) {
 	case GL_FRAMEBUFFER_COMPLETE:
-		// ILOG("Framebuffer verified complete.");
+		ILOG("Framebuffer verified complete.");
 		break;
 	case GL_FRAMEBUFFER_UNSUPPORTED:
 		ELOG("GL_FRAMEBUFFER_UNSUPPORTED");
@@ -1571,6 +1572,22 @@ Framebuffer *OpenGLContext::CreateFramebuffer(const FramebufferDesc &desc) {
 	glBindRenderbuffer(GL_RENDERBUFFER, 0);
 	glBindTexture(GL_TEXTURE_2D, 0);
 	CHECK_GL_ERROR_IF_DEBUG();
+
+	currentDrawHandle_ = fbo->handle;
+	currentReadHandle_ = fbo->handle;
+	return fbo;
+}
+
+Framebuffer *OpenGLContext::CreateFramebufferFromNative(GLuint native_framebuffer) {
+	//CheckGLExtensions();
+	ILOG("OpenGLContext CreateFramebufferFromNative\n");
+	OpenGLFramebuffer *fbo = new OpenGLFramebuffer();
+	fbo->width = 2048; //desc.width;
+	fbo->height = 2048; //desc.height;
+	fbo->colorDepth = Draw::FBO_8888; // = desc.colorDepth;
+	fbo->stencil_buffer = 0;
+	fbo->z_buffer = 0;
+	fbo->handle = native_framebuffer;
 
 	currentDrawHandle_ = fbo->handle;
 	currentReadHandle_ = fbo->handle;

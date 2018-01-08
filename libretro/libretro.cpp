@@ -1213,7 +1213,9 @@ void retro_run(void)
 	      _initialized = true;
 	      coreState = CORE_RUNNING;
 	      extern GLuint g_defaultFBO;
-	      g_defaultFBO = hw_render.get_current_framebuffer();
+	     // g_defaultFBO = (GLuint)libretro_draw->CreateFramebufferFromNative (hw_render.get_current_framebuffer());
+		g_defaultFBO = (GLuint)hw_render.get_current_framebuffer();
+
       }
 
    }
