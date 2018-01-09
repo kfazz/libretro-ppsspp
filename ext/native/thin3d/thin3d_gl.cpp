@@ -1466,7 +1466,7 @@ Framebuffer *OpenGLContext::CreateFramebuffer(const FramebufferDesc &desc) {
 	OpenGLFramebuffer *fbo = new OpenGLFramebuffer();
 	fbo->width = desc.width;
 	fbo->height = desc.height;
-	fbo->colorDepth = desc.colorDepth;
+	fbo->colorDepth = FBO_8888; //desc.colorDepth;
 
 	// Color texture is same everywhere
 	glGenFramebuffers(1, &fbo->handle);

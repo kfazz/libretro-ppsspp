@@ -384,6 +384,9 @@ static void initialize_gl(void)
 #endif
 	if (gpu)
 		gpu->InitClear();
+
+	if (gpu)
+		gpu->DeviceRestore();
 	
 
    CheckGLExtensions();
